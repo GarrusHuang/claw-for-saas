@@ -27,9 +27,16 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const authHeaders = await getAuthHeaders();
+  const { headers: optionHeaders, ...restOptions } = options || {};
+  const mergedHeaders = {
+    ...authHeaders,
+    ...(optionHeaders instanceof Headers
+      ? Object.fromEntries(optionHeaders.entries())
+      : optionHeaders as Record<string, string> | undefined),
+  };
   const res = await fetch(`${getBaseUrl()}${path}`, {
-    headers: authHeaders,
-    ...options,
+    ...restOptions,
+    headers: mergedHeaders,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

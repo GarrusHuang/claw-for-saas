@@ -253,7 +253,7 @@ class SandboxManager:
         Returns:
             None 如果允许, 否则返回拒绝原因。
         """
-        cmd_lower = command.lower().strip()
+        cmd_lower = re.sub(r'\s+', ' ', command.lower().strip())
         for pattern in self._COMMAND_BLACKLIST:
             if pattern in cmd_lower:
                 return f"命令被安全策略阻止: 包含危险模式 '{pattern}'"
@@ -420,35 +420,41 @@ class SandboxManager:
 
     # ── 速率限制 ──
 
-    def check_rate_limit(self, session_id: str) -> bool:
+    def check_rate_limit(self, session_id: str, tenant_id: str = "") -> bool:
         """
         检查单会话速率限制。
+
+        Args:
+            session_id: 会话 ID
+            tenant_id: 租户 ID (用于隔离不同租户的计数器)
 
         Returns:
             True 如果允许, False 如果超限。
         """
         now = time.time()
         window = 60.0  # 1 分钟窗口
+        key = f"{tenant_id}:{session_id}" if tenant_id else session_id
 
-        if session_id not in self._rate_counters:
-            self._rate_counters[session_id] = []
+        if key not in self._rate_counters:
+            self._rate_counters[key] = []
 
         # 清理过期记录
-        timestamps = self._rate_counters[session_id]
+        timestamps = self._rate_counters[key]
         cutoff = now - window
-        self._rate_counters[session_id] = [t for t in timestamps if t > cutoff]
+        self._rate_counters[key] = [t for t in timestamps if t > cutoff]
 
-        if len(self._rate_counters[session_id]) >= self.config.rate_limit_per_minute:
+        if len(self._rate_counters[key]) >= self.config.rate_limit_per_minute:
             return False
 
-        self._rate_counters[session_id].append(now)
+        self._rate_counters[key].append(now)
         return True
 
-    def get_rate_limit_info(self, session_id: str) -> dict:
+    def get_rate_limit_info(self, session_id: str, tenant_id: str = "") -> dict:
         """获取速率限制信息。"""
         now = time.time()
         window = 60.0
-        timestamps = self._rate_counters.get(session_id, [])
+        key = f"{tenant_id}:{session_id}" if tenant_id else session_id
+        timestamps = self._rate_counters.get(key, [])
         recent = [t for t in timestamps if t > now - window]
         return {
             "calls_in_window": len(recent),

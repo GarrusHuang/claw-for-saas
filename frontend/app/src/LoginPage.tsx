@@ -8,11 +8,13 @@ export default function LoginPage() {
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [success, setSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) return;
-    await login(username.trim(), password);
+    const ok = await login(username.trim(), password);
+    if (ok) setSuccess(true);
   };
 
   return (
@@ -51,8 +53,8 @@ export default function LoginPage() {
 
           {error && <div className="login-error">{error}</div>}
 
-          <button type="submit" className="login-btn" disabled={loading || !username.trim()}>
-            {loading ? 'Signing in...' : 'Sign in'}
+          <button type="submit" className="login-btn" disabled={loading || success || !username.trim()}>
+            {success ? 'Success!' : loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
       </div>

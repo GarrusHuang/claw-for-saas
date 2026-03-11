@@ -896,16 +896,15 @@ class TestDynamicBudgetAdditional:
     """Audit-identified gaps for budget validation."""
 
     def test_budget_ratio_exceeds_one_still_bounded(self):
-        """Budget with ratio > 1.0 should ideally be clamped to window."""
+        """Budget with ratio > 1.0 should be clamped to 1.0."""
         config = RuntimeConfig(
             model_context_window=32000,
             context_budget_ratio=1.5,
             context_budget_min=16000,
         )
         budget = config.get_effective_budget()
-        # Currently: 32000 * 1.5 = 48000 (BUG: exceeds window)
-        # Document this behavior for now
-        assert budget == 48000  # Known behavior — ratio not clamped
+        # ratio clamped to 1.0 → 32000 * 1.0 = 32000
+        assert budget == 32000
 
     def test_zero_context_window(self):
         """Window=0 should still return at least min budget."""

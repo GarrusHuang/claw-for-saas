@@ -75,7 +75,8 @@ class RuntimeConfig:
         """计算实际上下文预算 (4c: 动态预算)。"""
         if self.context_budget_tokens > 0:
             return self.context_budget_tokens
-        budget = int(self.model_context_window * self.context_budget_ratio)
+        ratio = max(0.1, min(1.0, self.context_budget_ratio))
+        budget = int(self.model_context_window * ratio)
         return max(budget, self.context_budget_min)
 
 
@@ -919,13 +920,18 @@ class AgenticRuntime:
                 if tc_id:
                     responded_ids.add(tc_id)
 
-        # 1. 删除孤立的 tool 消息 (没有对应的 assistant tool_call)
+        # 1. 删除孤立的 tool 消息 + 去重
+        seen_tool_ids: set[str] = set()
         result = []
         for msg in messages:
             if msg.get("role") == "tool":
                 tc_id = msg.get("tool_call_id", "")
                 if tc_id and tc_id not in declared_ids:
                     continue  # 删除孤立 tool 消息
+                if tc_id and tc_id in seen_tool_ids:
+                    continue  # 跳过重复的 tool 响应
+                if tc_id:
+                    seen_tool_ids.add(tc_id)
             result.append(msg)
 
         # 2. 为孤立的 assistant tool_calls 补充 tool 响应

@@ -157,6 +157,7 @@ class SkillLoader:
                         continue
 
                     self._registry[name] = metadata
+                    self._body_cache.pop(name, None)
                     count += 1
                     logger.info(
                         "Registered skill: %s (type=%s, priority=%d)",
@@ -331,7 +332,8 @@ class SkillLoader:
 
             # 单个 Skill 截断
             if len(body) > self._max_single_chars:
-                body = body[:self._max_single_chars] + "\n\n[...Skill 内容被截断...]"
+                trailer = "\n\n[...Skill 内容被截断...]"
+                body = body[:self._max_single_chars - len(trailer)] + trailer
                 logger.info("Skill %s truncated (%d > %d chars)", name, len(body), self._max_single_chars)
 
             # 总预算检查
