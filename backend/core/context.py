@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.sandbox import SandboxManager
     from core.data_lock import DataLockRegistry
+    from core.scheduler import Scheduler
     from services.file_service import FileService
     from services.browser_service import BrowserService
     from skills.loader import SkillLoader
@@ -95,4 +96,9 @@ current_sandbox: contextvars.ContextVar[SandboxManager | None] = contextvars.Con
 # A6: Data Lock Registry
 current_data_lock: contextvars.ContextVar[DataLockRegistry | None] = contextvars.ContextVar(
     "current_data_lock", default=None
+)
+
+# A9: Scheduler
+current_scheduler: contextvars.ContextVar[Scheduler | None] = contextvars.ContextVar(
+    "current_scheduler", default=None
 )

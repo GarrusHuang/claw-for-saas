@@ -22,6 +22,7 @@ from core.context import (
     current_memory_store,
     current_known_field_ids,
     current_sandbox, current_data_lock,
+    current_scheduler,
 )
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
@@ -142,6 +143,13 @@ class AgentGateway:
             current_data_lock.set(get_data_lock_registry())
         except Exception:
             pass  # Sandbox/DataLock 可选，不阻塞启动
+
+        # A9: 注入 Scheduler 到 ContextVar (供 schedule_tools 使用)
+        try:
+            from dependencies import get_scheduler
+            current_scheduler.set(get_scheduler())
+        except Exception:
+            pass  # Scheduler 可选，不阻塞启动
 
         # ── 2. 解析/创建会话 ──
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):

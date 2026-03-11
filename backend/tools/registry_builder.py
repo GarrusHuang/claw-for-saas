@@ -14,6 +14,7 @@ Built-in tools (no domain-specific tools):
 - code: read_source_file, write_source_file, run_command
 - memory: save_memory, recall_memory
 - skill: create_skill, update_skill
+- schedule: create_schedule, list_schedules, delete_schedule
 """
 from __future__ import annotations
 
@@ -55,12 +56,14 @@ def build_capability_registry() -> ToolRegistry:
     from tools.builtin.browser_tools import browser_capability_registry
     from tools.builtin.code_tools import code_capability_registry
     from tools.builtin.memory_tools import memory_capability_registry
+    from tools.builtin.schedule_tools import schedule_capability_registry
 
     merged = skill_capability_registry.merge(subagent_capability_registry)
     merged = merged.merge(file_capability_registry)
     merged = merged.merge(browser_capability_registry)
     merged = merged.merge(code_capability_registry)
     merged = merged.merge(memory_capability_registry)
+    merged = merged.merge(schedule_capability_registry)
     return merged
 
 
