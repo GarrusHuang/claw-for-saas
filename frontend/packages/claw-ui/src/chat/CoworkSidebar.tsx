@@ -1,17 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Typography, Tag, Input, Collapse, Tooltip, Button,
-  Popconfirm, Spin, Empty, message,
+  Typography, Button, Spin, Empty, Input, Tag,
+  Popconfirm, Tooltip, message,
 } from 'antd';
 import {
   PlusOutlined,
-  MessageOutlined,
-  AppstoreOutlined,
-  ApiOutlined,
-  ToolOutlined,
-  ImportOutlined,
-  DeleteOutlined,
   SearchOutlined,
+  CalendarOutlined,
+  BulbOutlined,
+  SettingOutlined,
+  DeleteOutlined,
+  ImportOutlined,
 } from '@ant-design/icons';
 import {
   useAIChatStore, usePipelineStore, aiApi,
@@ -20,8 +19,7 @@ import {
 import SkillEditorModal from '../skills/SkillEditorModal.tsx';
 import ImportModal from '../skills/ImportModal.tsx';
 
-const { listSkills, getSkillDetail, deleteSkill, listSessions: apiListSessions, listTools } = aiApi;
-type ToolInfo = Awaited<ReturnType<typeof listTools>>[number];
+const { listSkills, getSkillDetail, deleteSkill, listSessions: apiListSessions } = aiApi;
 
 const { Text } = Typography;
 
@@ -54,8 +52,6 @@ function formatSessionDate(session: SessionInfo): string {
   }
 }
 
-// ── Skill type color mapping ──
-
 const SKILL_TYPE_COLOR: Record<string, string> = {
   domain: '#2db7f5',
   scenario: '#87d068',
@@ -64,29 +60,17 @@ const SKILL_TYPE_COLOR: Record<string, string> = {
 
 const DEFAULT_USER_ID = 'U001';
 
-/**
- * Cowork Sidebar — 自管理的统一侧栏组件。
- *
- * 渲染在 Claw Layout 的左侧 Sider 内 (fullscreen 模式时替换菜单)。
- * 自行管理 Sessions / Skills / MCP Tools 的数据加载。
- * 通过 useAppStore.dispatchSessionAction 与 useAIChat 通信。
- */
 export default function CoworkSidebar() {
   const currentSessionId = usePipelineStore((s) => s.sessionId);
   const dispatchSessionAction = useAIChatStore((s) => s.dispatchSessionAction);
 
-  // ── Sessions state (self-managed) ──
+  // ── Sessions state ──
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
   // ── Skills state ──
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
-  const [skillsLoaded, setSkillsLoaded] = useState(false);
-
-  // ── MCP Tools state ──
-  const [tools, setTools] = useState<ToolInfo[]>([]);
-  const [toolsLoading, setToolsLoading] = useState(false);
-  const [toolsLoaded, setToolsLoaded] = useState(false);
+  const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [skillSearch, setSkillSearch] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -102,20 +86,6 @@ export default function CoworkSidebar() {
     }
   }, []);
 
-  // ── MCP Tools lazy loading ──
-  const loadTools = useCallback(async () => {
-    setToolsLoading(true);
-    try {
-      const data = await listTools();
-      setTools(data);
-    } catch (err) {
-      console.error('Failed to load tools:', err);
-    } finally {
-      setToolsLoading(false);
-      setToolsLoaded(true);
-    }
-  }, []);
-
   // ── Skills lazy loading ──
   const loadSkills = useCallback(async () => {
     setSkillsLoading(true);
@@ -126,27 +96,14 @@ export default function CoworkSidebar() {
       console.error('Failed to load skills:', err);
     } finally {
       setSkillsLoading(false);
-      setSkillsLoaded(true);
     }
   }, []);
 
-  // ── Fetch sessions on mount + when sessionId changes (new session created) ──
   useEffect(() => {
     fetchSessions();
   }, [currentSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Collapse change handler for lazy loading ──
-  const handleCollapseChange = useCallback((keys: string | string[]) => {
-    const activeKeys = Array.isArray(keys) ? keys : [keys];
-    if (activeKeys.includes('skills') && !skillsLoaded) {
-      loadSkills();
-    }
-    if (activeKeys.includes('tools') && !toolsLoaded) {
-      loadTools();
-    }
-  }, [skillsLoaded, loadSkills, toolsLoaded, loadTools]);
-
-  // ── Session handlers → dispatch to store ──
+  // ── Handlers ──
   const handleNewSession = useCallback(() => {
     dispatchSessionAction({ type: 'new' });
   }, [dispatchSessionAction]);
@@ -155,7 +112,15 @@ export default function CoworkSidebar() {
     dispatchSessionAction({ type: 'load', sessionId });
   }, [dispatchSessionAction]);
 
-  // ── Skill handlers ──
+  const handleSkillsClick = useCallback(() => {
+    if (!skillsExpanded) {
+      setSkillsExpanded(true);
+      loadSkills();
+    } else {
+      setSkillsExpanded(false);
+    }
+  }, [skillsExpanded, loadSkills]);
+
   const handleSkillDelete = useCallback(async (name: string) => {
     const result = await deleteSkill(name);
     if (result.ok) {
@@ -180,36 +145,117 @@ export default function CoworkSidebar() {
     loadSkills();
   }, [loadSkills]);
 
-  // ── Filtered skills ──
   const filteredSkills = skills.filter((s) => {
     if (!skillSearch) return true;
     const q = skillSearch.toLowerCase();
-    return (
-      s.name.toLowerCase().includes(q) ||
-      (s.description || '').toLowerCase().includes(q)
-    );
+    return s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q);
   });
 
-  // ── Render ──
   return (
     <div className="cowork-sidebar">
-      {/* ── New session button ── */}
-      <div className="cowork-sidebar-new-btn">
-        <Button
-          type="dashed"
-          icon={<PlusOutlined />}
-          onClick={handleNewSession}
-          block
-          size="small"
-        >
-          新对话
-        </Button>
+      {/* ── Function entries ── */}
+      <div className="cowork-sidebar-entries">
+        <div className="sidebar-entry" onClick={handleNewSession}>
+          <PlusOutlined style={{ fontSize: 13 }} />
+          <span>New task</span>
+        </div>
+        <div className="sidebar-entry sidebar-entry--disabled">
+          <SearchOutlined style={{ fontSize: 13 }} />
+          <span>Search</span>
+        </div>
+        <div className="sidebar-entry sidebar-entry--disabled">
+          <CalendarOutlined style={{ fontSize: 13 }} />
+          <span>Scheduled</span>
+        </div>
+        <div className="sidebar-entry" onClick={handleSkillsClick}>
+          <BulbOutlined style={{ fontSize: 13 }} />
+          <span>Skills</span>
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>
+            {skills.length > 0 ? skills.length : ''}
+          </span>
+        </div>
+        <div className="sidebar-entry sidebar-entry--disabled">
+          <SettingOutlined style={{ fontSize: 13 }} />
+          <span>Customize</span>
+        </div>
       </div>
 
-      {/* ── Sessions section ── */}
-      <div className="cowork-sidebar-section-title">
-        <MessageOutlined style={{ fontSize: 12, color: '#8c8c8c' }} />
-        <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>Sessions</Text>
+      {/* ── Skills sub-view (lazy) ── */}
+      {skillsExpanded && (
+        <div className="cowork-sidebar-skills-view">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+            <Input
+              prefix={<SearchOutlined style={{ color: '#bbb', fontSize: 10 }} />}
+              placeholder="Search skills..."
+              size="small"
+              allowClear
+              value={skillSearch}
+              onChange={(e) => setSkillSearch(e.target.value)}
+              style={{ flex: 1, borderRadius: 4, fontSize: 11 }}
+            />
+            <Tooltip title="Create">
+              <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined style={{ fontSize: 11 }} />}
+                onClick={() => { setEditData(null); setEditorOpen(true); }}
+              />
+            </Tooltip>
+            <Tooltip title="Import">
+              <Button
+                type="text"
+                size="small"
+                icon={<ImportOutlined style={{ fontSize: 11 }} />}
+                onClick={() => setImportOpen(true)}
+              />
+            </Tooltip>
+          </div>
+          {skillsLoading ? (
+            <div style={{ textAlign: 'center', padding: 12 }}><Spin size="small" /></div>
+          ) : filteredSkills.length === 0 ? (
+            <Empty description="No skills" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '8px 0' }} imageStyle={{ height: 24 }} />
+          ) : (
+            <div style={{ maxHeight: 200, overflow: 'auto' }}>
+              {filteredSkills.map((skill) => (
+                <div
+                  key={skill.name}
+                  className="cowork-sidebar-skill-item"
+                  onClick={() => handleSkillClick(skill.name)}
+                >
+                  <Text style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {skill.name}
+                  </Text>
+                  <Tag
+                    color={SKILL_TYPE_COLOR[skill.type || ''] || '#999'}
+                    style={{ fontSize: 8, lineHeight: '12px', padding: '0 2px', margin: 0, flexShrink: 0 }}
+                  >
+                    {skill.type || '?'}
+                  </Tag>
+                  <Popconfirm
+                    title={`Delete "${skill.name}"?`}
+                    onConfirm={(e) => { e?.stopPropagation(); handleSkillDelete(skill.name); }}
+                    onCancel={(e) => e?.stopPropagation()}
+                    okText="Delete"
+                    cancelText="Cancel"
+                    okButtonProps={{ danger: true, size: 'small' }}
+                    cancelButtonProps={{ size: 'small' }}
+                  >
+                    <DeleteOutlined
+                      className="cowork-sidebar-skill-delete"
+                      style={{ fontSize: 10, color: '#ff4d4f', flexShrink: 0 }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </Popconfirm>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Recents ── */}
+      <div className="cowork-sidebar-section-title" style={{ marginTop: 8 }}>
+        <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>Recents</Text>
         <Text type="secondary" style={{ fontSize: 10, marginLeft: 'auto' }}>
           {sessions.length}
         </Text>
@@ -250,194 +296,11 @@ export default function CoworkSidebar() {
         )}
       </div>
 
-      {/* ── Collapse: Skills + MCP Tools ── */}
-      <div className="cowork-sidebar-toolbox">
-        <Collapse
-          ghost
-          size="small"
-          onChange={handleCollapseChange}
-          items={[
-            // ── Skills panel ──
-            {
-              key: 'skills',
-              label: (
-                <div className="cowork-sidebar-collapse-header">
-                  <AppstoreOutlined style={{ fontSize: 12, color: '#8c8c8c' }} />
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'rgba(0,0,0,0.65)' }}>Skills</span>
-                  <Tag
-                    color="blue"
-                    style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: '0 0 0 4px' }}
-                  >
-                    {skills.length}
-                  </Tag>
-                  <span style={{ flex: 1 }} />
-                  <Tooltip title="创建 Skill">
-                    <PlusOutlined
-                      style={{ fontSize: 11, color: '#1a6fb5', cursor: 'pointer' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditData(null);
-                        setEditorOpen(true);
-                      }}
-                    />
-                  </Tooltip>
-                  <Tooltip title="导入 Skill">
-                    <ImportOutlined
-                      style={{ fontSize: 11, color: '#1a6fb5', cursor: 'pointer', marginLeft: 6 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setImportOpen(true);
-                      }}
-                    />
-                  </Tooltip>
-                </div>
-              ),
-              children: (
-                <div>
-                  {/* Search */}
-                  <Input
-                    prefix={<SearchOutlined style={{ color: '#bbb', fontSize: 10 }} />}
-                    placeholder="搜索..."
-                    size="small"
-                    allowClear
-                    value={skillSearch}
-                    onChange={(e) => setSkillSearch(e.target.value)}
-                    style={{ marginBottom: 6, borderRadius: 4, fontSize: 11 }}
-                  />
-                  {/* List */}
-                  {skillsLoading ? (
-                    <div style={{ textAlign: 'center', padding: 12 }}>
-                      <Spin size="small" />
-                    </div>
-                  ) : filteredSkills.length === 0 ? (
-                    <Empty
-                      description="无 Skill"
-                      image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      style={{ margin: '8px 0' }}
-                      imageStyle={{ height: 24 }}
-                    />
-                  ) : (
-                    <div style={{ maxHeight: 200, overflow: 'auto' }}>
-                      {filteredSkills.map((skill) => (
-                        <div
-                          key={skill.name}
-                          className="cowork-sidebar-skill-item"
-                          onClick={() => handleSkillClick(skill.name)}
-                        >
-                          <Text
-                            style={{
-                              fontSize: 11,
-                              flex: 1,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {skill.name}
-                          </Text>
-                          <Tag
-                            color={SKILL_TYPE_COLOR[skill.type || ''] || '#999'}
-                            style={{
-                              fontSize: 8,
-                              lineHeight: '12px',
-                              padding: '0 2px',
-                              margin: 0,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {skill.type || '?'}
-                          </Tag>
-                          <Popconfirm
-                            title={`删除 "${skill.name}"？`}
-                            onConfirm={(e) => {
-                              e?.stopPropagation();
-                              handleSkillDelete(skill.name);
-                            }}
-                            onCancel={(e) => e?.stopPropagation()}
-                            okText="删除"
-                            cancelText="取消"
-                            okButtonProps={{ danger: true, size: 'small' }}
-                            cancelButtonProps={{ size: 'small' }}
-                          >
-                            <DeleteOutlined
-                              className="cowork-sidebar-skill-delete"
-                              style={{ fontSize: 10, color: '#ff4d4f', flexShrink: 0 }}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </Popconfirm>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ),
-            },
-
-            // ── MCP Tools panel ──
-            {
-              key: 'tools',
-              label: (
-                <div className="cowork-sidebar-collapse-header">
-                  <ApiOutlined style={{ fontSize: 12, color: '#8c8c8c' }} />
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'rgba(0,0,0,0.65)' }}>MCP Tools</span>
-                  <Tag
-                    color="purple"
-                    style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: '0 0 0 4px' }}
-                  >
-                    {tools.length}
-                  </Tag>
-                </div>
-              ),
-              children: (
-                <div>
-                  {toolsLoading ? (
-                    <div style={{ textAlign: 'center', padding: 12 }}>
-                      <Spin size="small" />
-                    </div>
-                  ) : tools.length === 0 ? (
-                    <Empty
-                      description="无工具"
-                      image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      style={{ margin: '8px 0' }}
-                      imageStyle={{ height: 24 }}
-                    />
-                  ) : (
-                    <div style={{ maxHeight: 200, overflow: 'auto' }}>
-                      {tools.map((tool) => (
-                        <Tooltip key={tool.name} title={tool.description} placement="right">
-                          <div style={{
-                            display: 'flex', alignItems: 'center', gap: 4,
-                            padding: '4px 6px', fontSize: 11, borderRadius: 4,
-                            cursor: 'default',
-                          }}>
-                            <ToolOutlined style={{ fontSize: 10, color: '#8c8c8c', flexShrink: 0 }} />
-                            <Text
-                              style={{
-                                fontSize: 11, flex: 1,
-                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {tool.name}
-                            </Text>
-                            {tool.read_only && (
-                              <Tag
-                                color="default"
-                                style={{ fontSize: 8, lineHeight: '12px', padding: '0 2px', margin: 0 }}
-                              >
-                                RO
-                              </Tag>
-                            )}
-                          </div>
-                        </Tooltip>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ),
-            },
-
-          ]}
-        />
+      {/* ── Bottom note ── */}
+      <div style={{ marginTop: 'auto', padding: '12px 8px' }}>
+        <Text type="secondary" style={{ fontSize: 10, lineHeight: '14px' }}>
+          These tasks run locally and aren't synced across devices.
+        </Text>
       </div>
 
       {/* ── Modals ── */}
