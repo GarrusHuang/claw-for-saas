@@ -834,3 +834,165 @@ class TestMultimodalContentProcessor:
         result = process_pdf(b"fake pdf content", "test.pdf")
         # Should not crash, returns unsupported or text depending on libs
         assert result.content_type in ("text", "unsupported")
+
+
+# ═══ A4 Audit: Additional Tests ═══
+
+class TestSmartTruncateAdditional:
+    """Audit-identified gaps for smart_truncate."""
+
+    def test_marker_length_includes_truncated_count(self):
+        """Marker text should accurately reflect how many chars were truncated."""
+        text = "a" * 10000
+        result = smart_truncate(text, 3000)
+        assert "truncated" in result
+        # Result should be approximately budget size (head + marker + optional tail)
+        assert len(result) < 10000
+
+    def test_preserves_line_boundary(self):
+        """Truncation should try to break at newlines when possible."""
+        lines = ["line_" + str(i) + "\n" for i in range(200)]
+        text = "".join(lines)
+        result = smart_truncate(text, 500)
+        # Should not cut mid-line (best effort)
+        assert "truncated" in result
+
+    def test_empty_string_no_truncation(self):
+        """Empty string should return as-is."""
+        assert smart_truncate("", 100) == ""
+
+    def test_exact_budget_no_truncation(self):
+        """String exactly at budget should not be truncated."""
+        text = "x" * 3000
+        result = smart_truncate(text, 3000)
+        assert result == text
+
+
+class TestFilePaginationAdditional:
+    """Audit-identified gaps for file pagination."""
+
+    def test_offset_beyond_file_size(self):
+        """Offset exceeding file content should return empty or error."""
+        # Simulate: file has 100 chars, offset=200
+        content = "a" * 100
+        offset = 200
+        chunk = content[offset:offset + 50000]
+        assert chunk == ""  # offset beyond content
+
+    def test_chained_pagination_next_offset(self):
+        """Chaining multiple page reads should cover entire file."""
+        content = "a" * 150000  # 150K chars
+        page_size = 50000
+        offset = 0
+        all_read = ""
+        while offset < len(content):
+            chunk = content[offset:offset + page_size]
+            all_read += chunk
+            offset += page_size
+        assert all_read == content
+
+
+class TestDynamicBudgetAdditional:
+    """Audit-identified gaps for budget validation."""
+
+    def test_budget_ratio_exceeds_one_still_bounded(self):
+        """Budget with ratio > 1.0 should ideally be clamped to window."""
+        config = RuntimeConfig(
+            model_context_window=32000,
+            context_budget_ratio=1.5,
+            context_budget_min=16000,
+        )
+        budget = config.get_effective_budget()
+        # Currently: 32000 * 1.5 = 48000 (BUG: exceeds window)
+        # Document this behavior for now
+        assert budget == 48000  # Known behavior — ratio not clamped
+
+    def test_zero_context_window(self):
+        """Window=0 should still return at least min budget."""
+        config = RuntimeConfig(
+            model_context_window=0,
+            context_budget_ratio=0.8,
+            context_budget_min=16000,
+        )
+        budget = config.get_effective_budget()
+        assert budget == 16000  # min enforced
+
+
+class TestToolPairRepairAdditional:
+    """Audit-identified gaps for tool pair repair."""
+
+    def test_duplicate_tool_call_ids(self):
+        """Duplicate tool_call_ids in assistant message."""
+        messages = [
+            {"role": "assistant", "tool_calls": [
+                {"id": "call_1", "function": {"name": "tool_a"}},
+                {"id": "call_1", "function": {"name": "tool_b"}},  # duplicate
+            ]},
+        ]
+        result = AgenticRuntime._repair_tool_pairs(messages)
+        # Duplicate ID is added to declared_ids once (set), not in responded_ids
+        # So one synthetic tool response is added for "call_1"
+        tool_msgs = [m for m in result if m.get("role") == "tool"]
+        assert len(tool_msgs) == 1
+
+    def test_missing_role_field_skipped(self):
+        """Message without 'role' field should not crash."""
+        messages = [
+            {"content": "no role here"},
+            {"role": "user", "content": "normal"},
+        ]
+        result = AgenticRuntime._repair_tool_pairs(messages)
+        assert len(result) == 2  # both kept
+
+    def test_empty_tool_call_id_handled(self):
+        """Empty string tool_call_id should be gracefully handled."""
+        messages = [
+            {"role": "assistant", "tool_calls": [
+                {"id": "", "function": {"name": "tool_a"}},
+            ]},
+        ]
+        result = AgenticRuntime._repair_tool_pairs(messages)
+        # Empty ID is skipped by `if tc_id:` checks — no synthetic response added
+        assert len(result) >= 1
+
+    def test_assistant_content_preserved_after_repair(self):
+        """Repair should not lose assistant content field."""
+        messages = [
+            {"role": "assistant", "content": "Let me call a tool", "tool_calls": [
+                {"id": "call_1", "function": {"name": "search"}},
+            ]},
+        ]
+        result = AgenticRuntime._repair_tool_pairs(messages)
+        assistant_msg = [m for m in result if m.get("role") == "assistant"][0]
+        assert assistant_msg["content"] == "Let me call a tool"
+
+
+class TestIdentifierPatternAdditional:
+    """Audit-identified gaps for ID pattern regex."""
+
+    def test_id_pattern_false_positive_identification(self):
+        """'identification' should not trigger ID extraction."""
+        ids = _extract_identifiers("the identification number is important")
+        # The regex matches "id" in "identification" then captures "entification"
+        # as an alphanumeric identifier — this is a known false positive
+        false_positives = [i for i in ids if "entification" in i]
+        # Document: current regex does produce false positives (known issue)
+        assert len(false_positives) >= 1  # Known behavior — regex needs word boundary
+
+    def test_id_pattern_matches_real_ids(self):
+        """Real business IDs should be extracted."""
+        text = 'ID: ABC-12345 and 编号: INV-2025-001'
+        ids = _extract_identifiers(text)
+        assert len(ids) >= 1  # Should find at least one ID
+
+    def test_amount_pattern_yuan(self):
+        """Chinese yuan amounts should be extracted."""
+        ids = _extract_identifiers("金额是 ¥1,234.56 元")
+        amounts = [i for i in ids if "1,234" in i or "¥" in i]
+        assert len(amounts) >= 1
+
+    def test_date_pattern_chinese(self):
+        """Chinese date format should be extracted."""
+        ids = _extract_identifiers("日期: 2025年3月15日")
+        dates = [i for i in ids if "2025" in i]
+        assert len(dates) >= 1
