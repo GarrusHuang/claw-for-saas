@@ -1,0 +1,69 @@
+@import 'tailwindcss';
+
+/* ── AI Chat 样式 ── */
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── 动画效果 (与 HRP 前端共享) ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* ── Phase 23: Contract Diff Editor + Document Presenter ── */
+
+.contract-diff-editor { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; overflow: hidden; }
+.contract-diff-header { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; background: #fafafa; }
+.contract-diff-body { padding: 12px 16px; max-height: 500px; overflow: auto; }
+.contract-diff-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #f0f0f0; background: #fafafa; }
+
+.diff-block { border: 1px solid #f0f0f0; border-radius: 4px; }
+.diff-block-header:hover { background: rgba(0, 0, 0, 0.02); }
+.diff-block-content { margin: 0; padding: 8px 12px; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; border-radius: 4px; font-family: inherit; }
+.diff-block-content--unchanged { background: #fafafa; color: #666; max-height: 120px; overflow: auto; }
+.diff-block-content--added { background: #f6ffed; border: 1px solid #b7eb8f; color: #135200; }
+.diff-block-content--removed { background: #fff2f0; border: 1px solid #ffccc7; color: #820014; text-decoration: line-through; text-decoration-color: rgba(130, 0, 20, 0.3); }
+.diff-block-compare { display: flex; gap: 8px; align-items: stretch; }
+.diff-block-side { flex: 1; min-width: 0; }
+.diff-block-side-label { font-size: 10px; font-weight: 600; color: #999; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.5px; }
+.diff-block-side-divider { display: flex; align-items: center; padding: 0 4px; }
+
+.document-presenter { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; overflow: hidden; transition: box-shadow 0.2s ease; }
+.document-presenter:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+.document-presenter-header { display: flex; align-items: center; padding: 10px 12px; border-bottom: 1px solid #f0f0f0; gap: 4px; }
+.document-presenter-preview { padding: 12px 16px; max-height: 200px; overflow: hidden; cursor: pointer; position: relative; font-size: 12px; line-height: 1.7; color: #333; }
+.document-presenter-preview::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 40px; background: linear-gradient(transparent, #fff); pointer-events: none; }
+.document-presenter-footer { padding: 4px 12px 8px; text-align: center; }
+.document-presenter-meta { padding: 6px 12px 8px; border-top: 1px solid #f5f5f5; display: flex; flex-wrap: wrap; gap: 4px; }
+
+.document-preview-content { font-size: 13px; line-height: 1.8; }
+.document-preview-content h1 { font-size: 20px; margin: 16px 0 12px; }
+.document-preview-content h2 { font-size: 17px; margin: 14px 0 10px; }
+.document-preview-content h3 { font-size: 15px; margin: 12px 0 8px; }
+.document-preview-content p { margin: 8px 0; }
+
+/* ── Phase 24: InlineUploader + InteractiveMessage ── */
+.inline-uploader { background: #fafafa; border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px; max-width: 380px; }
+.inline-uploader--resolved { background: #f6ffed; border-color: #b7eb8f; padding: 8px 12px; }
+.inline-uploader-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.inline-uploader-dropzone { border: 2px dashed #d9d9d9; border-radius: 6px; padding: 20px 16px; text-align: center; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.inline-uploader-dropzone:hover { border-color: #1890ff; background: #e6f7ff; }
+.inline-uploader-dropzone--active { border-color: #1890ff; background: #e6f7ff; }
+.inline-uploader-files { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.inline-uploader-actions { margin-top: 10px; text-align: right; }
+.interactive-message { background: #fafafa; border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px; max-width: 380px; }
+.interactive-message--resolved { background: #f6ffed; border-color: #b7eb8f; padding: 8px 12px; }
+.interactive-message-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.interactive-message-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.interactive-message-input-row { display: flex; gap: 8px; align-items: center; }

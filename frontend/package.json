@@ -1,0 +1,5 @@
+{
+  "name": "claw-frontend",
+  "private": true,
+  "workspaces": ["packages/*", "app"]
+}

@@ -1,0 +1,345 @@
+"""
+文件存储服务 — 用户文件空间管理。
+
+功能:
+- 上传/下载/删除文件 (用户隔离)
+- 文本提取: PDF (PyPDF2) / DOCX (python-docx) / TXT / 图片 (Pillow, 仅元信息)
+- 路径穿越防护 + 文件大小限制
+
+Usage:
+    service = FileService(base_dir="data/files")
+    meta = service.save_file("U001", "report.pdf", pdf_bytes)
+    meta, data = service.get_file("U001", meta.file_id)
+    text = service.extract_text("U001", meta.file_id)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import mimetypes
+import os
+import re
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# 最大文件大小: 10MB
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+# 允许的文件扩展名 (白名单)
+ALLOWED_EXTENSIONS = {
+    ".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+    ".zip", ".tar", ".gz",
+}
+
+# 图片扩展名
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+
+
+@dataclass
+class FileMetadata:
+    """文件元数据"""
+    file_id: str
+    user_id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    created_at: float
+    extracted_text: str = ""
+
+
+class FileService:
+    """
+    用户文件存储服务。
+
+    目录结构:
+        base_dir/
+        ├── {user_id}/
+        │   ├── {file_id}.{ext}         # 原始文件
+        │   └── {file_id}.meta.json     # 元数据
+    """
+
+    def __init__(self, base_dir: str = "data/files") -> None:
+        self.base_dir = Path(base_dir)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _sanitize_filename(self, filename: str) -> str:
+        """清理文件名，防止路径穿越。"""
+        # 移除路径分隔符
+        name = os.path.basename(filename)
+        # 移除特殊字符
+        name = re.sub(r'[^\w.\-]', '_', name)
+        # 限制长度
+        if len(name) > 200:
+            ext = Path(name).suffix
+            name = name[:200 - len(ext)] + ext
+        return name or "unnamed_file"
+
+    def _user_dir(self, user_id: str) -> Path:
+        """获取用户目录，防止穿越。"""
+        # 清理 user_id
+        safe_uid = re.sub(r'[^\w\-]', '_', user_id)
+        user_dir = self.base_dir / safe_uid
+        # 验证路径在 base_dir 下
+        resolved = user_dir.resolve()
+        if not str(resolved).startswith(str(self.base_dir.resolve())):
+            raise ValueError(f"Path traversal detected: {user_id}")
+        return user_dir
+
+    def save_file(
+        self, user_id: str, filename: str, content: bytes
+    ) -> FileMetadata:
+        """
+        保存文件到用户空间。
+
+        Args:
+            user_id: 用户 ID
+            filename: 原始文件名
+            content: 文件内容 (bytes)
+
+        Returns:
+            FileMetadata
+
+        Raises:
+            ValueError: 文件过大 / 路径穿越 / 不支持的格式
+        """
+        # 1. 大小检查
+        if len(content) > MAX_FILE_SIZE:
+            raise ValueError(
+                f"File too large: {len(content)} bytes "
+                f"(max: {MAX_FILE_SIZE} bytes / {MAX_FILE_SIZE // 1024 // 1024}MB)"
+            )
+
+        # 2. 清理文件名
+        safe_name = self._sanitize_filename(filename)
+        ext = Path(safe_name).suffix.lower()
+
+        # 3. 扩展名检查
+        if ext and ext not in ALLOWED_EXTENSIONS:
+            raise ValueError(f"Unsupported file extension: {ext}")
+
+        # 4. 创建用户目录
+        user_dir = self._user_dir(user_id)
+        user_dir.mkdir(parents=True, exist_ok=True)
+
+        # 5. 生成 file_id
+        file_id = str(uuid.uuid4())[:12]
+
+        # 6. 计算 SHA256
+        sha256 = hashlib.sha256(content).hexdigest()
+
+        # 7. 推断 content_type
+        content_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+
+        # 8. 保存文件
+        file_ext = ext if ext else ""
+        file_path = user_dir / f"{file_id}{file_ext}"
+        file_path.write_bytes(content)
+
+        # 9. 构建元数据
+        metadata = FileMetadata(
+            file_id=file_id,
+            user_id=user_id,
+            filename=safe_name,
+            content_type=content_type,
+            size_bytes=len(content),
+            sha256=sha256,
+            created_at=time.time(),
+        )
+
+        # 10. 保存元数据
+        meta_path = user_dir / f"{file_id}.meta.json"
+        meta_path.write_text(
+            json.dumps(asdict(metadata), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        logger.info(
+            f"File saved: {safe_name} ({len(content)} bytes) -> {file_id}",
+            extra={"user_id": user_id, "file_id": file_id},
+        )
+
+        return metadata
+
+    def get_file(
+        self, user_id: str, file_id: str
+    ) -> tuple[FileMetadata, bytes]:
+        """
+        获取文件。
+
+        Returns:
+            (FileMetadata, file_bytes)
+
+        Raises:
+            FileNotFoundError: 文件不存在
+        """
+        metadata = self._load_metadata(user_id, file_id)
+        ext = Path(metadata.filename).suffix.lower()
+        file_path = self._user_dir(user_id) / f"{file_id}{ext}"
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_id}")
+        return metadata, file_path.read_bytes()
+
+    def list_files(self, user_id: str) -> list[FileMetadata]:
+        """列出用户所有文件。"""
+        user_dir = self._user_dir(user_id)
+        if not user_dir.exists():
+            return []
+
+        results = []
+        for meta_file in sorted(user_dir.glob("*.meta.json")):
+            try:
+                data = json.loads(meta_file.read_text(encoding="utf-8"))
+                results.append(FileMetadata(**data))
+            except Exception as e:
+                logger.warning(f"Failed to load metadata: {meta_file}: {e}")
+        return results
+
+    def delete_file(self, user_id: str, file_id: str) -> bool:
+        """
+        删除文件。
+
+        Returns:
+            True 表示成功删除, False 表示文件不存在
+        """
+        user_dir = self._user_dir(user_id)
+        meta_path = user_dir / f"{file_id}.meta.json"
+
+        if not meta_path.exists():
+            return False
+
+        try:
+            metadata = self._load_metadata(user_id, file_id)
+            ext = Path(metadata.filename).suffix.lower()
+            file_path = user_dir / f"{file_id}{ext}"
+
+            # 删除文件和元数据
+            if file_path.exists():
+                file_path.unlink()
+            meta_path.unlink()
+
+            logger.info(
+                f"File deleted: {file_id}",
+                extra={"user_id": user_id},
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete file {file_id}: {e}")
+            return False
+
+    def extract_text(self, user_id: str, file_id: str) -> str:
+        """
+        从文件提取文本。
+
+        支持:
+        - PDF (PyPDF2)
+        - DOCX (python-docx)
+        - TXT/CSV/JSON 等文本文件 (直接读取)
+        - 图片 (返回尺寸信息)
+
+        Returns:
+            提取的文本内容
+        """
+        metadata, content = self.get_file(user_id, file_id)
+        ext = Path(metadata.filename).suffix.lower()
+
+        try:
+            if ext == ".pdf":
+                return self._extract_pdf(content)
+            elif ext in (".docx", ".doc"):
+                return self._extract_docx(content)
+            elif ext in IMAGE_EXTENSIONS:
+                return self._extract_image_info(content, metadata.filename)
+            elif ext in (".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md"):
+                return self._extract_text_file(content)
+            else:
+                return (
+                    f"[文件信息] {metadata.filename}\n"
+                    f"类型: {metadata.content_type}\n"
+                    f"大小: {metadata.size_bytes} bytes\n"
+                    f"(不支持文本提取的文件格式: {ext})"
+                )
+        except Exception as e:
+            logger.error(f"Text extraction failed for {file_id}: {e}")
+            return (
+                f"[文件信息] {metadata.filename}\n"
+                f"类型: {metadata.content_type}\n"
+                f"大小: {metadata.size_bytes} bytes\n"
+                f"(文本提取失败: {e})"
+            )
+
+    def _load_metadata(self, user_id: str, file_id: str) -> FileMetadata:
+        """加载文件元数据。"""
+        user_dir = self._user_dir(user_id)
+        meta_path = user_dir / f"{file_id}.meta.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"File not found: {file_id}")
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        return FileMetadata(**data)
+
+    def _extract_pdf(self, content: bytes) -> str:
+        """从 PDF 提取文本。"""
+        import io
+        from PyPDF2 import PdfReader
+
+        reader = PdfReader(io.BytesIO(content))
+        pages = []
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text()
+            if text:
+                pages.append(f"--- Page {i + 1} ---\n{text}")
+        return "\n\n".join(pages) if pages else "(PDF 中未提取到文本)"
+
+    def _extract_docx(self, content: bytes) -> str:
+        """从 DOCX 提取文本。"""
+        import io
+        from docx import Document
+
+        doc = Document(io.BytesIO(content))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        return "\n".join(paragraphs) if paragraphs else "(DOCX 中未提取到文本)"
+
+    def _extract_image_info(self, content: bytes, filename: str) -> str:
+        """从图片获取元信息。"""
+        try:
+            import io
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(content))
+            return (
+                f"[图片文件] {filename}\n"
+                f"格式: {img.format}\n"
+                f"尺寸: {img.width} x {img.height} px\n"
+                f"模式: {img.mode}\n"
+                f"大小: {len(content)} bytes"
+            )
+        except Exception:
+            return (
+                f"[图片文件] {filename}\n"
+                f"大小: {len(content)} bytes\n"
+                f"(无法解析图片信息)"
+            )
+
+    def _extract_text_file(self, content: bytes) -> str:
+        """读取文本文件。"""
+        # 尝试 UTF-8 编码
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        # 尝试 GBK 编码 (中文常见)
+        try:
+            return content.decode("gbk")
+        except UnicodeDecodeError:
+            pass
+        # 最终回退
+        return content.decode("utf-8", errors="replace")
