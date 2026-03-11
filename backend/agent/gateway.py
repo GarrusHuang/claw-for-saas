@@ -1,11 +1,10 @@
 """
 Agent Gateway — 对标 OpenClaw Gateway / Claude Code Agent Loop。
 
-替代 Orchestrator + Pipeline:
-- 没有固定步骤编排
-- Agent 自主决定调用什么工具、什么顺序
-- 通过 8 层 prompt 注入知识和约束
-- 双模式: AUTO (Agent 自主判断) / EXECUTE (用户确认后执行)
+A2 简化:
+- 去掉 business_context 推送 (MCP 拉取模式)
+- 去掉 plan_mode 双模式 (Plan 纯进度展示)
+- 单一工具集，Agent 自主决策
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from core.context import (
     current_event_bus, current_session_id, current_user_id,
     current_tenant_id,
     current_skill_loader, current_file_service, current_browser_service,
-    current_known_field_ids, current_business_context,
     current_plan_tracker,
     current_learning_memory, current_correction_memory,
 )
@@ -41,9 +39,7 @@ class AgentGateway:
     """
     Agent Gateway — 单一入口处理所有用户请求。
 
-    双模式:
-    - AUTO (plan_mode=True): Agent 自主判断是否需要用户确认
-    - EXECUTE (plan_mode=False): 用户已确认方案，直接执行
+    Agent 自主决策，通过 propose_plan 记录计划进度（纯展示，无审批）。
     """
 
     def __init__(
@@ -51,7 +47,6 @@ class AgentGateway:
         *,
         llm_client: LLMGatewayClient,
         tool_registry: ToolRegistry,
-        execute_registry: ToolRegistry | None = None,
         session_manager: SessionManager,
         skill_loader: Any,  # SkillLoader
         prompt_builder: PromptBuilder,
@@ -60,10 +55,11 @@ class AgentGateway:
         learning_memory: Any,  # LearningMemory
         hooks: HookRegistry | None = None,
         runtime_config: RuntimeConfig | None = None,
+        # Deprecated — ignored, kept for caller compatibility during transition
+        execute_registry: ToolRegistry | None = None,
     ) -> None:
         self.llm_client = llm_client
-        self.tool_registry = tool_registry  # AUTO: 33 tools (含 propose_plan)
-        self.execute_registry = execute_registry or tool_registry  # EXECUTE: 32 tools (无 propose_plan)
+        self.tool_registry = tool_registry
         self.session_manager = session_manager
         self.skill_loader = skill_loader
         self.prompt_builder = prompt_builder
@@ -84,23 +80,25 @@ class AgentGateway:
         session_id: str | None = None,
         message: str,
         business_type: str,
-        business_context: dict | None = None,
         skill_names: list[str] | None = None,
         event_bus: EventBus | None = None,
+        materials: list[dict] | None = None,
+        # Deprecated — ignored, kept for caller compatibility during transition
+        business_context: dict | None = None,
         plan_mode: bool = True,
     ) -> dict:
         """
         处理用户消息 — 单一入口。
 
         Args:
+            tenant_id: 租户 ID
             user_id: 用户 ID (隔离)
             session_id: 可选, 续接会话
             message: 用户消息
             business_type: 业务类型 (reimbursement_create 等)
-            business_context: 业务上下文 (form_fields, audit_rules 等)
             skill_names: 要加载的 Skills
             event_bus: SSE 事件总线
-            plan_mode: True=AUTO(自主模式), False=EXECUTE(执行模式)
+            materials: 上传的材料列表
 
         Returns:
             {"session_id": str, "answer": str, "iterations": int, ...}
@@ -139,24 +137,6 @@ class AgentGateway:
             current_browser_service.set(get_browser_service())
         except Exception:
             pass  # BrowserService 可选，不阻塞启动
-
-        # 注入 known_field_ids 到 contextvars (供 known_values_guard hook 使用)
-        current_known_field_ids.set(set())  # 始终初始化，避免 LookupError
-        if business_context and business_context.get("known_values"):
-            kv = business_context["known_values"]
-            if isinstance(kv, dict):
-                current_known_field_ids.set(set(kv.keys()))
-            elif isinstance(kv, list):
-                ids = {
-                    item.get("field_id")
-                    for item in kv
-                    if isinstance(item, dict) and "field_id" in item
-                }
-                current_known_field_ids.set(ids)
-
-        # Phase 16: 注入 business_context 到 ContextVar (供子智能体继承)
-        if business_context:
-            current_business_context.set(business_context)
 
         # Phase 28: 注入 Memory 到 ContextVar (供记忆工具使用)
         current_learning_memory.set(self.learning_memory)
@@ -230,7 +210,7 @@ class AgentGateway:
 
         memory_context = "\n\n".join(memory_parts) if memory_parts else ""
 
-        # ── 6. 构建 8 层系统提示 ──
+        # ── 6. 构建系统提示 ──
         from agent.prompt import ToolSummary
         tool_summaries = [
             ToolSummary(
@@ -243,20 +223,19 @@ class AgentGateway:
 
         system_prompt = self.prompt_builder.build_system_prompt(
             skill_knowledge=skill_knowledge,
-            business_context=business_context,
             memory_context=memory_context,
             user_id=user_id,
             session_id=session_id,
-            plan_mode=plan_mode,
             tool_summaries=tool_summaries,
         )
 
         # ── 7. 构建用户消息 ──
         materials_summary = ""
-        if business_context and business_context.get("materials"):
-            materials = business_context["materials"]
+        # Support both new materials param and legacy business_context.materials
+        mat_list = materials or (business_context or {}).get("materials") or []
+        if mat_list:
             summaries = []
-            for m in materials:
+            for m in mat_list:
                 if isinstance(m, dict):
                     content = m.get("content", "")
                     filename = m.get("filename", "")
@@ -268,19 +247,10 @@ class AgentGateway:
             materials_summary=materials_summary,
         )
 
-        # ── 8. 工具集 — 根据模式选择 ──
-        if plan_mode:
-            tools = self.tool_registry  # AUTO: 33 tools (含 propose_plan)
-        else:
-            tools = self.execute_registry  # EXECUTE: 32 tools (无 propose_plan)
-
-            # EXECUTE 模式: 从 session 中恢复 PlanTracker
-            self._rebuild_plan_tracker(tenant_id, user_id, session_id, event_bus)
-
-        # ── 9. 创建 AgenticRuntime 并执行 ──
+        # ── 8. 创建 AgenticRuntime 并执行 ──
         runtime = AgenticRuntime(
             llm_client=self.llm_client,
-            tool_registry=tools,
+            tool_registry=self.tool_registry,
             tool_parser=ToolCallParser(),
             config=self.runtime_config,
             event_bus=event_bus,
@@ -313,7 +283,7 @@ class AgentGateway:
                 "error": str(e),
             }
 
-        # ── 10. 持久化会话 ──
+        # ── 9. 持久化会话 ──
         self.session_manager.append_message(
             tenant_id, user_id, session_id,
             {"role": "user", "content": message, "ts": start_time},
@@ -331,8 +301,7 @@ class AgentGateway:
             except Exception as e:
                 logger.warning(f"Session compaction failed: {e}")
 
-        # ── 11. 发射 Agent 文字回复 ──
-        # text_delta 事件已在 runtime 流式发射，这里发完整版做兜底
+        # ── 10. 发射 Agent 文字回复 ──
         if result.final_answer and event_bus:
             event_bus.emit("agent_message", {
                 "content": result.final_answer,
@@ -344,7 +313,7 @@ class AgentGateway:
                 "content": result.thinking,
             })
 
-        # ── 12. 触发 agent_stop hook ──
+        # ── 11. 触发 agent_stop hook ──
         if self.hooks:
             from agent.hooks import HookEvent
             stop_event = HookEvent(
@@ -367,30 +336,17 @@ class AgentGateway:
             except Exception as e:
                 logger.warning(f"agent_stop hook error: {e}")
 
-        # ── 13. 检测 plan_awaiting_approval ──
-        is_plan_awaiting = self._check_plan_awaiting(event_bus)
-
-        # ── 13.5. PlanTracker 收尾 ──
+        # ── 12. PlanTracker 收尾 ──
         tracker = current_plan_tracker.get(None)
         if tracker:
             if result.error:
                 tracker.fail_current()
-            elif not is_plan_awaiting:
+            else:
                 tracker.complete_all()
 
-        # ── 13.6. 持久化 plan steps 到 session (供 EXECUTE 模式恢复) ──
-        if is_plan_awaiting:
-            for evt in event_bus.history if event_bus else []:
-                if evt.event_type == "plan_proposed":
-                    steps = evt.data.get("steps", [])
-                    if steps:
-                        self.session_manager.save_plan_steps(tenant_id, user_id, session_id, steps)
-                    break
-
-        # ── 13.7. 记录成功经验到 LearningMemory ──
+        # ── 13. 记录成功经验到 LearningMemory ──
         if (
             self.learning_memory
-            and not is_plan_awaiting
             and not result.error
             and not result.max_iterations_reached
         ):
@@ -400,7 +356,7 @@ class AgentGateway:
                 self.learning_memory.record_success(
                     scenario=business_type,
                     business_type=bt,
-                    doc_type=(business_context or {}).get("doc_type", ""),
+                    doc_type="",
                     description=f"{business_type} 成功完成",
                     success_pattern={"tool_chain": tool_chain},
                     correction_count=0,
@@ -411,12 +367,7 @@ class AgentGateway:
         # ── 14. 发射完成事件 ──
         duration_ms = (time.time() - start_time) * 1000
         if event_bus:
-            if is_plan_awaiting:
-                status = "plan_awaiting_approval"
-            elif result.error:
-                status = "failed"
-            else:
-                status = "success"
+            status = "failed" if result.error else "success"
 
             event_bus.emit("pipeline_complete", {
                 "status": status,
@@ -437,31 +388,3 @@ class AgentGateway:
             "duration_ms": round(duration_ms, 1),
             "max_iterations_reached": result.max_iterations_reached,
         }
-
-    def _rebuild_plan_tracker(
-        self,
-        tenant_id: str,
-        user_id: str,
-        session_id: str,
-        event_bus: EventBus | None,
-    ) -> None:
-        """EXECUTE 模式: 从 session 中读取 plan steps, 重建 PlanTracker。"""
-        from agent.plan_tracker import PlanTracker
-
-        steps = self.session_manager.load_plan_steps(tenant_id, user_id, session_id)
-        if steps:
-            tracker = PlanTracker(steps, event_bus=event_bus)
-            current_plan_tracker.set(tracker)
-            # 推送 steps 给前端初始化 todo list
-            if event_bus:
-                event_bus.emit("plan_steps_init", {"steps": steps})
-            logger.info(f"Rebuilt PlanTracker with {len(steps)} steps for EXECUTE mode")
-
-    def _check_plan_awaiting(self, event_bus: EventBus | None) -> bool:
-        """检查 EventBus 历史中是否有 requires_approval=True 的 plan_proposed 事件。"""
-        if not event_bus:
-            return False
-        for evt in event_bus.history:
-            if evt.event_type == "plan_proposed" and evt.data.get("requires_approval"):
-                return True
-        return False

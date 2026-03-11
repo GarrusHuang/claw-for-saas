@@ -56,13 +56,6 @@ async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user))
     # Build Gateway
     gateway = build_gateway()
 
-    # Build business context dict
-    business_context = {
-        "data": request.context.data,
-        "protected_values": request.context.protected_values,
-        "materials": [m.model_dump() for m in request.context.materials],
-    }
-
     # Run Gateway.chat in background task
     async def run_chat():
         try:
@@ -72,9 +65,8 @@ async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user))
                 session_id=request.session_id,
                 message=request.message,
                 business_type=request.business_type,
-                business_context=business_context,
+                materials=[m.model_dump() for m in request.materials],
                 event_bus=bus,
-                plan_mode=request.plan_mode,
             )
         except AgentError as e:
             logger.exception(f"Gateway chat error (category={e.category}): {e}")

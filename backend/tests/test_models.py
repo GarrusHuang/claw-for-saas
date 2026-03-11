@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from models.request import ChatRequest, BusinessContext, MaterialInfo
+from models.request import ChatRequest, MaterialInfo
 from models.response import (
     AgentProgressEvent,
     TextDeltaEvent,
@@ -21,42 +21,27 @@ class TestChatRequest:
         req = ChatRequest(message="hello")
         assert req.session_id is None
         assert req.business_type == "general_chat"
-        assert req.plan_mode is True
-        assert req.context.data == {}
+        assert req.materials == []
 
     def test_full_request(self):
         req = ChatRequest(
             session_id="sess-abc",
             message="review this",
             business_type="invoice_review",
-            plan_mode=False,
-            context=BusinessContext(
-                data={"company": "ACME"},
-                protected_values={"amount": 1000},
-                materials=[MaterialInfo(material_id="m1", filename="doc.pdf")],
-            ),
+            materials=[MaterialInfo(material_id="m1", filename="doc.pdf")],
         )
-        assert req.context.data["company"] == "ACME"
-        assert req.context.protected_values["amount"] == 1000
-        assert len(req.context.materials) == 1
+        assert len(req.materials) == 1
+        assert req.materials[0].filename == "doc.pdf"
 
     def test_serialization(self):
         req = ChatRequest(message="test")
         d = req.model_dump()
         assert d["message"] == "test"
-        assert "context" in d
+        assert "materials" in d
 
     def test_message_required(self):
         with pytest.raises(Exception):
             ChatRequest()
-
-
-class TestBusinessContext:
-    def test_defaults(self):
-        ctx = BusinessContext()
-        assert ctx.data == {}
-        assert ctx.protected_values == {}
-        assert ctx.materials == []
 
 
 class TestMaterialInfo:
@@ -83,14 +68,21 @@ class TestResponseModels:
         assert e.event == "pipeline_complete"
         assert e.duration_ms == 1500.0
 
+    def test_pipeline_complete_no_plan_awaiting(self):
+        """A2: plan_awaiting_approval status removed."""
+        e = PipelineCompleteEvent(status="success")
+        assert e.status == "success"
+        # Only valid statuses: success, partial, failed
+        with pytest.raises(Exception):
+            PipelineCompleteEvent(status="plan_awaiting_approval")
+
     def test_plan_proposed_event(self):
         e = PlanProposedEvent(
             summary="Execute plan",
             steps=[{"action": "step1"}],
-            requires_approval=True,
         )
         assert e.event == "plan_proposed"
-        assert e.requires_approval is True
+        # A2: requires_approval field removed
 
     def test_error_event(self):
         e = ErrorEvent(
