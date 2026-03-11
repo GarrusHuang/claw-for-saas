@@ -16,12 +16,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from core.llm_client import LLMGatewayClient
 from core.runtime import AgenticRuntime, RuntimeConfig
 from core.tool_protocol import ToolCallParser
 from core.tool_registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from agent.prompt import PromptBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +54,13 @@ class SubagentRunner:
         shared_registry: ToolRegistry,
         capability_registry: ToolRegistry,
         agents_dir: Path | str | None = None,
+        prompt_builder: PromptBuilder | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.shared_registry = shared_registry  # 12 个只读工具
         self.capability_registry = capability_registry  # 14 个能力工具
         self.agents_dir = Path(agents_dir) if agents_dir else _DEFAULT_AGENTS_DIR
+        self.prompt_builder = prompt_builder
         self._role_loader: Any = None  # lazy init
 
     @property
@@ -193,11 +198,19 @@ class SubagentRunner:
 
         return filtered
 
+    def _build_minimal_base(self) -> str:
+        """使用 PromptBuilder minimal 模式构建基础 prompt。"""
+        if self.prompt_builder is None:
+            return ""
+        return self.prompt_builder.build_system_prompt(mode="minimal")
+
     def _build_role_prompt(
         self, role: Any, context: str, inherit_context: bool
     ) -> str:
         """基于角色定义构建系统提示。"""
-        parts = [role.system_prompt]
+        minimal_base = self._build_minimal_base()
+        parts = [minimal_base] if minimal_base else []
+        parts.append(role.system_prompt)
 
         # 列出可用工具
         if role.allowed_tools:
@@ -220,6 +233,7 @@ class SubagentRunner:
         self, subagent_type: str, context: str, inherit_context: bool
     ) -> str:
         """构建子 Agent 专用 prompt (简化版, 向后兼容)。"""
+        minimal_base = self._build_minimal_base()
         if subagent_type == "query":
             prompt = (
                 "你是一个数据查询助手。你的任务是使用工具查询数据并汇总结果。\n\n"
@@ -254,6 +268,8 @@ class SubagentRunner:
         if context:
             prompt += f"\n<context>\n{context}\n</context>"
 
+        if minimal_base:
+            return minimal_base + "\n" + prompt
         return prompt
 
     def _get_business_context(self) -> str:

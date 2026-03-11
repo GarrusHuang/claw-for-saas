@@ -228,6 +228,16 @@ class AgentGateway:
         memory_context = "\n\n".join(memory_parts) if memory_parts else ""
 
         # ── 6. 构建 8 层系统提示 ──
+        from agent.prompt import ToolSummary
+        tool_summaries = [
+            ToolSummary(
+                name=t.name,
+                description=t.description,
+                read_only=t.read_only,
+            )
+            for t in self.tool_registry.list_tools()
+        ]
+
         system_prompt = self.prompt_builder.build_system_prompt(
             skill_knowledge=skill_knowledge,
             business_context=business_context,
@@ -235,6 +245,7 @@ class AgentGateway:
             user_id=user_id,
             session_id=session_id,
             plan_mode=plan_mode,
+            tool_summaries=tool_summaries,
         )
 
         # ── 7. 构建用户消息 ──

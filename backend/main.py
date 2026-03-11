@@ -24,6 +24,7 @@ from api.skill_routes import router as skill_router
 from api.file_routes import router as file_router
 from core.logging import setup_logging
 from api.hook_rule_routes import router as hook_rule_router
+from api.plugin_routes import router as plugin_router
 
 
 @asynccontextmanager
@@ -32,6 +33,14 @@ async def lifespan(app: FastAPI):
     setup_logging(level="INFO", format="console")
     logger = logging.getLogger(__name__)
     logger.info("Claw-for-SaaS backend starting...")
+
+    # Load plugins
+    from dependencies import get_plugin_registry
+    plugin_registry = get_plugin_registry()
+    plugin_count = len(plugin_registry.list_plugins())
+    if plugin_count:
+        logger.info(f"Loaded {plugin_count} plugins")
+
     logger.info("Agent Gateway routes mounted at /api")
 
     yield
@@ -77,6 +86,7 @@ app.include_router(memory_router)
 app.include_router(skill_router)
 app.include_router(file_router)
 app.include_router(hook_rule_router)
+app.include_router(plugin_router)
 
 
 @app.get("/")
