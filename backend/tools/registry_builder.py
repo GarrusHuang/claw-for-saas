@@ -16,6 +16,7 @@ Built-in tools (no domain-specific tools):
 - skill: create_skill, update_skill
 - mcp: get_form_schema, get_business_rules, get_candidate_types,
        get_protected_values, submit_form_data, query_data
+- schedule: create_schedule, list_schedules, delete_schedule
 """
 from __future__ import annotations
 
@@ -57,12 +58,14 @@ def build_capability_registry() -> ToolRegistry:
     from tools.builtin.browser_tools import browser_capability_registry
     from tools.builtin.code_tools import code_capability_registry
     from tools.builtin.memory_tools import memory_capability_registry
+    from tools.builtin.schedule_tools import schedule_capability_registry
 
     merged = skill_capability_registry.merge(subagent_capability_registry)
     merged = merged.merge(file_capability_registry)
     merged = merged.merge(browser_capability_registry)
     merged = merged.merge(code_capability_registry)
     merged = merged.merge(memory_capability_registry)
+    merged = merged.merge(schedule_capability_registry)
     return merged
 
 

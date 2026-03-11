@@ -27,6 +27,8 @@ from api.file_routes import router as file_router
 from core.logging import setup_logging
 from api.hook_rule_routes import router as hook_rule_router
 from api.plugin_routes import router as plugin_router
+from api.schedule_routes import router as schedule_router
+from api.webhook_routes import router as webhook_router
 
 
 @asynccontextmanager
@@ -48,11 +50,27 @@ async def lifespan(app: FastAPI):
     if plugin_count:
         logger.info(f"Loaded {plugin_count} plugins")
 
+    # Start scheduler (A9)
+    from dependencies import get_scheduler, get_settings
+    s = get_settings()
+    if s.scheduler_enabled:
+        scheduler = get_scheduler()
+        await scheduler.start()
+        logger.info("Scheduler started")
+
     logger.info("Agent Gateway routes mounted at /api")
 
     yield
 
     logger.info("Claw-for-SaaS backend shutting down...")
+
+    # Stop scheduler (A9)
+    try:
+        if s.scheduler_enabled:
+            await scheduler.stop()
+            logger.info("Scheduler stopped")
+    except Exception:
+        pass
 
     try:
         from dependencies import _llm_client_instance
@@ -96,6 +114,8 @@ app.include_router(skill_router)
 app.include_router(file_router)
 app.include_router(hook_rule_router)
 app.include_router(plugin_router)
+app.include_router(schedule_router)
+app.include_router(webhook_router)
 
 
 @app.get("/")
