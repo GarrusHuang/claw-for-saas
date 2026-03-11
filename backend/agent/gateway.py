@@ -20,6 +20,7 @@ from core.context import (
     current_skill_loader, current_file_service, current_browser_service,
     current_plan_tracker,
     current_memory_store,
+    current_known_field_ids, current_business_context,
 )
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
@@ -337,16 +338,7 @@ class AgentGateway:
             else:
                 tracker.complete_all()
 
-        # ── 13.6. 持久化 plan steps 到 session (供 EXECUTE 模式恢复) ──
-        if is_plan_awaiting:
-            for evt in event_bus.history if event_bus else []:
-                if evt.event_type == "plan_proposed":
-                    steps = evt.data.get("steps", [])
-                    if steps:
-                        self.session_manager.save_plan_steps(tenant_id, user_id, session_id, steps)
-                    break
-
-        # ── 14. 发射完成事件 ──
+        # ── 13. 发射完成事件 ──
         duration_ms = (time.time() - start_time) * 1000
         if event_bus:
             status = "failed" if result.error else "success"

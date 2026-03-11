@@ -75,6 +75,16 @@ current_plan_tracker: contextvars.ContextVar[PlanTracker | None] = contextvars.C
     "current_plan_tracker", default=None
 )
 
+# Known field IDs — 供 known_values_guard hook 使用
+current_known_field_ids: contextvars.ContextVar[set] = contextvars.ContextVar(
+    "current_known_field_ids"
+)
+
+# Business context — 供子智能体继承
+current_business_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "current_business_context", default=None
+)
+
 # Memory system ContextVar (A8: Markdown 分层笔记)
 current_memory_store: contextvars.ContextVar[MarkdownMemoryStore | None] = contextvars.ContextVar(
     "current_memory_store", default=None
