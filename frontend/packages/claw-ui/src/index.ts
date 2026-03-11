@@ -11,7 +11,7 @@ export { default as ClawFloatingButton } from './ClawFloatingButton.tsx';
 export { default as ChatMessageList } from './chat/ChatMessageList.tsx';
 export { default as ChatInput } from './chat/ChatInput.tsx';
 export { default as CoworkSidebar } from './chat/CoworkSidebar.tsx';
-export { default as PromptCards } from './chat/PromptCards.tsx';
+export { default as CollapsibleBlock } from './chat/CollapsibleBlock.tsx';
 export {
   MiniTypeInference,
   MiniFieldUpdates,

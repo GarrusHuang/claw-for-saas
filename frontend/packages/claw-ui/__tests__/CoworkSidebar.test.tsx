@@ -39,24 +39,24 @@ vi.mock('../src/skills/ImportModal.tsx', () => ({
 // ── Tests ──
 
 describe('CoworkSidebar', () => {
-  it('renders "新对话" button', async () => {
+  it('renders "New task" entry', async () => {
     const { default: CoworkSidebar } = await import(
       '../src/chat/CoworkSidebar.tsx'
     );
 
     render(<CoworkSidebar />);
 
-    expect(screen.getByText('新对话')).toBeInTheDocument();
+    expect(screen.getByText('New task')).toBeInTheDocument();
   });
 
-  it('renders Sessions section title', async () => {
+  it('renders Recents section title', async () => {
     const { default: CoworkSidebar } = await import(
       '../src/chat/CoworkSidebar.tsx'
     );
 
     render(<CoworkSidebar />);
 
-    expect(screen.getByText('Sessions')).toBeInTheDocument();
+    expect(screen.getByText('Recents')).toBeInTheDocument();
   });
 
   it('shows "暂无会话" when no sessions', async () => {
@@ -69,7 +69,7 @@ describe('CoworkSidebar', () => {
     expect(screen.getByText('暂无会话')).toBeInTheDocument();
   });
 
-  it('renders Skills and MCP Tools collapse panels', async () => {
+  it('renders function entries (Skills, Search, etc.)', async () => {
     const { default: CoworkSidebar } = await import(
       '../src/chat/CoworkSidebar.tsx'
     );
@@ -77,6 +77,8 @@ describe('CoworkSidebar', () => {
     render(<CoworkSidebar />);
 
     expect(screen.getByText('Skills')).toBeInTheDocument();
-    expect(screen.getByText('MCP Tools')).toBeInTheDocument();
+    expect(screen.getByText('Search')).toBeInTheDocument();
+    expect(screen.getByText('Scheduled')).toBeInTheDocument();
+    expect(screen.getByText('Customize')).toBeInTheDocument();
   });
 });

@@ -29,32 +29,24 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('请输入您的问题');
+    const textarea = screen.getByPlaceholderText('Reply...');
     expect(textarea).toBeInTheDocument();
   });
 
   it('renders custom placeholder', () => {
     const onSend = vi.fn();
-    render(<ChatInput onSend={onSend} placeholder="自定义提示" />);
+    render(<ChatInput onSend={onSend} placeholder="Custom prompt" />);
 
-    expect(screen.getByPlaceholderText('自定义提示')).toBeInTheDocument();
-  });
-
-  it('renders "展示思考" switch', () => {
-    const onSend = vi.fn();
-    render(<ChatInput onSend={onSend} />);
-
-    expect(screen.getByText('展示思考')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Custom prompt')).toBeInTheDocument();
   });
 
   it('calls onSend when send button is clicked with text', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('请输入您的问题');
+    const textarea = screen.getByPlaceholderText('Reply...');
     fireEvent.change(textarea, { target: { value: '你好' } });
 
-    // Find the send button (circle button with SendOutlined)
     const sendBtn = screen.getByRole('button', { name: /send/i });
     fireEvent.click(sendBtn);
 
@@ -65,13 +57,14 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    // Send button should be disabled with empty text
+    // Send button is the primary circle button (not the text-type + button)
     const buttons = screen.getAllByRole('button');
-    const sendBtn = buttons.find(b => b.classList.contains('ant-btn-circle'));
+    const sendBtn = buttons.find(b =>
+      b.classList.contains('ant-btn-circle') && b.classList.contains('ant-btn-primary'),
+    );
     if (sendBtn) {
       expect(sendBtn).toBeDisabled();
     }
-    // Just verify onSend not called
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -79,11 +72,10 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('请输入您的问题') as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText('Reply...') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '测试消息' } });
     expect(textarea.value).toBe('测试消息');
 
-    // Simulate Enter key
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
 
     expect(onSend).toHaveBeenCalledWith('测试消息', undefined);
@@ -93,7 +85,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('请输入您的问题');
+    const textarea = screen.getByPlaceholderText('Reply...');
     fireEvent.change(textarea, { target: { value: '第一行' } });
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
 
@@ -111,7 +103,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} disabled />);
 
-    const textarea = screen.getByPlaceholderText('请输入您的问题');
+    const textarea = screen.getByPlaceholderText('Reply...');
     expect(textarea).toBeDisabled();
   });
 
@@ -119,28 +111,10 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} disabled />);
 
-    const textarea = screen.getByPlaceholderText('请输入您的问题');
+    const textarea = screen.getByPlaceholderText('Reply...');
     fireEvent.change(textarea, { target: { value: '测试' } });
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
 
     expect(onSend).not.toHaveBeenCalled();
-  });
-
-  it('calls onShowThinkingChange when switch toggled', () => {
-    const onSend = vi.fn();
-    const onThinkingChange = vi.fn();
-    render(
-      <ChatInput
-        onSend={onSend}
-        showThinking={false}
-        onShowThinkingChange={onThinkingChange}
-      />,
-    );
-
-    // Find the switch button
-    const switchEl = screen.getByRole('switch');
-    fireEvent.click(switchEl);
-
-    expect(onThinkingChange).toHaveBeenCalledWith(true);
   });
 });
