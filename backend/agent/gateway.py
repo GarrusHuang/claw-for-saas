@@ -110,13 +110,8 @@ class AgentGateway:
         current_user_id.set(user_id)
 
         # 注入 SubagentRunner 到 contextvars
-        from tools.capabilities.subagent_tools import _subagent_runner
+        from tools.builtin.subagent_tools import _subagent_runner
         _subagent_runner.set(self.subagent_runner)
-
-        # Phase 13: 注入 ParallelReviewOrchestrator 到 contextvars
-        from agent.parallel_review import ParallelReviewOrchestrator
-        from tools.capabilities.review_tools import _review_orchestrator
-        _review_orchestrator.set(ParallelReviewOrchestrator(self.subagent_runner))
 
         # 注入 SkillLoader 到 contextvars (供 skill 管理工具使用)
         if self.skill_loader:
