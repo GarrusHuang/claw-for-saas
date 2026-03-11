@@ -21,6 +21,61 @@ body {
   animation: fadeIn 0.4s ease-out;
 }
 
+/* ── F2: Three-column Cowork layout ── */
+
+.ai-chat-dialog--fullscreen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #fff;
+}
+
+.chat-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid #eee;
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.chat-dialog-body-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left sidebar */
+.chat-dialog-body-wrapper > .cowork-sidebar {
+  width: 220px;
+  min-width: 220px;
+  border-right: 1px solid #f0f0f0;
+  overflow-y: auto;
+  background: #fff;
+}
+
+/* Center chat area */
+.chat-dialog-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px 24px;
+}
+
+/* Right progress panel */
+.chat-dialog-body-wrapper > .progress-panel {
+  width: 280px;
+  min-width: 280px;
+  border-left: 1px solid #f0f0f0;
+  overflow-y: auto;
+  padding: 12px;
+  background: #fff;
+}
+
 /* ── F1: Document-flow message styles ── */
 
 .msg-ai {
