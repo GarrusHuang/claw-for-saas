@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useAIChatStore, useAIChat, usePipelineStore } from '@claw/core';
 import ChatMessageList from './chat/ChatMessageList';
 import ChatInput from './chat/ChatInput';
@@ -12,10 +12,9 @@ interface AIChatDialogProps {
 }
 
 /**
- * AI 对话框 — Claude Cowork 文档流风格布局。
+ * AI 对话框 — Cowork 文档流风格三栏布局。
  *
- * cowork 模式: [CoworkSidebar] [ChatCenter] [ProgressPanel]
- * chat 模式:   [ChatCenter only]
+ * 固定布局: [CoworkSidebar] [ChatCenter] [ProgressPanel]
  */
 export default function AIChatDialog({ onResize }: AIChatDialogProps) {
   const chatDialogState = useAIChatStore((s) => s.chatDialogState);
@@ -26,8 +25,6 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
     sendMessage,
     isRunning,
   } = useAIChat();
-
-  const [activeTab, setActiveTab] = useState<'chat' | 'cowork' | 'code'>('cowork');
 
   // ── Notify host of mode changes via onResize ──
   const onResizeRef = useRef(onResize);
@@ -41,35 +38,21 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
 
   if (chatDialogState === 'closed') return null;
 
-  const isCowork = activeTab === 'cowork';
-
   return (
     <div className="ai-chat-dialog ai-chat-dialog--fullscreen">
-      {/* ── Header with tabs ── */}
+      {/* ── Header ── */}
       <div className="chat-dialog-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: '#333', letterSpacing: '-0.3px' }}>
             Claw
           </span>
         </div>
-        <div className="header-tabs">
-          {(['chat', 'cowork', 'code'] as const).map((tab) => (
-            <button
-              key={tab}
-              className={`header-tab${activeTab === tab ? ' header-tab--active' : ''}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </div>
         <div style={{ width: 60 }} />
       </div>
 
       {/* ── Body: three-column layout ── */}
       <div className="chat-dialog-body-wrapper">
-        {/* Left sidebar (cowork mode only) */}
-        {isCowork && <CoworkSidebar />}
+        <CoworkSidebar />
 
         {/* Center chat */}
         <div className="chat-dialog-body">
@@ -80,8 +63,7 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
           />
         </div>
 
-        {/* Right panel (cowork mode only) */}
-        {isCowork && <ProgressPanel />}
+        <ProgressPanel />
       </div>
 
       {/* ── Input ── */}

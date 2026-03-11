@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 // ── Mock state for controlling chatDialogState per test ──
 let mockChatDialogState = 'closed';
@@ -64,54 +64,33 @@ describe('AIChatDialog', () => {
     AIChatDialog = mod.default;
   });
 
-  // ── F2 Tab switching ──
+  // ── F2 三栏布局 (Cowork 固定布局，无 tab 切换) ──
 
-  describe('Tab switching', () => {
-    it('defaults to cowork tab', () => {
+  describe('Three-column layout', () => {
+    it('always shows CoworkSidebar', () => {
       render(<AIChatDialog />);
-
-      const coworkTab = screen.getByText('Cowork');
-      expect(coworkTab).toHaveClass('header-tab--active');
-    });
-
-    it('switches to Chat tab when clicked', () => {
-      render(<AIChatDialog />);
-
-      const chatTab = screen.getByText('Chat');
-      fireEvent.click(chatTab);
-
-      expect(chatTab).toHaveClass('header-tab--active');
-    });
-
-    it('switches to Code tab when clicked', () => {
-      render(<AIChatDialog />);
-
-      const codeTab = screen.getByText('Code');
-      fireEvent.click(codeTab);
-
-      expect(codeTab).toHaveClass('header-tab--active');
-    });
-
-    it('shows CoworkSidebar only in cowork tab', () => {
-      render(<AIChatDialog />);
-
-      // Default is cowork — sidebar visible
       expect(screen.getByTestId('cowork-sidebar')).toBeInTheDocument();
-
-      // Switch to chat — sidebar hidden
-      fireEvent.click(screen.getByText('Chat'));
-      expect(screen.queryByTestId('cowork-sidebar')).not.toBeInTheDocument();
     });
 
-    it('shows ProgressPanel only in cowork tab', () => {
+    it('always shows ProgressPanel', () => {
       render(<AIChatDialog />);
-
-      // Default is cowork — panel visible
       expect(screen.getByTestId('progress-panel')).toBeInTheDocument();
+    });
 
-      // Switch to code — panel hidden
-      fireEvent.click(screen.getByText('Code'));
-      expect(screen.queryByTestId('progress-panel')).not.toBeInTheDocument();
+    it('always shows ChatMessageList', () => {
+      render(<AIChatDialog />);
+      expect(screen.getByTestId('chat-message-list')).toBeInTheDocument();
+    });
+
+    it('shows ChatInput', () => {
+      render(<AIChatDialog />);
+      expect(screen.getByTestId('chat-input')).toBeInTheDocument();
+    });
+
+    it('has no tab buttons', () => {
+      render(<AIChatDialog />);
+      expect(screen.queryByText('Chat')).toBeNull();
+      expect(screen.queryByText('Code')).toBeNull();
     });
   });
 
@@ -120,7 +99,6 @@ describe('AIChatDialog', () => {
   describe('Expand/Collapse mode', () => {
     it('does not render when chatDialogState is closed', async () => {
       mockChatDialogState = 'closed';
-      // Re-import to pick up new state
       const mod = await import('../src/AIChatDialog.tsx');
       const Dialog = mod.default;
 
