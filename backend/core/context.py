@@ -30,6 +30,10 @@ if TYPE_CHECKING:
     from memory.learning import LearningMemory
     from memory.correction import CorrectionMemory
 
+current_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "current_tenant_id", default="default"
+)
+
 current_event_bus: contextvars.ContextVar[EventBus | None] = contextvars.ContextVar(
     "current_event_bus", default=None
 )

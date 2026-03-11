@@ -3,16 +3,17 @@
 
 端点:
 - POST /api/correction/submit — 提交用户修正
-- GET /api/correction/preferences/{user_id}/{business_type} — 查询用户偏好
+- GET /api/correction/preferences/{business_type} — 查询用户偏好
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from core.auth import AuthUser, get_current_user
 from dependencies import get_correction_memory
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,6 @@ router = APIRouter(prefix="/api/correction", tags=["correction"])
 
 class CorrectionSubmitRequest(BaseModel):
     """用户修正提交请求。"""
-    user_id: str
     business_type: str
     doc_type: str | None = None
     field_id: str
@@ -32,7 +32,10 @@ class CorrectionSubmitRequest(BaseModel):
 
 
 @router.post("/submit")
-async def submit_correction(req: CorrectionSubmitRequest):
+async def submit_correction(
+    req: CorrectionSubmitRequest,
+    user: AuthUser = Depends(get_current_user),
+):
     """
     提交用户修正。
 
@@ -42,7 +45,7 @@ async def submit_correction(req: CorrectionSubmitRequest):
     correction_memory = get_correction_memory()
 
     correction_memory.record_correction(
-        user_id=req.user_id,
+        user_id=user.user_id,
         business_type=req.business_type,
         doc_type=req.doc_type or "",
         field_id=req.field_id,
@@ -52,7 +55,7 @@ async def submit_correction(req: CorrectionSubmitRequest):
     )
 
     logger.info(
-        f"Correction recorded: user={req.user_id}, field={req.field_id}, "
+        f"Correction recorded: user={user.user_id}, field={req.field_id}, "
         f"{req.agent_value} → {req.user_value}"
     )
 
@@ -63,8 +66,12 @@ async def submit_correction(req: CorrectionSubmitRequest):
     }
 
 
-@router.get("/preferences/{user_id}/{business_type}")
-async def get_preferences(user_id: str, business_type: str, doc_type: str | None = None):
+@router.get("/preferences/{business_type}")
+async def get_preferences(
+    business_type: str,
+    doc_type: str | None = None,
+    user: AuthUser = Depends(get_current_user),
+):
     """
     查询用户的历史修正偏好。
 
@@ -74,7 +81,7 @@ async def get_preferences(user_id: str, business_type: str, doc_type: str | None
     correction_memory = get_correction_memory()
 
     corrections = correction_memory.get_corrections(
-        user_id=user_id,
+        user_id=user.user_id,
         business_type=business_type,
         doc_type=doc_type,
     )
@@ -82,14 +89,14 @@ async def get_preferences(user_id: str, business_type: str, doc_type: str | None
     # 构建偏好提示（与注入 Agent 的相同）
     field_ids = list(set(c.field_id for c in corrections))
     preference_prompt = correction_memory.build_preference_prompt(
-        user_id=user_id,
+        user_id=user.user_id,
         business_type=business_type,
         doc_type=doc_type or "",
         field_ids=field_ids,
     ) if field_ids else ""
 
     return {
-        "user_id": user_id,
+        "user_id": user.user_id,
         "business_type": business_type,
         "correction_count": len(corrections),
         "corrections": [

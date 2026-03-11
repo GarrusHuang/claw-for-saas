@@ -105,6 +105,92 @@ class Settings(BaseSettings):
         description="User correction memory decay days",
     )
 
+    # ─── Auth ───
+    auth_enabled: bool = Field(
+        default=False,
+        description="Enable authentication (False = dev mode with default user)",
+    )
+    auth_mode: str = Field(
+        default="jwt",
+        description="Auth mode: jwt | api_key | oidc | saml",
+    )
+    auth_jwt_secret: str = Field(
+        default="",
+        description="JWT HS256 secret key (also used for Claw session tokens in OIDC/SAML mode)",
+    )
+    auth_jwt_algorithm: str = Field(
+        default="HS256",
+        description="JWT algorithm",
+    )
+    auth_session_expire_s: int = Field(
+        default=86400,
+        description="Claw session token lifetime in seconds (OIDC/SAML mode)",
+    )
+    auth_default_tenant_id: str = Field(
+        default="default",
+        description="Default tenant ID when auth is disabled",
+    )
+    auth_default_user_id: str = Field(
+        default="U001",
+        description="Default user ID when auth is disabled",
+    )
+    auth_api_keys: str = Field(
+        default="",
+        description="Comma-separated valid API keys",
+    )
+
+    # ─── OIDC (auth_mode=oidc) ───
+    auth_oidc_issuer: str = Field(
+        default="",
+        description="OIDC issuer URL (e.g. https://sso.company.com)",
+    )
+    auth_oidc_client_id: str = Field(
+        default="",
+        description="OIDC client ID",
+    )
+    auth_oidc_client_secret: str = Field(
+        default="",
+        description="OIDC client secret",
+    )
+    auth_oidc_scopes: str = Field(
+        default="openid profile email",
+        description="OIDC scopes (space-separated)",
+    )
+    auth_oidc_redirect_uri: str = Field(
+        default="",
+        description="OIDC callback URL (e.g. http://localhost:8000/api/auth/callback/oidc)",
+    )
+    auth_oidc_tenant_claim: str = Field(
+        default="org_id",
+        description="id_token claim for tenant_id",
+    )
+    auth_oidc_user_claim: str = Field(
+        default="sub",
+        description="id_token claim for user_id",
+    )
+
+    # ─── SAML (auth_mode=saml) ───
+    auth_saml_idp_metadata_url: str = Field(
+        default="",
+        description="SAML IdP metadata XML URL",
+    )
+    auth_saml_sp_entity_id: str = Field(
+        default="claw-for-saas",
+        description="SAML Service Provider entity ID",
+    )
+    auth_saml_sp_acs_url: str = Field(
+        default="",
+        description="SAML ACS URL (e.g. http://localhost:8000/api/auth/callback/saml)",
+    )
+    auth_saml_tenant_attr: str = Field(
+        default="org_id",
+        description="SAML assertion attribute for tenant_id",
+    )
+    auth_saml_user_attr: str = Field(
+        default="uid",
+        description="SAML assertion attribute for user_id",
+    )
+
     # ─── Logging ───
     log_level: str = Field(default="INFO")
     log_format: str = Field(
