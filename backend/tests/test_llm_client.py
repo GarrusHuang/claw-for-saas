@@ -131,6 +131,7 @@ class TestUsageTracking:
 # ── Integration tests (real LLM) ──
 
 
+@pytest.mark.llm
 class TestLLMIntegration:
     """Integration tests with real LLM at 127.0.0.1:7225."""
 
