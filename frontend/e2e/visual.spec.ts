@@ -1,42 +1,122 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Cowork Layout — Static UI', () => {
-  test.beforeEach(async ({ page }) => {
+/**
+ * E2E 视觉测试 — 真实浏览器验证 UI 渲染。
+ *
+ * 覆盖:
+ * - F3: LoginPage 渲染 + 表单交互 + 错误提示
+ * - F2: Cowork 三栏布局（无 tab 切换）
+ * - F1: 文档流风格（无气泡、无头像）
+ * - 截图: 每个关键页面自动截图到 e2e/screenshots/
+ */
+
+// ── F3: LoginPage ──
+
+test.describe('F3: LoginPage', () => {
+  test('renders login form correctly', async ({ page }) => {
     await page.goto('/');
+    await page.waitForLoadState('networkidle');
+
+    // 页面标题
+    await expect(page.locator('.login-logo')).toHaveText('Claw');
+    await expect(page.locator('.login-subtitle')).toHaveText('AI Agent Runtime');
+
+    // 表单元素
+    await expect(page.locator('#username')).toBeVisible();
+    await expect(page.locator('#password')).toBeVisible();
+    await expect(page.locator('button[type="submit"]')).toHaveText('Sign in');
+
+    await page.screenshot({ path: 'e2e/screenshots/login-page.png' });
   });
 
-  test('test_three_column_layout', async ({ page }) => {
+  test('sign in button disabled when username empty', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+
+    const btn = page.locator('button[type="submit"]');
+    await expect(btn).toBeDisabled();
+  });
+
+  test('sign in button enabled when username filled', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+
+    await page.fill('#username', 'admin');
+    await page.fill('#password', 'test123');
+
+    const btn = page.locator('button[type="submit"]');
+    await expect(btn).toBeEnabled();
+
+    await page.screenshot({ path: 'e2e/screenshots/login-filled.png' });
+  });
+
+  test('shows error on failed login', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+
+    await page.fill('#username', 'admin');
+    await page.fill('#password', 'wrong');
+    await page.click('button[type="submit"]');
+
+    // 等待错误显示
+    await page.waitForTimeout(2000);
+    const error = page.locator('.login-error');
+    await expect(error).toBeVisible();
+
+    await page.screenshot({ path: 'e2e/screenshots/login-error.png' });
+  });
+});
+
+// ── F2: Cowork 三栏布局 ──
+
+test.describe('F2: Cowork Layout', () => {
+  test.beforeEach(async ({ page }) => {
+    // 注入 token 绕过认证进入主界面
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => {
+      localStorage.setItem('claw_auth_token', 'e2e-test-token');
+      localStorage.setItem('claw_auth_user', JSON.stringify({
+        userId: 'admin',
+        tenantId: 'default',
+        expiresAt: Date.now() + 86400000,
+      }));
+    });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+  });
+
+  test('three-column layout renders', async ({ page }) => {
+    await expect(page.locator('.cowork-sidebar')).toBeVisible();
+    await expect(page.locator('.chat-dialog-body')).toBeVisible();
+    await expect(page.locator('.progress-panel')).toBeVisible();
+
+    await page.screenshot({ path: 'e2e/screenshots/cowork-layout.png', fullPage: true });
+  });
+
+  test('no tab buttons exist', async ({ page }) => {
+    // 确认没有 Chat/Code tab
+    await expect(page.locator('button:has-text("Chat")')).toHaveCount(0);
+    await expect(page.locator('button:has-text("Code")')).toHaveCount(0);
+  });
+
+  test('header shows Claw title', async ({ page }) => {
+    await expect(page.locator('.chat-dialog-header')).toContainText('Claw');
+  });
+
+  test('sidebar has navigation entries', async ({ page }) => {
     const sidebar = page.locator('.cowork-sidebar');
-    const chatBody = page.locator('.chat-dialog-body');
-    const progressPanel = page.locator('.progress-panel');
 
-    await expect(sidebar).toBeVisible();
-    await expect(chatBody).toBeVisible();
-    await expect(progressPanel).toBeVisible();
+    await expect(sidebar.locator('text=New task')).toBeVisible();
+    await expect(sidebar.locator('text=Search')).toBeVisible();
+    await expect(sidebar.locator('text=Scheduled')).toBeVisible();
+    await expect(sidebar.locator('text=Skills')).toBeVisible();
+    await expect(sidebar.locator('text=Customize')).toBeVisible();
+    await expect(sidebar.locator('text=Recents')).toBeVisible();
   });
 
-  test('test_header_tabs', async ({ page }) => {
-    const tabs = page.locator('.header-tabs .header-tab');
-    await expect(tabs).toHaveCount(3);
-
-    await expect(tabs.nth(0)).toHaveText('Chat');
-    await expect(tabs.nth(1)).toHaveText('Cowork');
-    await expect(tabs.nth(2)).toHaveText('Code');
-
-    // Cowork is active by default
-    const activeTab = page.locator('.header-tab--active');
-    await expect(activeTab).toHaveText('Cowork');
-  });
-
-  test('test_sidebar_entries', async ({ page }) => {
-    const entries = page.locator('.cowork-sidebar-entries .sidebar-entry');
-
-    await expect(entries.filter({ hasText: 'New task' })).toBeVisible();
-    await expect(entries.filter({ hasText: 'Search' })).toBeVisible();
-    await expect(entries.filter({ hasText: 'Skills' })).toBeVisible();
-  });
-
-  test('test_progress_panel_sections', async ({ page }) => {
+  test('progress panel has all sections', async ({ page }) => {
     const panel = page.locator('.progress-panel');
 
     await expect(panel.locator('.progress-section-title', { hasText: 'Progress' })).toBeVisible();
@@ -45,33 +125,49 @@ test.describe('Cowork Layout — Static UI', () => {
     await expect(panel.locator('.progress-section-title', { hasText: 'Context' })).toBeVisible();
   });
 
-  test('test_chat_input', async ({ page }) => {
-    const input = page.locator('.chat-input-area textarea');
-    await expect(input).toBeVisible();
-    await expect(input).toHaveAttribute('placeholder', 'Reply...');
+  test('chat input area renders with placeholder', async ({ page }) => {
+    const textarea = page.locator('.chat-input-area textarea');
+    await expect(textarea).toBeVisible();
+    await expect(textarea).toHaveAttribute('placeholder', 'Reply...');
+
+    await page.screenshot({ path: 'e2e/screenshots/chat-input.png' });
+  });
+});
+
+// ── F1: 文档流风格 ──
+
+test.describe('F1: Document Flow Style', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => {
+      localStorage.setItem('claw_auth_token', 'e2e-test-token');
+      localStorage.setItem('claw_auth_user', JSON.stringify({
+        userId: 'admin',
+        tenantId: 'default',
+        expiresAt: Date.now() + 86400000,
+      }));
+    });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
   });
 
-  test('test_chat_mode_hides_sidebars', async ({ page }) => {
-    // Click "Chat" tab
-    await page.locator('.header-tab', { hasText: 'Chat' }).click();
-
-    // Sidebar and progress panel should not be rendered
-    await expect(page.locator('.cowork-sidebar')).toBeHidden();
-    await expect(page.locator('.progress-panel')).toBeHidden();
-
-    // Chat body still visible
-    await expect(page.locator('.chat-dialog-body')).toBeVisible();
+  test('no chat bubbles in layout', async ({ page }) => {
+    // 确认无气泡样式
+    const bubbles = page.locator('.chat-bubble-ai, .chat-bubble-user');
+    await expect(bubbles).toHaveCount(0);
   });
 
-  test('test_cowork_mode_shows_all', async ({ page }) => {
-    // Switch to Chat first, then back to Cowork
-    await page.locator('.header-tab', { hasText: 'Chat' }).click();
-    await expect(page.locator('.cowork-sidebar')).toBeHidden();
+  test('no avatar elements in layout', async ({ page }) => {
+    // 确认无头像元素
+    const avatars = page.locator('.claw-avatar, .user-avatar');
+    await expect(avatars).toHaveCount(0);
+  });
 
-    await page.locator('.header-tab', { hasText: 'Cowork' }).click();
-
-    await expect(page.locator('.cowork-sidebar')).toBeVisible();
-    await expect(page.locator('.chat-dialog-body')).toBeVisible();
-    await expect(page.locator('.progress-panel')).toBeVisible();
+  test('no thinking toggle button', async ({ page }) => {
+    // 确认无思考开关
+    const thinkingToggle = page.locator('.thinking-toggle, button:has-text("思考")');
+    await expect(thinkingToggle).toHaveCount(0);
   });
 });
