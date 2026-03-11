@@ -155,6 +155,45 @@ def get_browser_service():
 
 
 @lru_cache()
+def get_schedule_store():
+    from core.scheduler import ScheduleStore
+    s = get_settings()
+    base_dir = os.path.join(_BACKEND_ROOT, s.scheduler_data_dir)
+    return ScheduleStore(base_dir=base_dir)
+
+
+@lru_cache()
+def get_webhook_store():
+    from core.webhook import WebhookStore
+    s = get_settings()
+    base_dir = os.path.join(_BACKEND_ROOT, s.webhook_data_dir)
+    return WebhookStore(base_dir=base_dir)
+
+
+@lru_cache()
+def get_webhook_dispatcher():
+    from core.webhook import WebhookDispatcher
+    s = get_settings()
+    return WebhookDispatcher(
+        store=get_webhook_store(),
+        timeout_s=s.webhook_timeout_s,
+        max_retries=s.webhook_max_retries,
+    )
+
+
+@lru_cache()
+def get_scheduler():
+    from core.scheduler import Scheduler
+    s = get_settings()
+    return Scheduler(
+        store=get_schedule_store(),
+        gateway_factory=build_gateway,
+        webhook_dispatcher=get_webhook_dispatcher(),
+        check_interval_s=s.scheduler_check_interval_s,
+    )
+
+
+@lru_cache()
 def get_hook_rule_engine():
     from agent.hook_rules import HookRuleEngine
     return HookRuleEngine(os.path.join(_BACKEND_ROOT, "data", "hook_rules"))
