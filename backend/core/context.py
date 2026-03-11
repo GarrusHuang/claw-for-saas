@@ -27,8 +27,7 @@ if TYPE_CHECKING:
     from services.file_service import FileService
     from services.browser_service import BrowserService
     from skills.loader import SkillLoader
-    from memory.learning import LearningMemory
-    from memory.correction import CorrectionMemory
+    from memory.markdown_store import MarkdownMemoryStore
 
 current_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "current_tenant_id", default="default"
@@ -81,11 +80,7 @@ current_plan_tracker: contextvars.ContextVar[PlanTracker | None] = contextvars.C
     "current_plan_tracker", default=None
 )
 
-# Memory system ContextVars
-current_learning_memory: contextvars.ContextVar[LearningMemory | None] = contextvars.ContextVar(
-    "current_learning_memory", default=None
-)
-
-current_correction_memory: contextvars.ContextVar[CorrectionMemory | None] = contextvars.ContextVar(
-    "current_correction_memory", default=None
+# Memory system ContextVar (A8: Markdown 分层笔记)
+current_memory_store: contextvars.ContextVar[MarkdownMemoryStore | None] = contextvars.ContextVar(
+    "current_memory_store", default=None
 )

@@ -13,8 +13,7 @@ from config import Settings
 from core.llm_client import LLMGatewayClient, LLMClientConfig
 from core.runtime import RuntimeConfig
 from core.tool_registry import ToolRegistry
-from memory.correction import CorrectionMemory
-from memory.learning import LearningMemory
+from memory.markdown_store import MarkdownMemoryStore
 from skills.loader import SkillLoader
 from tools.registry_builder import (
     build_shared_registry,
@@ -73,17 +72,13 @@ def get_runtime_config() -> RuntimeConfig:
 
 
 @lru_cache()
-def get_correction_memory() -> CorrectionMemory:
+def get_memory_store() -> MarkdownMemoryStore:
     s = get_settings()
-    storage_path = os.path.join(_BACKEND_ROOT, s.memory_storage_dir, "correction_memory.json")
-    return CorrectionMemory(storage_path=storage_path)
-
-
-@lru_cache()
-def get_learning_memory() -> LearningMemory:
-    s = get_settings()
-    storage_path = os.path.join(_BACKEND_ROOT, s.memory_storage_dir, "learning_memory.json")
-    return LearningMemory(storage_path=storage_path)
+    base_dir = os.path.join(_BACKEND_ROOT, s.memory_storage_dir)
+    return MarkdownMemoryStore(
+        base_dir=base_dir,
+        max_prompt_chars=s.memory_max_prompt_chars,
+    )
 
 
 @lru_cache()
@@ -214,8 +209,7 @@ def build_gateway():
         skill_loader=get_skill_loader(),
         prompt_builder=prompt_builder,
         subagent_runner=subagent_runner,
-        correction_memory=get_correction_memory(),
-        learning_memory=get_learning_memory(),
+        memory_store=get_memory_store(),
         hooks=build_default_hooks(),
         runtime_config=get_runtime_config(),
     )

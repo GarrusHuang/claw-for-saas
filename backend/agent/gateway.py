@@ -21,7 +21,7 @@ from core.context import (
     current_skill_loader, current_file_service, current_browser_service,
     current_known_field_ids, current_business_context,
     current_plan_tracker,
-    current_learning_memory, current_correction_memory,
+    current_memory_store,
 )
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
@@ -56,8 +56,7 @@ class AgentGateway:
         skill_loader: Any,  # SkillLoader
         prompt_builder: PromptBuilder,
         subagent_runner: SubagentRunner,
-        correction_memory: Any,  # CorrectionMemory
-        learning_memory: Any,  # LearningMemory
+        memory_store: Any,  # MarkdownMemoryStore
         hooks: HookRegistry | None = None,
         runtime_config: RuntimeConfig | None = None,
     ) -> None:
@@ -68,8 +67,7 @@ class AgentGateway:
         self.skill_loader = skill_loader
         self.prompt_builder = prompt_builder
         self.subagent_runner = subagent_runner
-        self.correction_memory = correction_memory
-        self.learning_memory = learning_memory
+        self.memory_store = memory_store
         self.hooks = hooks or build_default_hooks()
         self.runtime_config = runtime_config or RuntimeConfig(
             max_iterations=25,
@@ -158,9 +156,9 @@ class AgentGateway:
         if business_context:
             current_business_context.set(business_context)
 
-        # Phase 28: 注入 Memory 到 ContextVar (供记忆工具使用)
-        current_learning_memory.set(self.learning_memory)
-        current_correction_memory.set(self.correction_memory)
+        # A8: 注入 MarkdownMemoryStore 到 ContextVar (供记忆工具使用)
+        if self.memory_store:
+            current_memory_store.set(self.memory_store)
 
         # ── 2. 解析/创建会话 ──
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):
@@ -201,34 +199,16 @@ class AgentGateway:
             except Exception as e:
                 logger.warning(f"Skill loading failed: {e}")
 
-        # ── 5. 构建 Memory 上下文 ──
-        memory_parts: list[str] = []
-
-        if self.correction_memory:
+        # ── 5. 构建 Memory 上下文 (A8: Markdown 分层笔记) ──
+        memory_context = ""
+        if self.memory_store:
             try:
-                bt = business_type.split("_")[0] if "_" in business_type else business_type
-                prefs = self.correction_memory.build_preference_prompt(
+                memory_context = self.memory_store.build_memory_prompt(
+                    tenant_id=tenant_id,
                     user_id=user_id,
-                    business_type=bt,
-                    doc_type=bt,
                 )
-                if prefs:
-                    memory_parts.append(f"[用户偏好]\n{prefs}")
             except Exception as e:
-                logger.warning(f"CorrectionMemory error: {e}")
-
-        if self.learning_memory:
-            try:
-                exp = self.learning_memory.build_experience_prompt(
-                    scenario=business_type,
-                    business_type=business_type.split("_")[0] if "_" in business_type else business_type,
-                )
-                if exp:
-                    memory_parts.append(f"[历史经验]\n{exp}")
-            except Exception as e:
-                logger.warning(f"LearningMemory error: {e}")
-
-        memory_context = "\n\n".join(memory_parts) if memory_parts else ""
+                logger.warning(f"MarkdownMemoryStore error: {e}")
 
         # ── 6. 构建 8 层系统提示 ──
         from agent.prompt import ToolSummary
@@ -386,27 +366,6 @@ class AgentGateway:
                     if steps:
                         self.session_manager.save_plan_steps(tenant_id, user_id, session_id, steps)
                     break
-
-        # ── 13.7. 记录成功经验到 LearningMemory ──
-        if (
-            self.learning_memory
-            and not is_plan_awaiting
-            and not result.error
-            and not result.max_iterations_reached
-        ):
-            try:
-                tool_chain = [s.tool_name for s in result.steps if s.tool_name]
-                bt = business_type.split("_")[0] if "_" in business_type else business_type
-                self.learning_memory.record_success(
-                    scenario=business_type,
-                    business_type=bt,
-                    doc_type=(business_context or {}).get("doc_type", ""),
-                    description=f"{business_type} 成功完成",
-                    success_pattern={"tool_chain": tool_chain},
-                    correction_count=0,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to record learning experience: {e}")
 
         # ── 14. 发射完成事件 ──
         duration_ms = (time.time() - start_time) * 1000

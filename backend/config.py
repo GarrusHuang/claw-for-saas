@@ -93,22 +93,14 @@ class Settings(BaseSettings):
         description="Max token estimate for single Skill L2 body",
     )
 
-    # ─── Memory ───
+    # ─── Memory (A8: Markdown 分层笔记) ───
     memory_storage_dir: str = Field(
         default="data/memory",
-        description="Memory persistence directory",
+        description="Memory persistence directory (三级: global/tenant/user)",
     )
-    conversation_window_size: int = Field(
-        default=10,
-        description="Conversation memory sliding window size",
-    )
-    conversation_max_tokens: int = Field(
+    memory_max_prompt_chars: int = Field(
         default=8000,
-        description="Conversation memory max tokens",
-    )
-    correction_decay_days: int = Field(
-        default=90,
-        description="User correction memory decay days",
+        description="Max chars for memory injection into system prompt",
     )
 
     # ─── Auth ───

@@ -319,6 +319,8 @@ class PromptBuilder:
     @staticmethod
     def _build_memory(ctx: PromptContext) -> str:
         if ctx.memory_context:
+            # memory_context 已由 MarkdownMemoryStore.build_memory_prompt() 构建
+            # 包含 <global>/<tenant>/<user> 子标签
             return f"\n<memory>\n{ctx.memory_context}\n</memory>"
         return ""
 
