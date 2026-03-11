@@ -22,3 +22,6 @@ playwright>=1.40
 
 # SSE
 sse-starlette>=2.0
+
+# Scheduling
+croniter>=2.0

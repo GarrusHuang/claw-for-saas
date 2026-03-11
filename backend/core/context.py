@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.sandbox import SandboxManager
     from core.data_lock import DataLockRegistry
+    from core.scheduler import Scheduler
     from services.file_service import FileService
     from services.browser_service import BrowserService
     from skills.loader import SkillLoader
@@ -100,4 +101,9 @@ current_data_lock: contextvars.ContextVar[DataLockRegistry | None] = contextvars
 # A2: MCP Provider (SaaS 宿主注入业务数据拉取接口)
 current_mcp_provider: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "current_mcp_provider", default=None
+)
+
+# A9: Scheduler
+current_scheduler: contextvars.ContextVar[Scheduler | None] = contextvars.ContextVar(
+    "current_scheduler", default=None
 )

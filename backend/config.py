@@ -190,6 +190,34 @@ class Settings(BaseSettings):
         description="Max chars for memory injection into system prompt",
     )
 
+    # ─── Scheduler (A9) ───
+    scheduler_enabled: bool = Field(
+        default=True,
+        description="Enable cron scheduler background loop",
+    )
+    scheduler_check_interval_s: int = Field(
+        default=60,
+        description="Scheduler tick interval in seconds",
+    )
+    scheduler_data_dir: str = Field(
+        default="data/schedules",
+        description="Scheduler task persistence directory",
+    )
+
+    # ─── Webhook (A9) ───
+    webhook_data_dir: str = Field(
+        default="data/webhooks",
+        description="Webhook config persistence directory",
+    )
+    webhook_timeout_s: float = Field(
+        default=10.0,
+        description="Webhook POST request timeout in seconds",
+    )
+    webhook_max_retries: int = Field(
+        default=3,
+        description="Webhook max retry count with exponential backoff",
+    )
+
     # ─── Auth ───
     auth_enabled: bool = Field(
         default=False,
