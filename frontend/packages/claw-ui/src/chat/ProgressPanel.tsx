@@ -1,110 +1,95 @@
 /**
- * 任务进度面板 — TodoList + 工具调用日志 + Thinking + 并行审查 + 实时统计。
+ * 右栏面板 — Progress + Files + Instructions + Context
  */
 
-import { useState } from 'react';
-import { Typography, Tag, Spin, Progress } from 'antd';
+import { useState, useEffect, useCallback } from 'react';
+import { Typography } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LoadingOutlined,
   ClockCircleOutlined,
   ThunderboltOutlined,
-  CodeOutlined,
-  BulbOutlined,
-  DownOutlined,
-  RightOutlined,
-  TeamOutlined,
+  FileOutlined,
+  BookOutlined,
+  DatabaseOutlined,
   ToolOutlined,
-  StopOutlined,
 } from '@ant-design/icons';
-import { usePipelineStore } from '@claw/core';
-import type { PlanProposal, PlanStepTracking, ToolExecution } from '@claw/core';
+import { usePipelineStore, aiApi } from '@claw/core';
+import type { PlanStepTracking, ToolExecution } from '@claw/core';
 
 const { Text } = Typography;
 
-/** Phase 9: 工作流阶段标签映射 */
-const PHASE_LABELS: Record<string, string> = {
-  initializing: '初始化',
-  classifying: '类型推断',
-  form_filling: '表单填写',
-  auditing: '审计检查',
-  reviewing: '审查验证',
-  generating: '文档生成',
-  completing: '完成收尾',
-};
-
-interface ProgressPanelProps {
-  plan: PlanProposal | null;
-  showThinking?: boolean;
-}
-
-export default function ProgressPanel({ plan, showThinking = false }: ProgressPanelProps) {
+export default function ProgressPanel() {
   const pipelineStatus = usePipelineStore((s) => s.status);
-  const toolExecutions = usePipelineStore((s) => s.toolExecutions);
-  const agentIteration = usePipelineStore((s) => s.agentIteration);
-  const agentPlanProposed = usePipelineStore((s) => s.agentPlanProposed);
   const planSteps = usePipelineStore((s) => s.planSteps);
-  const startedAt = usePipelineStore((s) => s.startedAt);
-  const durationMs = usePipelineStore((s) => s.durationMs);
-  const thinkingText = usePipelineStore((s) => s.thinkingText);
-  const isStreaming = usePipelineStore((s) => s.isStreaming);
-  // Phase 9
-  const workflowPhase = usePipelineStore((s) => s.workflowPhase);
-  const workflowProgress = usePipelineStore((s) => s.workflowProgress);
-  // Phase 13
-  const parallelReview = usePipelineStore((s) => s.parallelReview);
-
-  const [thinkingExpanded, setThinkingExpanded] = useState(true);
-  const [toolLogExpanded, setToolLogExpanded] = useState(false);
+  const toolExecutions = usePipelineStore((s) => s.toolExecutions);
 
   const isRunning = pipelineStatus === 'running';
   const isCompleted = pipelineStatus === 'completed';
   const isFailed = pipelineStatus === 'failed';
-  const isPlanAwaiting = pipelineStatus === 'plan_awaiting';
-
-  const elapsed = isRunning && startedAt
-    ? Math.round((Date.now() - startedAt) / 1000 * 10) / 10
-    : durationMs > 0
-      ? Math.round(durationMs / 100) / 10
-      : 0;
-
-  if (pipelineStatus === 'idle' && toolExecutions.length === 0 && !plan && planSteps.length === 0) {
-    return null;
-  }
 
   const hasPlanSteps = planSteps.length > 0;
 
+  // ── Files: extract from tool executions ──
+  const fileNames = Array.from(
+    new Set(
+      toolExecutions
+        .filter((te: ToolExecution) => te.argsSummary && (te.argsSummary.file_path || te.argsSummary.filename || te.argsSummary.path))
+        .map((te: ToolExecution) => te.argsSummary?.file_path || te.argsSummary?.filename || te.argsSummary?.path)
+        .filter(Boolean) as string[]
+    )
+  );
+
+  // ── Context: tool count + memory stats from API ──
+  const [toolCount, setToolCount] = useState(0);
+  const [memorySummary, setMemorySummary] = useState('');
+
+  const loadContext = useCallback(async () => {
+    try {
+      const [tools, memStats] = await Promise.all([
+        aiApi.listTools(),
+        aiApi.getMemoryStats(),
+      ]);
+      setToolCount(tools.length);
+
+      // Build memory summary from stats
+      const parts: string[] = [];
+      const corrCount = typeof memStats.corrections === 'number'
+        ? memStats.corrections
+        : (memStats.corrections as { total?: number })?.total ?? 0;
+      if (corrCount > 0) parts.push(`${corrCount} corrections`);
+      if (memStats.learning_entries > 0) parts.push(`${memStats.learning_entries} learnings`);
+      const sessCount = (memStats.sessions as { count?: number })?.count ?? 0;
+      if (sessCount > 0) parts.push(`${sessCount} sessions`);
+      setMemorySummary(parts.length > 0 ? parts.join(', ') : 'No data');
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    loadContext();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="progress-panel">
-      {/* ── 标题 ── */}
-      <div className="progress-panel-header">
-        <ThunderboltOutlined style={{ color: '#fa8c16' }} />
-        <span>Progress</span>
-        {isRunning && (
-          <LoadingOutlined style={{ color: '#1890ff', fontSize: 12, marginLeft: 'auto' }} />
-        )}
-        {isCompleted && (
-          <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12, marginLeft: 'auto' }} />
-        )}
-        {isFailed && (
-          <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 12, marginLeft: 'auto' }} />
-        )}
-      </div>
-
-      {/* ── 任务进度 TodoList (纯执行追踪，方案内容由聊天区 PlanCard 展示) ── */}
-      {hasPlanSteps && (
-        <div className="progress-section">
-          <div className="progress-section-title">
-            <CodeOutlined style={{ fontSize: 11 }} />
-            <span>任务进度</span>
-            {isPlanAwaiting && (
-              <span style={{ marginLeft: 'auto', fontSize: 10, color: '#faad14' }}>待确认</span>
-            )}
-            {isRunning && (
-              <span style={{ marginLeft: 'auto', fontSize: 10, color: '#52c41a' }}>执行中</span>
-            )}
-          </div>
+      {/* ── Section 1: Progress ── */}
+      <div className="progress-section">
+        <div className="progress-section-title">
+          <ThunderboltOutlined style={{ fontSize: 11, color: '#fa8c16' }} />
+          <span>Progress</span>
+          {isRunning && (
+            <LoadingOutlined style={{ color: '#1890ff', fontSize: 12, marginLeft: 'auto' }} />
+          )}
+          {isCompleted && (
+            <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12, marginLeft: 'auto' }} />
+          )}
+          {isFailed && (
+            <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 12, marginLeft: 'auto' }} />
+          )}
+        </div>
+        {hasPlanSteps ? (
           <div className="progress-plan-steps">
             {planSteps.map((step: PlanStepTracking, i: number) => (
               <div key={i} className={`progress-plan-step progress-plan-step--${step.status}`}>
@@ -128,207 +113,82 @@ export default function ProgressPanel({ plan, showThinking = false }: ProgressPa
                 >
                   {step.description}
                 </Text>
-                {step.status === 'completed' && step.startedAt && step.completedAt && (
-                  <span style={{ fontSize: 10, color: '#999', whiteSpace: 'nowrap' }}>
-                    {((step.completedAt - step.startedAt) / 1000).toFixed(1)}s
-                  </span>
-                )}
-                {step.status === 'running' && step.startedAt && (
-                  <span style={{ fontSize: 10, color: '#1890ff', whiteSpace: 'nowrap' }}>...</span>
-                )}
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* ── Phase 27: 工具调用日志 ── */}
-      {toolExecutions.length > 0 && (
-        <div className="progress-section">
-          <div
-            className="progress-section-title"
-            style={{ cursor: 'pointer', userSelect: 'none' }}
-            onClick={() => setToolLogExpanded((v) => !v)}
-          >
-            <ToolOutlined style={{ fontSize: 11, color: '#722ed1' }} />
-            <span>工具调用</span>
-            <span style={{ marginLeft: 4, fontSize: 10, color: '#999' }}>
-              ({toolExecutions.length})
-            </span>
-            <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>
-              {toolLogExpanded ? <DownOutlined /> : <RightOutlined />}
-            </span>
+        ) : (
+          <div style={{ padding: '8px 0' }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>No active tasks</Text>
           </div>
-          {toolLogExpanded && (
-            <div className="progress-tool-log">
-              {toolExecutions.map((te: ToolExecution) => (
-                <div key={te.id} className="progress-tool-item">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span className="progress-tool-icon">
-                      {te.blocked ? (
-                        <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
-                      ) : te.success ? (
-                        <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
-                      ) : (
-                        <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
-                      )}
-                    </span>
-                    <span className="progress-tool-name">{te.toolName}</span>
-                    <span className="progress-tool-latency">
-                      ({Math.round(te.latencyMs)}ms)
-                    </span>
-                  </div>
-                  {te.argsSummary && Object.keys(te.argsSummary).length > 0 && (
-                    <div className="progress-tool-args">
-                      {'→ '}
-                      {Object.entries(te.argsSummary)
-                        .map(([k, v]) => `${k}=${v}`)
-                        .join(', ')}
-                    </div>
-                  )}
-                  {te.resultSummary && (
-                    <div className="progress-tool-result">
-                      {'← '}
-                      {te.resultSummary}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+        )}
+      </div>
+
+      {/* ── Section 2: Files ── */}
+      <div className="progress-section">
+        <div className="progress-section-title">
+          <FileOutlined style={{ fontSize: 11, color: '#1890ff' }} />
+          <span>Files</span>
+          {fileNames.length > 0 && (
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>
+              {fileNames.length}
+            </span>
           )}
         </div>
-      )}
-
-      {/* ── Phase 9: 工作流阶段 ── */}
-      {workflowPhase && isRunning && (
-        <div className="progress-section">
-          <div className="progress-section-title">
-            <ThunderboltOutlined style={{ fontSize: 11, color: '#1890ff' }} />
-            <span>工作流阶段</span>
-          </div>
+        {fileNames.length > 0 ? (
           <div style={{ padding: '4px 0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <Tag color="blue" style={{ fontSize: 10 }}>
-                {PHASE_LABELS[workflowPhase] || workflowPhase}
-              </Tag>
-              {workflowProgress > 0 && (
-                <Text type="secondary" style={{ fontSize: 10 }}>
-                  {Math.round(workflowProgress * 100)}%
-                </Text>
-              )}
-            </div>
-            {workflowProgress > 0 && (
-              <Progress
-                percent={Math.round(workflowProgress * 100)}
-                size="small"
-                showInfo={false}
-                strokeColor="#1890ff"
-              />
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Phase 13: 并行审查状态 ── */}
-      {parallelReview && (
-        <div className="progress-section">
-          <div className="progress-section-title">
-            <TeamOutlined style={{ fontSize: 11, color: '#2f54eb' }} />
-            <span>多 Agent 审查</span>
-            {parallelReview.status === 'running' && (
-              <LoadingOutlined style={{ fontSize: 10, color: '#1890ff', marginLeft: 'auto' }} />
-            )}
-            {parallelReview.status === 'completed' && (
-              <Tag
-                color={parallelReview.overallStatus === '通过' ? 'green' : parallelReview.overallStatus === '警告' ? 'orange' : 'red'}
-                style={{ fontSize: 10, marginLeft: 'auto' }}
-              >
-                {parallelReview.overallStatus}
-              </Tag>
-            )}
-          </div>
-
-          {parallelReview.status === 'running' && (
-            <div style={{ padding: '6px 0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <Spin size="small" />
-                <Text type="secondary" style={{ fontSize: 11 }}>并行审查中...</Text>
+            {fileNames.map((name) => (
+              <div key={name} style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <FileOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {parallelReview.roles.map((r) => (
-                  <Tag key={r} style={{ fontSize: 10 }}>{r}</Tag>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {parallelReview.status === 'completed' && (
-            <div style={{ padding: '4px 0' }}>
-              {parallelReview.results.map((r) => (
-                <div key={r.agentRole} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0', fontSize: 11 }}>
-                  {r.conclusion === '通过' ? (
-                    <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
-                  ) : r.conclusion === '警告' ? (
-                    <ClockCircleOutlined style={{ color: '#faad14', fontSize: 11 }} />
-                  ) : (
-                    <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
-                  )}
-                  <Text style={{ fontSize: 11 }}>{r.agentRole}</Text>
-                  <Text type="secondary" style={{ fontSize: 10, marginLeft: 'auto' }}>
-                    {Math.round(r.confidence * 100)}%
-                  </Text>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Thinking 思考过程 ── */}
-      {showThinking && thinkingText && (
-        <div className="progress-section">
-          <div
-            className="progress-section-title"
-            style={{ cursor: 'pointer', userSelect: 'none' }}
-            onClick={() => setThinkingExpanded((v) => !v)}
-          >
-            <BulbOutlined style={{ fontSize: 11, color: '#faad14' }} />
-            <span>Thinking</span>
-            {isStreaming && (
-              <LoadingOutlined style={{ fontSize: 10, color: '#1890ff', marginLeft: 4 }} />
-            )}
-            <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>
-              {thinkingExpanded ? <DownOutlined /> : <RightOutlined />}
-            </span>
+            ))}
           </div>
-          {thinkingExpanded && (
-            <div className="progress-thinking-content">
-              {thinkingText}
-            </div>
-          )}
-        </div>
-      )}
+        ) : (
+          <div style={{ padding: '8px 0' }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>No files yet</Text>
+          </div>
+        )}
+      </div>
 
-      {/* ── 实时统计 ── */}
-      {(isRunning || isCompleted || isFailed || isPlanAwaiting) && (
-        <div className="progress-stats">
-          {agentIteration.current > 0 && (
-            <span className="progress-stat-item">
-              迭代 {agentIteration.current}/{agentIteration.max}
-            </span>
-          )}
-          {toolExecutions.length > 0 && (
-            <span className="progress-stat-item">
-              {toolExecutions.length} 次工具调用
-            </span>
-          )}
-          {elapsed > 0 && (
-            <span className="progress-stat-item">
-              ⏱ {elapsed}s
-            </span>
-          )}
+      {/* ── Section 3: Instructions ── */}
+      <div className="progress-section">
+        <div className="progress-section-title">
+          <BookOutlined style={{ fontSize: 11, color: '#722ed1' }} />
+          <span>Instructions</span>
         </div>
-      )}
+        <div style={{ padding: '4px 0' }}>
+          <div style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <FileOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+            <span>soul.md</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <FileOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+            <span>Scratchpad</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section 4: Context ── */}
+      <div className="progress-section">
+        <div className="progress-section-title">
+          <DatabaseOutlined style={{ fontSize: 11, color: '#13c2c2' }} />
+          <span>Context</span>
+        </div>
+        <div style={{ padding: '4px 0' }}>
+          <div style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <ToolOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+            <span>MCP Tools ({toolCount})</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <DatabaseOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+            <span>Memory — {memorySummary}</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#999', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 10, textAlign: 'center', fontSize: 10 }}>○</span>
+            <span>Connectors</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

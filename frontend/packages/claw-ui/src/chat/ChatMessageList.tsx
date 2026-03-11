@@ -1,18 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { Typography, Spin, Button } from 'antd';
 import {
-  RobotOutlined,
-  UserOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   ClockCircleOutlined,
   ThunderboltOutlined,
   BulbOutlined,
+  ToolOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { usePipelineStore } from '@claw/core';
-import type { PendingInteraction } from '@claw/core';
+import type { PendingInteraction, ToolExecution } from '@claw/core';
 import {
   MiniTypeInference,
   MiniFieldUpdates,
@@ -21,6 +21,7 @@ import {
 import DocumentPresenter from '../results/DocumentPresenter';
 import InlineUploader from './InlineUploader';
 import InteractiveMessage from './InteractiveMessage';
+import CollapsibleBlock from './CollapsibleBlock';
 
 const { Text } = Typography;
 
@@ -35,14 +36,12 @@ interface ChatMessage {
 interface ChatMessageListProps {
   messages: ChatMessage[];
   showPipelineProgress?: boolean;
-  onApprovePlan?: () => void;
-  showThinking?: boolean;
   onInteractionRespond?: (value: string, files?: { fileId: string; filename: string }[]) => void;
 }
 
 // ── PlanCard 组件 — 在聊天流中渲染 Agent 提出的方案 ──
 
-function PlanCard({ onApprove }: { onApprove?: () => void }) {
+function PlanCard() {
   const plan = usePipelineStore((s) => s.plan);
   const agentPlanProposed = usePipelineStore((s) => s.agentPlanProposed);
   const status = usePipelineStore((s) => s.status);
@@ -105,22 +104,6 @@ function PlanCard({ onApprove }: { onApprove?: () => void }) {
 
       {/* ── 操作区 ── */}
       <div className="plan-document-footer">
-        {isPlanAwaiting && onApprove && (
-          <div className="plan-document-actions">
-            <Button
-              type="primary"
-              size="small"
-              onClick={onApprove}
-              style={{ borderRadius: 6, height: 32, paddingInline: 20 }}
-            >
-              <CheckCircleOutlined />
-              确认执行
-            </Button>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              或在下方输入修改意见
-            </Text>
-          </div>
-        )}
         {isConfirmed && (
           <div className="plan-document-actions">
             <Text type="success" style={{ fontSize: 12 }}>
@@ -140,57 +123,56 @@ function PlanCard({ onApprove }: { onApprove?: () => void }) {
   );
 }
 
-// ── Pipeline 进度组件（事件驱动，嵌入聊天气泡） ──
+// ── Pipeline 进度组件 — 折叠摘要 ──
 
-function InlinePipelineProgress({ onApprovePlan }: { onApprovePlan?: () => void }) {
+function InlinePipelineProgress() {
   const status = usePipelineStore((s) => s.status);
   const inferredType = usePipelineStore((s) => s.inferredType);
   const fieldValues = usePipelineStore((s) => s.fieldValues);
   const auditSummary = usePipelineStore((s) => s.auditSummary);
   const document = usePipelineStore((s) => s.document);
+  const toolExecutions = usePipelineStore((s) => s.toolExecutions);
   const durationMs = usePipelineStore((s) => s.durationMs);
 
   if (status === 'idle') return null;
 
-  // 事件驱动进度提示
-  const progressHints: string[] = [];
-  if (inferredType) progressHints.push(`类型推断: ${inferredType.docType}`);
-  if (fieldValues.length > 0) progressHints.push(`已填写 ${fieldValues.length} 个字段`);
-  if (auditSummary) progressHints.push(`审计完成: ${auditSummary.conclusion}`);
-  if (document) progressHints.push(`文档生成: ${document.title}`);
+  // Build one-line summary
+  const parts: string[] = [];
+  if (toolExecutions.length > 0) parts.push(`Ran ${toolExecutions.length} tools`);
+  if (fieldValues.length > 0) parts.push(`filled ${fieldValues.length} fields`);
+  if (inferredType) parts.push(`type: ${inferredType.docType}`);
+  if (auditSummary) parts.push(`audit: ${auditSummary.conclusion}`);
+  if (document) parts.push(`doc: ${document.title}`);
+  const summaryText = parts.length > 0 ? parts.join(', ') : 'Processing...';
 
   return (
     <div>
       {/* PlanCard — Agent 提出的方案 */}
-      <PlanCard onApprove={onApprovePlan} />
+      <PlanCard />
 
-      {/* 实时处理状态 */}
-      {status === 'running' && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Spin size="small" />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              Agent 自主处理中...
-            </Text>
-          </div>
-          {progressHints.length > 0 && (
-            <div style={{ paddingLeft: 24 }}>
-              {progressHints.map((hint, i) => (
-                <div key={i} style={{ fontSize: 11, color: '#52c41a', marginBottom: 2 }}>
-                  <CheckCircleOutlined style={{ marginRight: 4, fontSize: 10 }} />
-                  {hint}
-                </div>
-              ))}
+      {/* Pipeline progress as collapsible */}
+      <CollapsibleBlock
+        icon={<ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 12 }} />}
+        summary={status === 'running' ? `Agent working — ${summaryText}` : summaryText}
+      >
+        {/* 实时处理状态 */}
+        {status === 'running' && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Spin size="small" />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Agent 自主处理中...
+              </Text>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* 结果卡片 — 内联显示关键结果 */}
-      {inferredType && <MiniTypeInference data={inferredType} />}
-      {fieldValues.length > 0 && <MiniFieldUpdates fields={fieldValues} />}
-      {auditSummary && <MiniAuditSummary data={auditSummary} />}
-      {document && <DocumentPresenter document={document} />}
+        {/* 结果卡片 */}
+        {inferredType && <MiniTypeInference data={inferredType} />}
+        {fieldValues.length > 0 && <MiniFieldUpdates fields={fieldValues} />}
+        {auditSummary && <MiniAuditSummary data={auditSummary} />}
+        {document && <DocumentPresenter document={document} />}
+      </CollapsibleBlock>
 
       {/* Plan Mode 等待确认 */}
       {status === 'plan_awaiting' && (
@@ -204,7 +186,7 @@ function InlinePipelineProgress({ onApprovePlan }: { onApprovePlan?: () => void 
 
       {/* 完成提示 */}
       {status === 'completed' && durationMs > 0 && (
-        <div style={{ textAlign: 'center', marginTop: 8 }}>
+        <div style={{ marginTop: 8 }}>
           <Text type="secondary" style={{ fontSize: 11 }}>
             <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 4 }} />
             处理完成，用时 {(durationMs / 1000).toFixed(1)}s
@@ -214,7 +196,7 @@ function InlinePipelineProgress({ onApprovePlan }: { onApprovePlan?: () => void 
 
       {/* 失败提示 */}
       {status === 'failed' && (
-        <div style={{ textAlign: 'center', marginTop: 8 }}>
+        <div style={{ marginTop: 8 }}>
           <Text type="danger" style={{ fontSize: 11 }}>
             <CloseCircleOutlined style={{ marginRight: 4 }} />
             处理失败
@@ -225,13 +207,73 @@ function InlinePipelineProgress({ onApprovePlan }: { onApprovePlan?: () => void 
   );
 }
 
+// ── 工具调用折叠行 — 逐条嵌入文档流 ──
+
+function ToolExecutionLog() {
+  const toolExecutions = usePipelineStore((s) => s.toolExecutions) as ToolExecution[];
+
+  if (toolExecutions.length === 0) return null;
+
+  // 构建一行汇总
+  const summaryParts: string[] = [];
+  const toolNames = new Set(toolExecutions.map((te) => te.toolName));
+  summaryParts.push(`Ran ${toolExecutions.length} command${toolExecutions.length > 1 ? 's' : ''}`);
+
+  // 提取文件相关操作
+  const fileOps = toolExecutions.filter(
+    (te) => te.argsSummary && (te.argsSummary.file_path || te.argsSummary.filename || te.argsSummary.path),
+  );
+  if (fileOps.length > 0) summaryParts.push(`touched ${fileOps.length} file${fileOps.length > 1 ? 's' : ''}`);
+
+  const blocked = toolExecutions.filter((te) => te.blocked);
+  if (blocked.length > 0) summaryParts.push(`${blocked.length} blocked`);
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <CollapsibleBlock
+        icon={<ToolOutlined style={{ color: '#722ed1', fontSize: 12 }} />}
+        summary={summaryParts.join(', ')}
+      >
+        {toolExecutions.map((te) => (
+          <div key={te.id} style={{ padding: '3px 0', fontSize: 11, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+            <span style={{ flexShrink: 0, marginTop: 1 }}>
+              {te.blocked ? (
+                <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
+              ) : te.success ? (
+                <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
+              ) : (
+                <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
+              )}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 500, color: '#333' }}>{te.toolName}</span>
+              <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latencyMs)}ms)</span>
+              {te.argsSummary && Object.keys(te.argsSummary).length > 0 && (
+                <div style={{ color: '#888', fontSize: 10 }}>
+                  {'→ '}
+                  {Object.entries(te.argsSummary)
+                    .map(([k, v]) => `${k}=${v}`)
+                    .join(', ')}
+                </div>
+              )}
+              {te.resultSummary && (
+                <div style={{ color: '#666', fontSize: 10 }}>
+                  {'← '}{te.resultSummary}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </CollapsibleBlock>
+    </div>
+  );
+}
+
 // ── 主组件 ──
 
 export default function ChatMessageList({
   messages,
   showPipelineProgress = true,
-  onApprovePlan,
-  showThinking = false,
   onInteractionRespond,
 }: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -252,149 +294,87 @@ export default function ChatMessageList({
       style={{
         flex: 1,
         overflow: 'auto',
-        padding: '16px 16px 8px',
+        padding: '16px 24px 8px',
       }}
     >
       {messages.map((msg) => (
-        <div key={msg.id} className="chat-bubble" style={{ marginBottom: 16 }}>
+        <div key={msg.id} style={{ marginBottom: 16 }}>
           {msg.role === 'user' ? (
-            // 用户消息 — 右对齐蓝色气泡
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <div className="chat-bubble-user">
-                <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
-              </div>
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '50%',
-                  background: '#1a6fb5',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <UserOutlined style={{ color: '#fff', fontSize: 16 }} />
-              </div>
+            /* 用户消息 — 左对齐 + 左边框 */
+            <div className="msg-user">
+              <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
             </div>
           ) : (
-            // AI 消息 — 左对齐灰色气泡
-            <div style={{ display: 'flex', justifyContent: 'flex-start', gap: 8 }}>
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  flexShrink: 0,
-                }}
-              >
-                <img
-                  src="/assets/claw-avatar.svg"
-                  alt="Claw"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                />
-              </div>
-              <div className="chat-bubble-ai markdown-body">
-                <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
-              </div>
+            /* AI 消息 — 纯文档流 */
+            <div className="msg-ai markdown-body">
+              <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
             </div>
           )}
         </div>
       ))}
 
-      {/* Agent 思考过程（仅当开关开启 + 有内容 + 正在处理） */}
-      {showThinking && thinkingText && (isStreaming || pipelineStatus === 'running') && (
-        <div className="chat-bubble" style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-start', gap: 8 }}>
-            <div style={{ width: 40, height: 40, flexShrink: 0 }}>
-              <img src="/assets/claw-avatar.svg" alt="Claw" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+      {/* 思考过程 — 始终可见但默认折叠 */}
+      {thinkingText && (isStreaming || pipelineStatus === 'running') && (
+        <div style={{ marginBottom: 16 }}>
+          <CollapsibleBlock
+            icon={<BulbOutlined style={{ color: '#faad14', fontSize: 12 }} />}
+            summary="Thought process"
+          >
+            <div style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+              {thinkingText}
             </div>
-            <div className="chat-thinking-bubble">
-              <div className="chat-thinking-header">
-                <BulbOutlined style={{ color: '#faad14', fontSize: 12 }} />
-                <Text type="secondary" style={{ fontSize: 11 }}>思考中...</Text>
-              </div>
-              <div className="chat-thinking-content">
-                {thinkingText}
-              </div>
-            </div>
-          </div>
+          </CollapsibleBlock>
         </div>
       )}
 
-      {/* Pipeline 实时进度（跟随最后一条 AI 消息之后，自由对话不显示） */}
+      {/* 工具调用日志 — 逐条折叠行嵌入文档流 */}
+      <ToolExecutionLog />
+
+      {/* Pipeline 实时进度 — 折叠摘要 */}
       {showPipelineProgress && pipelineStatus !== 'idle' && pipelineScenario !== 'general_chat' && (
-        <div className="chat-bubble" style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-start', gap: 8 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                flexShrink: 0,
-              }}
-            >
-              <img
-                src="/assets/claw-avatar.svg"
-                alt="Claw"
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
-            </div>
-            <div className="chat-bubble-ai" style={{ minWidth: 240 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <RobotOutlined style={{ color: '#1a6fb5' }} />
-                <Text strong style={{ fontSize: 13 }}>AI Agent 处理中</Text>
-              </div>
-              <InlinePipelineProgress onApprovePlan={onApprovePlan} />
-            </div>
-          </div>
+        <div style={{ marginBottom: 16 }}>
+          <InlinePipelineProgress />
         </div>
       )}
 
-      {/* Phase 24: Agent 交互请求 (内联上传 / 确认 / 输入) */}
+      {/* Agent 交互请求 (内联上传 / 确认 / 输入) */}
       {pendingInteraction && (
-        <div className="chat-bubble" style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-start', gap: 8 }}>
-            <div style={{ width: 40, height: 40, flexShrink: 0 }}>
-              <img src="/assets/claw-avatar.svg" alt="Claw" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {pendingInteraction.type === 'upload' && (
-                <InlineUploader
-                  prompt={pendingInteraction.prompt}
-                  accept={pendingInteraction.accept}
-                  onSubmit={(files) => {
-                    resolveInteraction();
-                    onInteractionRespond?.(
-                      `[已上传 ${files.length} 个文件: ${files.map((f) => f.filename).join(', ')}]`,
-                      files,
-                    );
-                  }}
-                />
-              )}
-              {pendingInteraction.type === 'confirmation' && (
-                <InteractiveMessage
-                  type="confirmation"
-                  message={pendingInteraction.message}
-                  options={pendingInteraction.options}
-                  onRespond={(value) => {
-                    resolveInteraction();
-                    onInteractionRespond?.(value);
-                  }}
-                />
-              )}
-              {pendingInteraction.type === 'input' && (
-                <InteractiveMessage
-                  type="input"
-                  prompt={pendingInteraction.prompt}
-                  fieldType={pendingInteraction.fieldType}
-                  onRespond={(value) => {
-                    resolveInteraction();
-                    onInteractionRespond?.(value);
-                  }}
-                />
-              )}
-            </div>
-          </div>
+        <div style={{ marginBottom: 16 }}>
+          {pendingInteraction.type === 'upload' && (
+            <InlineUploader
+              prompt={pendingInteraction.prompt}
+              accept={pendingInteraction.accept}
+              onSubmit={(files) => {
+                resolveInteraction();
+                onInteractionRespond?.(
+                  `[已上传 ${files.length} 个文件: ${files.map((f) => f.filename).join(', ')}]`,
+                  files,
+                );
+              }}
+            />
+          )}
+          {pendingInteraction.type === 'confirmation' && (
+            <InteractiveMessage
+              type="confirmation"
+              message={pendingInteraction.message}
+              options={pendingInteraction.options}
+              onRespond={(value) => {
+                resolveInteraction();
+                onInteractionRespond?.(value);
+              }}
+            />
+          )}
+          {pendingInteraction.type === 'input' && (
+            <InteractiveMessage
+              type="input"
+              prompt={pendingInteraction.prompt}
+              fieldType={pendingInteraction.fieldType}
+              onRespond={(value) => {
+                resolveInteraction();
+                onInteractionRespond?.(value);
+              }}
+            />
+          )}
         </div>
       )}
 
