@@ -27,6 +27,7 @@ backend/data/sessions/
 backend/data/memory/
 backend/data/files/
 backend/data/hook_rules/
+backend/data/*.db
 
 # Node
 node_modules/
