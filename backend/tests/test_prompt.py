@@ -1,4 +1,4 @@
-"""Tests for agent/prompt.py — 8-layer modular prompt builder."""
+"""Tests for agent/prompt.py — 8-layer modular prompt builder (A2 simplified)."""
 import sys
 import os
 
@@ -42,9 +42,8 @@ class TestPromptBuilderInit:
         assert "skills" in sections
         assert "memory" in sections
         assert "runtime" in sections
-        assert "business_context" in sections
-        assert "plan_mode" in sections
-        assert len(sections) == 9
+        assert "plan_guidance" in sections
+        assert len(sections) == 8
 
 
 # ── register / unregister ──
@@ -120,8 +119,6 @@ class TestBuildSystemPrompt:
     def test_empty_skills_no_skill_content(self):
         pb = PromptBuilder()
         prompt = pb.build_system_prompt(skill_knowledge="")
-        # Soul file may contain "skills" in its text; check that our skills section didn't add content
-        # The _build_skills returns "" when skill_knowledge is empty
         assert "\n<skills>\n\n</skills>" not in prompt
 
     def test_empty_memory_no_memory_content(self):
@@ -152,76 +149,20 @@ class TestToolsSection:
         assert "write_file" in prompt
 
 
-# ── Plan mode ──
+# ── Plan guidance (A2 simplified — no AUTO/EXECUTE distinction) ──
 
 
-class TestPlanMode:
-    def test_auto_mode(self):
+class TestPlanGuidance:
+    def test_plan_guidance_present(self):
         pb = PromptBuilder()
-        prompt = pb.build_system_prompt(plan_mode=True)
-        assert "<mode>AUTO</mode>" in prompt
-        assert "自主模式" in prompt
+        prompt = pb.build_system_prompt()
+        assert "<plan_guidance>" in prompt
+        assert "propose_plan" in prompt
 
-    def test_execute_mode(self):
+    def test_plan_guidance_mentions_progress(self):
         pb = PromptBuilder()
-        prompt = pb.build_system_prompt(plan_mode=False)
-        assert "<mode>EXECUTE</mode>" in prompt
-        assert "执行模式" in prompt
-
-
-# ── Business context ──
-
-
-class TestBusinessContext:
-    def test_no_context_no_business_xml(self):
-        pb = PromptBuilder()
-        prompt = pb.build_system_prompt(business_context=None)
-        # business_context section returns "" when None, but soul.md may mention it
-        assert "\n<business_context>\n" not in prompt or "<candidate_types>" not in prompt
-
-    def test_form_fields(self):
-        ctx = {
-            "form_fields": [
-                {"field_id": "amount", "field_name": "金额", "field_type": "number", "required": True},
-            ],
-        }
-        pb = PromptBuilder()
-        prompt = pb.build_system_prompt(business_context=ctx)
-        assert "<form_fields>" in prompt
-        assert 'id="amount"' in prompt
-
-    def test_audit_rules(self):
-        ctx = {
-            "audit_rules": [
-                {"rule_id": "R001", "rule_name": "金额上限", "severity": "error"},
-            ],
-        }
-        pb = PromptBuilder()
-        prompt = pb.build_system_prompt(business_context=ctx)
-        assert "<audit_rules>" in prompt
-        assert 'id="R001"' in prompt
-
-    def test_candidate_types(self):
-        ctx = {
-            "candidate_types": [
-                {"type_id": "travel", "type_name": "差旅报销", "keywords": ["出差", "交通"]},
-            ],
-        }
-        pb = PromptBuilder()
-        prompt = pb.build_system_prompt(business_context=ctx)
-        assert "<candidate_types>" in prompt
-        assert 'id="travel"' in prompt
-
-    def test_known_values(self):
-        ctx = {
-            "known_values": [
-                {"field_id": "dept", "value": "IT", "source": "system"},
-            ],
-        }
-        pb = PromptBuilder()
-        prompt = pb.build_system_prompt(business_context=ctx)
-        assert "<known_values>" in prompt
-        assert 'field_id="dept"' in prompt
+        prompt = pb.build_system_prompt()
+        assert "进度" in prompt
 
 
 # ── build_user_message ──
