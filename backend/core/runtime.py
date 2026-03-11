@@ -28,7 +28,7 @@ from typing import Any, Optional
 
 from .event_bus import EventBus
 from .llm_client import LLMGatewayClient, LLMResponse, TokenUsage
-from .token_estimator import estimate_messages_tokens
+from .token_estimator import estimate_messages_tokens, estimate_tokens_conservative
 from .tool_protocol import ParsedToolCall, ToolCallParser
 from .tool_registry import ToolRegistry, ToolResult
 
@@ -58,14 +58,25 @@ class RuntimeStep:
 
 @dataclass
 class RuntimeConfig:
-    """Runtime 配置"""
+    """Runtime 配置 (A4: 动态上下文预算)"""
     max_iterations: int = 10
     max_tokens_per_turn: int = 4096
     tool_call_timeout_s: float = 30.0
     parallel_tool_calls: bool = True
     temperature: float | None = None  # 覆盖 LLM 默认值
     max_tool_result_chars: int = 3000  # 单个工具结果最大字符数 (0=不限制)
-    context_budget_tokens: int = 28000  # messages 数组最大 token 预算
+    context_budget_tokens: int = 0     # 0 = 动态计算 (A4: 4c)
+    model_context_window: int = 32000  # 模型上下文窗口
+    context_budget_ratio: float = 0.8  # 预算占窗口比例
+    compress_threshold_ratio: float = 0.85  # 压缩触发阈值
+    context_budget_min: int = 16000    # 最低预算硬下限
+
+    def get_effective_budget(self) -> int:
+        """计算实际上下文预算 (4c: 动态预算)。"""
+        if self.context_budget_tokens > 0:
+            return self.context_budget_tokens
+        budget = int(self.model_context_window * self.context_budget_ratio)
+        return max(budget, self.context_budget_min)
 
 
 @dataclass
@@ -78,6 +89,7 @@ class RuntimeResult:
     max_iterations_reached: bool = False
     error: str | None = None
     thinking: str = ""  # Qwen3 thinking 内容汇总
+    compact_stats: dict | None = None  # 压缩累计统计 (4j)
 
     @property
     def tool_call_count(self) -> int:
@@ -133,6 +145,12 @@ class AgenticRuntime:
         self._steps: list[RuntimeStep] = []
         self._accumulated_usage = TokenUsage()
         self._thinking_parts: list[str] = []
+        self._compact_stats: dict = {
+            "count": 0,
+            "total_ratio": 0.0,
+            "stages": {1: 0, 2: 0, 3: 0},
+            "overflow_retries": 0,
+        }
 
     async def run(
         self,
@@ -277,12 +295,15 @@ class AgenticRuntime:
                 assistant_msg = self._build_assistant_message(llm_response, parsed)
                 messages.append(assistant_msg)
 
-                # 追加每个工具的结果 (截断过长内容)
-                for tc, obs in zip(parsed.tool_calls, observations):
+                # 追加每个工具的结果 (A4-4a: 按比例分配总预算)
+                per_tool_budgets = self._allocate_tool_budgets(
+                    observations, self.config.max_tool_result_chars,
+                )
+                for tc, obs, budget in zip(parsed.tool_calls, observations, per_tool_budgets):
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": obs.to_json(max_chars=self.config.max_tool_result_chars),
+                        "content": obs.to_json(max_chars=budget),
                     })
 
                 continue
@@ -415,6 +436,7 @@ class AgenticRuntime:
             is_overflow = any(kw in error_msg for kw in overflow_keywords)
 
             if is_overflow:
+                self._compact_stats["overflow_retries"] += 1
                 logger.warning(
                     f"Context overflow detected at iteration {iteration + 1}, "
                     f"compacting and retrying: {e}"
@@ -653,45 +675,120 @@ class AgenticRuntime:
 
     async def _compact_messages(self, messages: list[dict]) -> list[dict]:
         """
-        上下文预算检查 + 中间消息压缩。
+        A4: 多阶段渐进压缩 + 动态上下文预算。
 
-        策略:
-        - 用 estimate_messages_tokens() 检查是否超预算
-        - 未超 → 原样返回
-        - 超出 → 保留 system(index 0) + user(index 1) + 最近 6 条消息
-                  中间消息压缩为工具名摘要
-        - Phase 15: 压缩前触发 pre_compact hook 保护关键信息
+        三阶段渐进降级:
+        阶段 1 — 工具结果压缩: 截断旧的工具结果 (保留工具名+状态+关键数值)
+        阶段 2 — 对话摘要: 窗口外的对话压缩为摘要
+        阶段 3 — 元数据模式: 只保留 system + 最近 4 条 + 摘要 (最后兜底)
         """
-        budget = self.config.context_budget_tokens
+        budget = self.config.get_effective_budget()
         if budget <= 0:
             return messages
 
-        estimated = estimate_messages_tokens(
-            messages,
-            tools=self.tool_registry.get_schemas() or None,
-        )
+        tools_schema = self.tool_registry.get_schemas() or None
+        estimated = estimate_messages_tokens(messages, tools=tools_schema)
 
-        if estimated <= budget:
+        # 压缩阈值 = 预算 × compress_threshold_ratio (提前触发)
+        compress_threshold = int(budget * self.config.compress_threshold_ratio)
+
+        if estimated <= compress_threshold:
             return messages
 
-        # 需要压缩
         logger.warning(
-            f"Context budget exceeded: {estimated} > {budget} tokens, compacting messages",
+            f"Context budget pressure: {estimated} > {compress_threshold} "
+            f"(budget={budget}), starting compression",
             extra={"trace_id": self.trace_id},
         )
 
-        if len(messages) <= 8:
-            # 消息太少，无法压缩
+        original_estimated = estimated
+        original_count = len(messages)
+        stage_used = 0
+
+        # 分类压缩触发原因
+        reason = self._classify_compaction_reason(messages, original_estimated, budget)
+
+        # ── 阶段 1: 工具结果压缩 (轻量) ──
+        messages = self._stage1_truncate_tool_results(messages)
+        estimated = estimate_messages_tokens(messages, tools=tools_schema)
+        if estimated <= compress_threshold:
+            stage_used = 1
+            self._emit_compaction_event(
+                stage_used, original_count, len(messages),
+                original_estimated, estimated, reason=reason,
+            )
             return messages
 
-        # 保留: system(0) + user(1) + 最近 6 条
-        head = messages[:2]  # system + user
-        tail = messages[-6:]  # 最近 6 条
+        # ── 阶段 2: 对话摘要 (中度) ──
+        if len(messages) > 8:
+            messages = await self._stage2_summarize_middle(
+                messages, budget, estimated,
+            )
+            # 修复工具对
+            messages = self._repair_tool_pairs(messages)
+            estimated = estimate_messages_tokens(messages, tools=tools_schema)
+            if estimated <= budget:
+                stage_used = 2
+                self._emit_compaction_event(
+                    stage_used, original_count, len(messages),
+                    original_estimated, estimated, reason=reason,
+                )
+                return messages
 
-        # 中间消息压缩为摘要
+        # ── 阶段 3: 元数据模式 (重度兜底) ──
+        messages = self._stage3_metadata_mode(messages)
+        messages = self._repair_tool_pairs(messages)
+        estimated = estimate_messages_tokens(messages, tools=tools_schema)
+        stage_used = 3
+
+        self._emit_compaction_event(
+            stage_used, original_count, len(messages),
+            original_estimated, estimated, reason=reason,
+        )
+        return messages
+
+    def _stage1_truncate_tool_results(self, messages: list[dict]) -> list[dict]:
+        """
+        阶段 1: 截断旧的工具结果。
+
+        保留最近 4 条 tool 消息不动，更早的 tool 消息截断到 200 字符。
+        """
+        result = []
+        # 找出所有 tool 消息的索引
+        tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        # 保护最近 4 条 tool 消息
+        protected = set(tool_indices[-4:]) if len(tool_indices) > 4 else set(tool_indices)
+
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "tool" and i not in protected:
+                content = str(msg.get("content", ""))
+                if len(content) > 200:
+                    from .tool_registry import smart_truncate
+                    truncated = smart_truncate(content, 200)
+                    msg = {**msg, "content": truncated}
+            result.append(msg)
+        return result
+
+    async def _stage2_summarize_middle(
+        self,
+        messages: list[dict],
+        budget: int,
+        estimated: int,
+    ) -> list[dict]:
+        """
+        阶段 2: 中间消息压缩为摘要。
+
+        保留 system(0) + user(1) + 最近 6 条，中间消息变摘要。
+        触发 pre_compact hook 保护关键信息。
+        """
+        head = messages[:2]   # system + first user
+        tail = messages[-6:]  # 最近 6 条
         middle = messages[2:-6]
 
-        # ── Phase 15: PreCompact Hook — 保护关键信息 ──
+        if not middle:
+            return messages
+
+        # ── PreCompact Hook: 保护关键信息 ──
         preserved_prefix = ""
         if self.hooks:
             from agent.hooks import HookEvent
@@ -707,53 +804,292 @@ class AgenticRuntime:
             if pc_result.action == "modify" and pc_result.message:
                 preserved_prefix = pc_result.message + "\n"
 
-        summary_parts = []
+        # 用 LLM 生成摘要 (4d)，失败则 fallback 到启发式
+        summary_text = await self._generate_summary(middle, preserved_prefix)
+
+        return head + [{"role": "user", "content": summary_text}] + tail
+
+    async def _generate_summary(
+        self, middle: list[dict], preserved_prefix: str,
+    ) -> str:
+        """
+        A4 (4d): 用 LLM 生成中间消息摘要。
+
+        有 llm_client 时调 LLM 做精确摘要，超时/失败则 fallback 到启发式截取。
+        """
+        # 先构建启发式 fallback
+        heuristic_parts = []
         for msg in middle:
             role = msg.get("role", "unknown")
             if role == "tool":
                 tool_call_id = msg.get("tool_call_id", "?")
                 content_preview = str(msg.get("content", ""))[:80]
-                summary_parts.append(f"[tool result: {tool_call_id}] {content_preview}")
+                heuristic_parts.append(f"[tool result: {tool_call_id}] {content_preview}")
             elif role == "assistant":
                 tool_calls = msg.get("tool_calls", [])
                 if tool_calls:
                     tool_names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
-                    summary_parts.append(f"[assistant called: {', '.join(tool_names)}]")
+                    heuristic_parts.append(f"[assistant called: {', '.join(tool_names)}]")
                 else:
                     content_preview = str(msg.get("content", ""))[:100]
-                    summary_parts.append(f"[assistant: {content_preview}]")
+                    heuristic_parts.append(f"[assistant: {content_preview}]")
             else:
                 content_preview = str(msg.get("content", ""))[:100]
-                summary_parts.append(f"[{role}: {content_preview}]")
+                heuristic_parts.append(f"[{role}: {content_preview}]")
 
-        summary_text = (
+        heuristic_text = "\n".join(heuristic_parts)
+
+        # 尝试 LLM 摘要
+        if self.llm_client is not None:
+            try:
+                summary_prompt = (
+                    "请用简洁的中文总结以下对话历史的关键信息。"
+                    "保留: 执行了哪些操作、关键结果数值、重要决策。"
+                    "去掉: 重复内容、冗长的工具输出细节。"
+                    "输出纯文本摘要，200字以内。\n\n"
+                    + heuristic_text[:3000]
+                )
+                llm_resp = await asyncio.wait_for(
+                    self.llm_client.chat_completion(
+                        messages=[
+                            {"role": "system", "content": "你是对话历史压缩助手。输出简洁摘要。"},
+                            {"role": "user", "content": summary_prompt},
+                        ],
+                        max_tokens=300,
+                        temperature=0.3,
+                    ),
+                    timeout=10.0,  # 摘要不能耗时太久
+                )
+                if llm_resp.content and len(llm_resp.content.strip()) > 10:
+                    logger.info("Stage2: LLM summary generated successfully")
+                    return (
+                        preserved_prefix
+                        + f"[Context Compacted — {len(middle)} messages summarized by LLM]\n"
+                        + llm_resp.content.strip()
+                    )
+            except Exception as e:
+                logger.warning(f"Stage2: LLM summary failed, falling back to heuristic: {e}")
+
+        # Fallback: 启发式截取
+        return (
             preserved_prefix
-            + "[Context Compacted — 以下是之前对话的摘要]\n"
-            + "\n".join(summary_parts)
+            + f"[Context Compacted — {len(middle)} messages summarized]\n"
+            + heuristic_text
         )
 
-        compacted = head + [{"role": "user", "content": summary_text}] + tail
+    def _stage3_metadata_mode(self, messages: list[dict]) -> list[dict]:
+        """
+        阶段 3: 元数据模式 — 只保留 system + 最近 4 条 + 简短摘要。
+        """
+        head = messages[:1]  # system only
+        tail_count = min(4, len(messages) - 1)
+        tail = messages[-tail_count:] if tail_count > 0 else []
+        compacted_count = len(messages) - 1 - tail_count
 
-        new_estimated = estimate_messages_tokens(
-            compacted,
-            tools=self.tool_registry.get_schemas() or None,
-        )
+        summary = {
+            "role": "user",
+            "content": f"[{compacted_count} earlier messages compacted to save context. Continue from here.]",
+        }
+        return head + [summary] + tail
+
+    @staticmethod
+    def _repair_tool_pairs(messages: list[dict]) -> list[dict]:
+        """
+        A4 (4f): 修复压缩后的 tool_calls/tool 消息配对。
+
+        规则:
+        - 每个 role=tool 消息必须有对应的 assistant(tool_calls) 在前
+        - 孤立的 tool 消息 → 删除
+        - 孤立的 assistant(tool_calls) → 补一个 "[result compacted]" 的 tool 消息
+        """
+        # 收集所有 assistant 消息中声明的 tool_call IDs
+        declared_ids: set[str] = set()
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls", []):
+                    tc_id = tc.get("id", "")
+                    if tc_id:
+                        declared_ids.add(tc_id)
+
+        # 收集所有 tool 消息的 tool_call_id
+        responded_ids: set[str] = set()
+        for msg in messages:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id", "")
+                if tc_id:
+                    responded_ids.add(tc_id)
+
+        # 1. 删除孤立的 tool 消息 (没有对应的 assistant tool_call)
+        result = []
+        for msg in messages:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id", "")
+                if tc_id and tc_id not in declared_ids:
+                    continue  # 删除孤立 tool 消息
+            result.append(msg)
+
+        # 2. 为孤立的 assistant tool_calls 补充 tool 响应
+        patched = []
+        for msg in result:
+            patched.append(msg)
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls", []):
+                    tc_id = tc.get("id", "")
+                    if tc_id and tc_id not in responded_ids:
+                        patched.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": "[result compacted]",
+                        })
+                        responded_ids.add(tc_id)
+
+        return patched
+
+    def _classify_compaction_reason(
+        self,
+        messages: list[dict],
+        original_tokens: int,
+        budget: int,
+    ) -> str:
+        """
+        分类压缩触发原因 (4j 可观测性增强)。
+
+        Returns:
+            reason 字符串:
+            - "too_few_messages": 消息太少但 token 超限 (说明单条消息过长或 system 太大)
+            - "large_system_prompt": system prompt 占预算超 50%
+            - "long_single_message": 存在单条消息超过预算 30% 的情况
+            - "accumulated_context": 正常累积导致超限
+        """
+        if len(messages) <= 4:
+            return "too_few_messages"
+
+        # 检查 system prompt 大小
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        if system_msgs:
+            sys_tokens = estimate_messages_tokens(system_msgs)
+            if sys_tokens > budget * 0.5:
+                return "large_system_prompt"
+
+        # 检查是否有单条消息过大
+        threshold_per_msg = budget * 0.3
+        for msg in messages:
+            single_tokens = estimate_messages_tokens([msg])
+            if single_tokens > threshold_per_msg:
+                return "long_single_message"
+
+        return "accumulated_context"
+
+    def _emit_compaction_event(
+        self,
+        stage: int,
+        original_count: int,
+        compacted_count: int,
+        original_tokens: int,
+        compacted_tokens: int,
+        reason: str = "accumulated_context",
+    ) -> None:
+        """发射压缩可观测性事件 (4j)。"""
+        ratio = compacted_tokens / original_tokens if original_tokens > 0 else 1.0
+
+        # 更新累计统计
+        self._compact_stats["count"] += 1
+        self._compact_stats["total_ratio"] += ratio
+        self._compact_stats["stages"][stage] = self._compact_stats["stages"].get(stage, 0) + 1
 
         logger.info(
-            f"Context compacted: {len(messages)} → {len(compacted)} messages, "
-            f"{estimated} → {new_estimated} estimated tokens",
+            f"Context compacted (stage {stage}, reason={reason}): "
+            f"{original_count} → {compacted_count} messages, "
+            f"{original_tokens} → {compacted_tokens} tokens "
+            f"(ratio={ratio:.2f})",
             extra={"trace_id": self.trace_id},
         )
-
         self._emit("agent_progress", {
             "status": "context_compacted",
-            "original_messages": len(messages),
-            "compacted_messages": len(compacted),
-            "original_tokens": estimated,
-            "compacted_tokens": new_estimated,
+            "stage": stage,
+            "reason": reason,
+            "original_messages": original_count,
+            "compacted_messages": compacted_count,
+            "original_tokens": original_tokens,
+            "compacted_tokens": compacted_tokens,
+            "compression_ratio": round(ratio, 3),
         })
 
-        return compacted
+    @staticmethod
+    def _allocate_tool_budgets(
+        observations: list[ToolResult],
+        max_per_tool: int,
+    ) -> list[int]:
+        """
+        A4-4a: 多个工具结果按比例分配总预算。
+
+        单个工具时，直接使用 max_per_tool。
+        多个工具时:
+        - 总预算 = max_per_tool × len × 1.5 系数（防止总量过大）
+        - 每个工具按原始大小占比分配
+        - 每个工具最低保留 MIN_BUDGET 字符
+        - 如果 max_per_tool <= 0（不限制），返回全 0
+        """
+        MIN_BUDGET = 2000
+        n = len(observations)
+
+        # 不限制或空列表
+        if max_per_tool <= 0 or n == 0:
+            return [max_per_tool] * n
+
+        # 单工具: 直接用 max_per_tool
+        if n == 1:
+            return [max_per_tool]
+
+        # 多工具: 按比例分配
+        import json as _json
+
+        # 计算每个工具结果的原始大小
+        raw_sizes = []
+        for obs in observations:
+            if obs.success:
+                raw = _json.dumps(obs.data, ensure_ascii=False, default=str)
+            else:
+                raw = _json.dumps({"error": obs.error}, ensure_ascii=False)
+            raw_sizes.append(len(raw))
+
+        total_raw = sum(raw_sizes)
+        total_budget = int(max_per_tool * n * 1.5)
+
+        # 所有结果都很小，无需分配
+        if total_raw <= total_budget:
+            return [max_per_tool] * n
+
+        # 按比例分配，保证最低 MIN_BUDGET
+        budgets: list[int] = []
+        if total_raw == 0:
+            # 全空结果
+            return [max_per_tool] * n
+
+        # 第一轮: 按比例分配
+        for size in raw_sizes:
+            ratio = size / total_raw
+            allocated = int(total_budget * ratio)
+            budgets.append(max(allocated, MIN_BUDGET))
+
+        # 第二轮: 如果最低保留导致总量超出，按比例缩放非最低的部分
+        budget_sum = sum(budgets)
+        if budget_sum > total_budget:
+            # 找出已经在最低值的和可以缩减的
+            min_count = sum(1 for b in budgets if b <= MIN_BUDGET)
+            min_total = min_count * MIN_BUDGET
+            remaining_budget = total_budget - min_total
+
+            if remaining_budget > 0:
+                non_min_total = sum(b for b in budgets if b > MIN_BUDGET)
+                if non_min_total > 0:
+                    scale = remaining_budget / non_min_total
+                    budgets = [
+                        max(int(b * scale), MIN_BUDGET) if b > MIN_BUDGET else b
+                        for b in budgets
+                    ]
+
+        return budgets
 
     def _build_initial_messages(
         self,
@@ -838,6 +1174,15 @@ class AgenticRuntime:
         error: str | None = None,
     ) -> RuntimeResult:
         """构建最终结果。"""
+        # 构建压缩统计 (仅在发生过压缩时附加)
+        compact_stats = None
+        if self._compact_stats["count"] > 0:
+            count = self._compact_stats["count"]
+            compact_stats = {
+                **self._compact_stats,
+                "avg_ratio": round(self._compact_stats["total_ratio"] / count, 3),
+            }
+
         return RuntimeResult(
             final_answer=final_answer,
             steps=list(self._steps),
@@ -846,6 +1191,7 @@ class AgenticRuntime:
             max_iterations_reached=max_iterations_reached,
             error=error,
             thinking="\n\n".join(self._thinking_parts) if self._thinking_parts else "",
+            compact_stats=compact_stats,
         )
 
     def _count_tool_calls(self) -> int:

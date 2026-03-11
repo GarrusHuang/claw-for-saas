@@ -67,6 +67,10 @@ def get_runtime_config() -> RuntimeConfig:
         max_tokens_per_turn=s.llm_default_max_tokens,
         max_tool_result_chars=s.agent_max_tool_result_chars,
         context_budget_tokens=s.agent_context_budget_tokens,
+        model_context_window=s.agent_model_context_window,
+        context_budget_ratio=s.agent_context_budget_ratio,
+        compress_threshold_ratio=s.agent_compress_threshold_ratio,
+        context_budget_min=s.agent_context_budget_min,
     )
 
 
