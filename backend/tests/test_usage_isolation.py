@@ -402,7 +402,7 @@ class TestJsonCorruptionRecovery:
         conn.close()
 
     def test_get_recent_events_with_invalid_json(self, tmp_path):
-        """get_recent_events must raise or handle invalid JSON in tool_names."""
+        """get_recent_events gracefully handles invalid JSON in tool_names."""
         db_path = str(tmp_path / "test.db")
         db = DatabaseService(db_path=db_path)
         db.create_tenant("T1", "Test")
@@ -417,13 +417,15 @@ class TestJsonCorruptionRecovery:
         # Insert a corrupt row directly (bypasses FK)
         self._insert_corrupt_row(db_path, "T1", "NOT_VALID_JSON{{{")
 
-        # get_recent_events does json.loads on each row — corrupt JSON will raise.
-        # The current implementation does NOT catch this, so it raises json.JSONDecodeError.
-        with pytest.raises(json.JSONDecodeError):
-            svc.get_recent_events("T1")
+        # After fix: corrupt JSON falls back to empty list, no crash
+        events = svc.get_recent_events("T1")
+        assert len(events) == 2
+        tool_names_lists = [e["tool_names"] for e in events]
+        assert [] in tool_names_lists  # corrupt row → []
+        assert ["arithmetic"] in tool_names_lists  # valid row preserved
 
     def test_get_tool_usage_stats_with_invalid_json(self, tmp_path):
-        """get_tool_usage_stats must raise or handle invalid JSON in tool_names."""
+        """get_tool_usage_stats gracefully handles invalid JSON in tool_names."""
         db_path = str(tmp_path / "test.db")
         db = DatabaseService(db_path=db_path)
         db.create_tenant("T1", "Test")
@@ -438,29 +440,28 @@ class TestJsonCorruptionRecovery:
         # Insert a corrupt row (bypasses FK)
         self._insert_corrupt_row(db_path, "T1", "{broken", session_id="SCORRUPT2")
 
-        # get_tool_usage_stats also does json.loads — should raise
-        with pytest.raises(json.JSONDecodeError):
-            svc.get_tool_usage_stats("T1")
+        # After fix: corrupt JSON skipped, valid tool stats preserved
+        stats = svc.get_tool_usage_stats("T1")
+        assert len(stats) == 1
+        assert stats[0]["tool_name"] == "arithmetic"
+        assert stats[0]["call_count"] == 1
 
     def test_get_recent_events_with_null_string(self, tmp_path):
-        """tool_names = 'null' should parse as JSON null, then fail on iteration."""
+        """tool_names = 'null' — JSON null falls back to empty list."""
         db_path = str(tmp_path / "test.db")
         db = DatabaseService(db_path=db_path)
         db.create_tenant("T1", "Test")
         svc = UsageService(db_path=db_path)
 
-        # "null" is valid JSON, but json.loads("null") returns None
-        # Iterating over None in get_tool_usage_stats would raise TypeError
         self._insert_corrupt_row(db_path, "T1", "null")
 
-        # get_recent_events: json.loads("null") -> None, then d["tool_names"] = None
-        # This should not crash — it just stores None in the dict
+        # After fix: json.loads("null") → None → not a list → falls back to []
         events = svc.get_recent_events("T1")
         assert len(events) == 1
-        assert events[0]["tool_names"] is None
+        assert events[0]["tool_names"] == []
 
     def test_get_tool_usage_stats_with_null_string(self, tmp_path):
-        """'null' JSON in tool_names: iteration over None in get_tool_usage_stats."""
+        """'null' JSON in tool_names: gracefully treated as empty list."""
         db_path = str(tmp_path / "test.db")
         db = DatabaseService(db_path=db_path)
         db.create_tenant("T1", "Test")
@@ -468,25 +469,22 @@ class TestJsonCorruptionRecovery:
 
         self._insert_corrupt_row(db_path, "T1", "null")
 
-        # json.loads("null") returns None, then `for name in None` raises TypeError
-        with pytest.raises(TypeError):
-            svc.get_tool_usage_stats("T1")
+        # After fix: None from json.loads("null") → falls back to [] → no tools counted
+        stats = svc.get_tool_usage_stats("T1")
+        assert stats == []
 
     def test_get_tool_usage_stats_with_string_instead_of_list(self, tmp_path):
-        """tool_names = '"just_a_string"' — valid JSON but not a list."""
+        """tool_names = '"just_a_string"' — not a list, falls back to empty."""
         db_path = str(tmp_path / "test.db")
         db = DatabaseService(db_path=db_path)
         db.create_tenant("T1", "Test")
         svc = UsageService(db_path=db_path)
 
-        # A plain JSON string like '"hello"' parses to a Python str.
-        # Iterating over str yields individual characters.
         self._insert_corrupt_row(db_path, "T1", '"hello"')
 
+        # After fix: str is not a list → falls back to [] → no tools counted
         stats = svc.get_tool_usage_stats("T1")
-        # Iterating over "hello" yields chars: 'h','e','l','l','o'
-        tool_names = {s["tool_name"] for s in stats}
-        assert tool_names == {"h", "e", "l", "o"}  # set dedup 'l'
+        assert stats == []
 
 
 # ═══════════════════════════════════════════════════════

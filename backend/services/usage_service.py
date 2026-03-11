@@ -336,7 +336,11 @@ class UsageService:
             results = []
             for r in rows:
                 d = dict(r)
-                d["tool_names"] = json.loads(d["tool_names"])
+                try:
+                    parsed = json.loads(d["tool_names"])
+                    d["tool_names"] = parsed if isinstance(parsed, list) else []
+                except (json.JSONDecodeError, TypeError):
+                    d["tool_names"] = []
                 results.append(d)
             return results
         finally:
@@ -370,7 +374,12 @@ class UsageService:
             # Python-side aggregation of JSON tool_names
             tool_counts: dict[str, int] = {}
             for r in rows:
-                names = json.loads(r["tool_names"])
+                try:
+                    names = json.loads(r["tool_names"])
+                    if not isinstance(names, list):
+                        names = []
+                except (json.JSONDecodeError, TypeError):
+                    names = []
                 for name in names:
                     tool_counts[name] = tool_counts.get(name, 0) + 1
 
