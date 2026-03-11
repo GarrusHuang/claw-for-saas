@@ -221,4 +221,64 @@ describe('MiniPlanCard', () => {
     expect(screen.getByText('step one')).toBeInTheDocument();
     expect(screen.getByText('step two')).toBeInTheDocument();
   });
+
+  it('does not render approve/reject buttons', async () => {
+    const { MiniPlanCard } = await import('../src/chat/ChatResultCards.tsx');
+
+    render(
+      <MiniPlanCard
+        data={{
+          summary: '报销创建方案',
+          detail: '',
+          steps: [
+            { step: 1, description: '推断单据类型' },
+            { step: 2, description: '填写表单字段' },
+            { step: 3, description: '执行审计规则' },
+          ],
+          estimatedActions: 15,
+        }}
+      />,
+    );
+
+    // Plan card should be a pure display — no approve/reject/confirm buttons
+    const buttons = screen.queryAllByRole('button');
+    for (const btn of buttons) {
+      const text = btn.textContent?.toLowerCase() ?? '';
+      expect(text).not.toContain('确认');
+      expect(text).not.toContain('approve');
+      expect(text).not.toContain('reject');
+    }
+    expect(screen.queryByText('确认')).not.toBeInTheDocument();
+    expect(screen.queryByText(/approve/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/reject/i)).not.toBeInTheDocument();
+  });
+
+  it('renders as pure progress display', async () => {
+    const { MiniPlanCard } = await import('../src/chat/ChatResultCards.tsx');
+
+    render(
+      <MiniPlanCard
+        data={{
+          summary: '审核方案',
+          detail: '',
+          steps: [
+            { step: 1, description: '推断单据类型' },
+            { step: 2, description: '填写表单字段' },
+          ],
+          estimatedActions: 10,
+        }}
+      />,
+    );
+
+    // Steps are rendered as text progress items, not as interactive controls
+    expect(screen.getByText('推断单据类型')).toBeInTheDocument();
+    expect(screen.getByText('填写表单字段')).toBeInTheDocument();
+    expect(screen.getByText('执行进度')).toBeInTheDocument();
+    expect(screen.getByText('0/2')).toBeInTheDocument();
+
+    // No interactive controls (checkboxes, buttons, switches)
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryAllByRole('switch')).toHaveLength(0);
+  });
 });
