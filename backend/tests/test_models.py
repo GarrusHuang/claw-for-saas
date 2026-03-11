@@ -19,7 +19,6 @@ from models.response import (
 class TestChatRequest:
     def test_defaults(self):
         req = ChatRequest(message="hello")
-        assert req.user_id == "U001"
         assert req.session_id is None
         assert req.business_type == "general_chat"
         assert req.plan_mode is True
@@ -27,7 +26,6 @@ class TestChatRequest:
 
     def test_full_request(self):
         req = ChatRequest(
-            user_id="U002",
             session_id="sess-abc",
             message="review this",
             business_type="invoice_review",
@@ -38,7 +36,6 @@ class TestChatRequest:
                 materials=[MaterialInfo(material_id="m1", filename="doc.pdf")],
             ),
         )
-        assert req.user_id == "U002"
         assert req.context.data["company"] == "ACME"
         assert req.context.protected_values["amount"] == 1000
         assert len(req.context.materials) == 1

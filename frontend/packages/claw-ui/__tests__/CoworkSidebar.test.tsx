@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 
 // ── Mocks — must be defined before imports ──
 
@@ -44,7 +44,9 @@ describe('CoworkSidebar', () => {
       '../src/chat/CoworkSidebar.tsx'
     );
 
-    render(<CoworkSidebar />);
+    await act(async () => {
+      render(<CoworkSidebar />);
+    });
 
     expect(screen.getByText('New task')).toBeInTheDocument();
   });
@@ -54,7 +56,9 @@ describe('CoworkSidebar', () => {
       '../src/chat/CoworkSidebar.tsx'
     );
 
-    render(<CoworkSidebar />);
+    await act(async () => {
+      render(<CoworkSidebar />);
+    });
 
     expect(screen.getByText('Recents')).toBeInTheDocument();
   });
@@ -64,7 +68,9 @@ describe('CoworkSidebar', () => {
       '../src/chat/CoworkSidebar.tsx'
     );
 
-    render(<CoworkSidebar />);
+    await act(async () => {
+      render(<CoworkSidebar />);
+    });
 
     expect(screen.getByText('暂无会话')).toBeInTheDocument();
   });
@@ -74,7 +80,9 @@ describe('CoworkSidebar', () => {
       '../src/chat/CoworkSidebar.tsx'
     );
 
-    render(<CoworkSidebar />);
+    await act(async () => {
+      render(<CoworkSidebar />);
+    });
 
     expect(screen.getByText('Skills')).toBeInTheDocument();
     expect(screen.getByText('Search')).toBeInTheDocument();
