@@ -12,7 +12,7 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -20,6 +20,7 @@ from api.sse import event_bus_to_sse
 from core.event_bus import EventBus
 from core.context import current_trace_id
 from core.errors import AgentError, classify_error
+from core.auth import AuthUser, get_current_user
 from models.request import ChatRequest
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/api", tags=["agent"])
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user)):
     """
     Agent Gateway chat endpoint.
 
@@ -66,7 +67,8 @@ async def chat(request: ChatRequest):
     async def run_chat():
         try:
             await gateway.chat(
-                user_id=request.user_id,
+                tenant_id=user.tenant_id,
+                user_id=user.user_id,
                 session_id=request.session_id,
                 message=request.message,
                 business_type=request.business_type,

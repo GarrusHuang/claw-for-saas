@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from api.auth import router as auth_router
 from api.routes import router as agent_router
 from api.session_routes import router as session_router
 from api.correction_routes import router as correction_router
@@ -70,6 +71,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(agent_router)
 app.include_router(session_router)
 app.include_router(correction_router)
