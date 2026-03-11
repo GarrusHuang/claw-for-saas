@@ -25,7 +25,7 @@ from core.context import (
 )
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
-from core.runtime import AgenticRuntime, RuntimeConfig, RuntimeResult
+from core.runtime import AgenticRuntime, RuntimeConfig, RuntimeResult, StepType
 from core.tool_protocol import ToolCallParser
 from core.tool_registry import ToolRegistry
 
@@ -354,6 +354,30 @@ class AgentGateway:
                     "session_id": session_id,
                 },
             })
+
+        # ── 14. 记录用量 (A10) ──
+        try:
+            from dependencies import get_usage_service
+            usage_svc = get_usage_service()
+            tool_names_used = list({
+                s.tool_name for s in result.steps
+                if s.step_type == StepType.TOOL_CALL and s.tool_name
+            })
+            usage_svc.record_pipeline(
+                tenant_id=tenant_id, user_id=user_id,
+                session_id=session_id, business_type=business_type,
+                prompt_tokens=result.token_usage.prompt_tokens,
+                completion_tokens=result.token_usage.completion_tokens,
+                total_tokens=result.token_usage.total_tokens,
+                tool_call_count=result.tool_call_count,
+                iterations=result.iterations,
+                duration_ms=round(duration_ms, 1),
+                status="failed" if result.error else "success",
+                model=self.llm_client.config.model,
+                tool_names=tool_names_used,
+            )
+        except Exception as e:
+            logger.warning(f"Usage recording failed: {e}")
 
         return {
             "session_id": session_id,
