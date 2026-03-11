@@ -45,7 +45,6 @@ class BusinessContext(BaseModel):
 class ChatRequest(BaseModel):
     """Agent Gateway chat request"""
 
-    user_id: str = Field("U001", description="User ID (isolation)")
     session_id: str | None = Field(None, description="Resume existing session")
     message: str = Field(..., description="User message")
     business_type: str = Field(

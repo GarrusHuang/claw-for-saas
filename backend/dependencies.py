@@ -87,6 +87,19 @@ def get_learning_memory() -> LearningMemory:
 
 
 @lru_cache()
+def get_database():
+    from services.database import DatabaseService
+    s = get_settings()
+    db_path = os.path.join(_BACKEND_ROOT, s.db_path)
+    db = DatabaseService(db_path=db_path)
+    db.ensure_default_tenant_and_admin(
+        tenant_id=s.auth_default_tenant_id,
+        admin_user_id=s.auth_default_user_id,
+    )
+    return db
+
+
+@lru_cache()
 def get_session_manager():
     from agent.session import SessionManager
     session_dir = os.path.join(_BACKEND_ROOT, "data", "sessions")

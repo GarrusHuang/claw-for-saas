@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from core.auth import AuthUser, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ def _get_engine():
 
 
 @router.get("")
-async def list_rules():
+async def list_rules(_user: AuthUser = Depends(get_current_user)):
     """列出所有规则。"""
     engine = _get_engine()
     rules = engine.load_rules()
@@ -48,7 +50,7 @@ async def list_rules():
 
 
 @router.post("", status_code=201)
-async def create_rule(req: HookRuleRequest):
+async def create_rule(req: HookRuleRequest, _user: AuthUser = Depends(get_current_user)):
     """创建新规则。"""
     from agent.hook_rules import HookRule
 
@@ -81,7 +83,7 @@ async def create_rule(req: HookRuleRequest):
 
 
 @router.put("/{rule_id}")
-async def update_rule(rule_id: str, req: HookRuleRequest):
+async def update_rule(rule_id: str, req: HookRuleRequest, _user: AuthUser = Depends(get_current_user)):
     """更新规则。"""
     from agent.hook_rules import HookRule
 
@@ -108,7 +110,7 @@ async def update_rule(rule_id: str, req: HookRuleRequest):
 
 
 @router.delete("/{rule_id}")
-async def delete_rule(rule_id: str):
+async def delete_rule(rule_id: str, _user: AuthUser = Depends(get_current_user)):
     """删除规则。"""
     engine = _get_engine()
     deleted = engine.delete_rule(rule_id)
