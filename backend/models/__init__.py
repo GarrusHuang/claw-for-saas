@@ -6,7 +6,6 @@ Re-exports all Pydantic v2 models for API and agent modules.
 
 # ── request models ──────────────────────────────────────────────
 from .request import (
-    BusinessContext,
     ChatRequest,
     MaterialInfo,
 )
@@ -22,7 +21,6 @@ from .response import (
 
 __all__ = [
     # request
-    "BusinessContext",
     "ChatRequest",
     "MaterialInfo",
     # response

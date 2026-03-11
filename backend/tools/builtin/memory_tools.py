@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from core.context import current_event_bus, current_learning_memory, current_business_context
+from core.context import current_event_bus, current_learning_memory
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -36,11 +36,9 @@ def save_memory(
     if not lm:
         return {"error": "LearningMemory 未初始化"}
 
-    # 从 business_context 获取场景信息
-    bctx = current_business_context.get(None) or {}
-    scenario = bctx.get("business_type", "unknown")
-    business_type = scenario.split("_")[0] if "_" in scenario else scenario
-    doc_type = bctx.get("doc_type", "")
+    scenario = "unknown"
+    business_type = "unknown"
+    doc_type = ""
 
     try:
         exp = lm.record_success(
@@ -93,11 +91,9 @@ def recall_memory(
     if not lm:
         return {"error": "LearningMemory 未初始化"}
 
-    # 如果未指定参数，从 business_context 推断
     if not scenario and not business_type:
-        bctx = current_business_context.get(None) or {}
-        scenario = bctx.get("business_type", "")
-        business_type = scenario.split("_")[0] if "_" in scenario else scenario
+        scenario = ""
+        business_type = ""
 
     try:
         experiences = lm.get_relevant_experiences(

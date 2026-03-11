@@ -68,11 +68,6 @@ current_trace_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "current_trace_id", default=""
 )
 
-# Business context (for subagent inheritance)
-current_business_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
-    "current_business_context", default=None
-)
-
 # Plan step tracker
 if TYPE_CHECKING:
     from agent.plan_tracker import PlanTracker

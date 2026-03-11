@@ -2,6 +2,7 @@
 8 层模块化系统提示构建器 — 对标 OpenClaw 8-layer prompt。
 
 A5 重构: 每一层拆为独立的 PromptSection, 支持插件注册/替换/卸载。
+A2 简化: 去掉 business_context 推送 (MCP 拉取模式) + 去掉 AUTO/EXECUTE 双模式。
 
 PromptLayer 枚举:
   IDENTITY=0  — 身份标识 (固定前缀)
@@ -11,7 +12,7 @@ PromptLayer 枚举:
   SKILLS=4    — Skills 知识
   MEMORY=5    — 用户偏好 + 经验
   RUNTIME=6   — 时间戳 / 用户 / 会话
-  EXTRA=7     — plan_mode / business_context / 插件自定义
+  EXTRA=7     — 插件自定义
 """
 
 from __future__ import annotations
@@ -55,11 +56,9 @@ class ToolSummary:
 class PromptContext:
     """构建 system prompt 时传递的全部上下文。"""
     skill_knowledge: str = ""
-    business_context: dict | None = None
     memory_context: str = ""
     user_id: str = "anonymous"
     session_id: str = ""
-    plan_mode: bool = True
     mode: str = "full"
     tool_summaries: list[ToolSummary] = field(default_factory=list)
 
@@ -127,34 +126,31 @@ class PromptBuilder:
         self,
         *,
         skill_knowledge: str = "",
-        business_context: dict | None = None,
         memory_context: str = "",
         user_id: str = "anonymous",
         session_id: str = "",
-        plan_mode: bool = True,
         mode: str = "full",
         tool_summaries: list[ToolSummary] | None = None,
+        # Deprecated — ignored, kept for caller compatibility during transition
+        business_context: dict | None = None,
+        plan_mode: bool = True,
     ) -> str:
         """
         构建系统提示。
 
         Args:
             skill_knowledge: L4 Skills 知识内容
-            business_context: L7 业务参数 (form_fields, audit_rules, etc.)
             memory_context: L5 用户偏好 + 经验
             user_id: L6 用户 ID
             session_id: L6 会话 ID
-            plan_mode: L7 模式 (True=AUTO, False=EXECUTE)
             mode: "full" | "minimal" | "none" — 控制生成哪些层
             tool_summaries: 工具摘要列表, 用于生成 <tools> 标签
         """
         ctx = PromptContext(
             skill_knowledge=skill_knowledge,
-            business_context=business_context,
             memory_context=memory_context,
             user_id=user_id,
             session_id=session_id,
-            plan_mode=plan_mode,
             mode=mode,
             tool_summaries=tool_summaries or [],
         )
@@ -252,14 +248,8 @@ class PromptBuilder:
             PromptSection(
                 layer=PromptLayer.EXTRA,
                 priority=0,
-                name="business_context",
-                builder_fn=self._build_business_context_section,
-            ),
-            PromptSection(
-                layer=PromptLayer.EXTRA,
-                priority=10,
-                name="plan_mode",
-                builder_fn=self._build_plan_mode_section,
+                name="plan_guidance",
+                builder_fn=self._build_plan_guidance_section,
             ),
         ]
         for sec in defaults:
@@ -325,15 +315,20 @@ class PromptBuilder:
     def _build_runtime(self, ctx: PromptContext) -> str:
         return self._format_runtime_context(ctx.user_id, ctx.session_id)
 
-    def _build_business_context_section(self, ctx: PromptContext) -> str:
-        if ctx.business_context:
-            return self._format_business_context(ctx.business_context)
-        return ""
+    @staticmethod
+    def _build_plan_guidance_section(_ctx: PromptContext) -> str:
+        return (
+            "\n<plan_guidance>\n"
+            "你拥有 propose_plan 工具，用于记录执行计划并向用户展示进度。\n\n"
+            "使用规则：\n"
+            "- 一步能完成的简单任务 → 直接调工具，不需要 plan\n"
+            "- 需要多个步骤的任务 → 先 propose_plan 记录步骤，然后立即执行\n"
+            "- plan 是进度展示工具，不是审批流程，不需要等用户确认\n"
+            "- 前端会实时显示计划进度，用户可以看到每一步的完成状态\n"
+            "</plan_guidance>"
+        )
 
-    def _build_plan_mode_section(self, ctx: PromptContext) -> str:
-        return self._format_plan_mode(ctx.plan_mode)
-
-    # ── 原有格式化方法 (保持不变) ──
+    # ── 内部方法 ──
 
     def _load_soul(self) -> str:
         """加载 SOUL 模板 (带缓存)。"""
@@ -345,68 +340,6 @@ class PromptBuilder:
                 self._soul_cache = "You are an AI assistant powered by Claw."
         return self._soul_cache
 
-    def _format_business_context(self, ctx: dict) -> str:
-        """格式化业务上下文为 XML 标签。"""
-        parts: list[str] = ["\n<business_context>"]
-
-        # 候选类型
-        if ctx.get("candidate_types"):
-            parts.append("<candidate_types>")
-            for ct in ctx["candidate_types"]:
-                if isinstance(ct, dict):
-                    parts.append(
-                        f'  <type id="{ct.get("type_id", "")}" '
-                        f'name="{ct.get("type_name", "")}" '
-                        f'keywords="{",".join(ct.get("keywords", []))}" />'
-                    )
-            parts.append("</candidate_types>")
-
-        # 表单字段
-        if ctx.get("form_fields"):
-            parts.append("<form_fields>")
-            for ff in ctx["form_fields"]:
-                if isinstance(ff, dict):
-                    attrs = [
-                        f'id="{ff.get("field_id", "")}"',
-                        f'name="{ff.get("field_name", "")}"',
-                        f'type="{ff.get("field_type", "text")}"',
-                        f'required="{ff.get("required", True)}"',
-                    ]
-                    if ff.get("options"):
-                        attrs.append(f'options="{",".join(ff["options"])}"')
-                    if ff.get("description"):
-                        attrs.append(f'description="{ff["description"]}"')
-                    parts.append(f'  <field {" ".join(attrs)} />')
-            parts.append("</form_fields>")
-
-        # 审计规则
-        if ctx.get("audit_rules"):
-            parts.append("<audit_rules>")
-            for ar in ctx["audit_rules"]:
-                if isinstance(ar, dict):
-                    parts.append(
-                        f'  <rule id="{ar.get("rule_id", "")}" '
-                        f'name="{ar.get("rule_name", "")}" '
-                        f'severity="{ar.get("severity", "error")}" '
-                        f'description="{ar.get("description", "")}" />'
-                    )
-            parts.append("</audit_rules>")
-
-        # 已知值
-        if ctx.get("known_values"):
-            parts.append("<known_values>")
-            for kv in ctx["known_values"]:
-                if isinstance(kv, dict):
-                    parts.append(
-                        f'  <value field_id="{kv.get("field_id", "")}" '
-                        f'value="{kv.get("value", "")}" '
-                        f'source="{kv.get("source", "system")}" />'
-                    )
-            parts.append("</known_values>")
-
-        parts.append("</business_context>")
-        return "\n".join(parts)
-
     def _format_runtime_context(self, user_id: str, session_id: str) -> str:
         """格式化运行时上下文。"""
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -417,42 +350,3 @@ class PromptBuilder:
             f"  <timestamp>{now}</timestamp>\n"
             f"</runtime>"
         )
-
-    def _format_plan_mode(self, plan_mode: bool) -> str:
-        """格式化模式约束。"""
-        if plan_mode:
-            # AUTO 模式: Agent 自主判断是否需要用户确认
-            return (
-                "\n<mode>AUTO</mode>\n"
-                "<mode_constraints>\n"
-                "你当前处于 **自主模式**。你拥有全部工具（含 propose_plan）。\n\n"
-                "**自主判断规则：**\n"
-                "根据 business_context 判断任务复杂度，决定工作方式：\n\n"
-                "- **复杂任务**（同时包含 `<candidate_types>` 和 `<form_fields>`，如创建/起草）：\n"
-                "  1. 先分析材料、查询必要数据\n"
-                "  2. 调用 `propose_plan(requires_approval=True)` 提交方案\n"
-                "  3. 输出方案要点总结后 **立即停止**，等待用户确认\n\n"
-                "- **简单任务**（只有 `<audit_rules>` 或只有 `<form_fields>`，如审核/查询）：\n"
-                "  1. 可选调用 `propose_plan(requires_approval=False)` 记录计划\n"
-                "  2. 立即开始执行，不需要等待确认\n"
-                "  3. 或直接跳过 propose_plan，直接调用能力工具\n\n"
-                "**核心原则：**\n"
-                "- propose_plan 的 requires_approval 参数决定是否需要用户确认\n"
-                "- requires_approval=True 时：输出总结后必须停止\n"
-                "- requires_approval=False 时：立即继续执行\n"
-                "- 前端会实时显示计划进度，用户可以看到每一步的完成状态\n"
-                "</mode_constraints>"
-            )
-        else:
-            # EXECUTE 模式: 用户已确认方案，直接执行
-            return (
-                "\n<mode>EXECUTE</mode>\n"
-                "<mode_constraints>\n"
-                "你当前处于 **执行模式**。用户已确认你之前提出的方案。\n\n"
-                "**工作流程：**\n"
-                "1. 查看对话历史中你之前提出的方案\n"
-                "2. 按方案依次调用能力工具完成各步骤\n"
-                "3. 不要再调用 propose_plan（该工具在执行模式不可用）\n"
-                "4. 所有步骤完成后输出最终总结\n"
-                "</mode_constraints>"
-            )
