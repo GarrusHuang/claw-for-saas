@@ -10,6 +10,7 @@ from agent.hooks import HookEvent, HookResult
 from agent.security_hooks import (
     parameter_validation_hook,
     sensitive_data_hook,
+    data_lock_hook,
     _is_unsafe_url,
     _has_path_traversal,
 )
@@ -188,3 +189,86 @@ class TestSensitiveDataHook:
     def test_bank_card_detected(self):
         result = sensitive_data_hook(self._event("卡号: 6222021234567890123"))
         assert result.action == "allow"
+
+
+# ── A6: data_lock_hook ──
+
+
+class TestDataLockHook:
+    """Tests for A6 DataLock hook integration."""
+
+    @staticmethod
+    def _event(tool_input: dict) -> HookEvent:
+        return HookEvent(
+            event_type="pre_tool_use",
+            session_id="s1",
+            user_id="U1",
+            tool_name="update_form_field",
+            tool_input=tool_input,
+        )
+
+    def test_no_registry_allows(self):
+        """Without DataLockRegistry injected, always allow."""
+        from core.context import current_data_lock
+        tok = current_data_lock.set(None)
+        try:
+            result = data_lock_hook(self._event({"field_id": "salary", "value": "100"}))
+            assert result.action == "allow"
+        finally:
+            current_data_lock.reset(tok)
+
+    def test_readonly_field_blocked(self):
+        """Readonly locked field is blocked."""
+        from core.context import current_data_lock
+        from core.data_lock import DataLockRegistry, DataLock, LockLevel
+
+        registry = DataLockRegistry()
+        registry.register(DataLock(key="salary", level=LockLevel.READONLY, reason="薪资不可改"))
+        tok = current_data_lock.set(registry)
+        try:
+            result = data_lock_hook(self._event({"field_id": "salary", "value": "999999"}))
+            assert result.action == "block"
+            assert "salary" in result.message
+        finally:
+            current_data_lock.reset(tok)
+
+    def test_audit_field_allowed(self):
+        """Audit locked field is allowed (logged only)."""
+        from core.context import current_data_lock
+        from core.data_lock import DataLockRegistry, DataLock, LockLevel
+
+        registry = DataLockRegistry()
+        registry.register(DataLock(key="department", level=LockLevel.AUDIT, reason="审计"))
+        tok = current_data_lock.set(registry)
+        try:
+            result = data_lock_hook(self._event({"field_id": "department", "value": "Engineering"}))
+            assert result.action == "allow"
+        finally:
+            current_data_lock.reset(tok)
+
+    def test_unlocked_field_allowed(self):
+        """Unlocked field is always allowed."""
+        from core.context import current_data_lock
+        from core.data_lock import DataLockRegistry
+
+        registry = DataLockRegistry()
+        tok = current_data_lock.set(registry)
+        try:
+            result = data_lock_hook(self._event({"field_id": "email", "value": "a@b.com"}))
+            assert result.action == "allow"
+        finally:
+            current_data_lock.reset(tok)
+
+    def test_key_param_checked(self):
+        """Also checks 'key' parameter (not just field_id)."""
+        from core.context import current_data_lock
+        from core.data_lock import DataLockRegistry, DataLock, LockLevel
+
+        registry = DataLockRegistry()
+        registry.register(DataLock(key="config_key", level=LockLevel.READONLY, reason="locked"))
+        tok = current_data_lock.set(registry)
+        try:
+            result = data_lock_hook(self._event({"key": "config_key", "value": "new"}))
+            assert result.action == "block"
+        finally:
+            current_data_lock.reset(tok)

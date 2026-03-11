@@ -56,7 +56,36 @@ def get_shared_registry() -> ToolRegistry:
 
 @lru_cache()
 def get_skill_loader() -> SkillLoader:
-    return SkillLoader()
+    s = get_settings()
+    return SkillLoader(
+        max_prompt_chars=s.skill_max_prompt_chars,
+        max_single_chars=s.skill_max_single_chars,
+    )
+
+
+@lru_cache()
+def get_sandbox_manager():
+    from core.sandbox import SandboxManager, SandboxConfig
+    s = get_settings()
+    whitelist = [w.strip() for w in s.sandbox_network_whitelist.split(",") if w.strip()] if s.sandbox_network_whitelist else []
+    config = SandboxConfig(
+        workspace_base_dir=s.sandbox_workspace_dir,
+        max_disk_quota_mb=s.sandbox_max_disk_quota_mb,
+        network_whitelist=whitelist,
+        block_private_networks=s.sandbox_block_private_networks,
+        rate_limit_per_minute=s.sandbox_rate_limit_per_minute,
+        docker_enabled=s.sandbox_docker_enabled,
+        docker_image=s.sandbox_docker_image,
+        docker_cpu_limit=s.sandbox_docker_cpu_limit,
+        docker_memory_limit=s.sandbox_docker_memory_limit,
+    )
+    return SandboxManager(config=config, backend_root=_BACKEND_ROOT)
+
+
+@lru_cache()
+def get_data_lock_registry():
+    from core.data_lock import DataLockRegistry
+    return DataLockRegistry()
 
 
 @lru_cache()

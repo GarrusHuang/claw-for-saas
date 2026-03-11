@@ -1,8 +1,12 @@
 """
-Skill 加载器。
+Skill 加载器 — A7 多源加载 + 优先级合并 + 大小预算。
 
-启动时扫描 skills/ 目录构建注册表。
-支持三级加载策略：
+A7 改造:
+- 多源加载: builtin/ → plugins/ → tenant/ → user/ (优先级从低到高)
+- 优先级合并: 同名 Skill 高优先级覆盖低优先级
+- 大小预算: max_skills_prompt_chars + max_single_skill_chars
+
+三级加载策略:
   L1 - 元数据注册表（启动时扫描 SKILL.md frontmatter）
   L2 - Skill 正文（首次使用时加载并缓存，注入 Agent System Prompt）
   L3 - 参考资料（按需读取，通过 skill_reference 工具暴露给 Agent）
@@ -19,6 +23,17 @@ logger = logging.getLogger(__name__)
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILLS_DIR = os.path.join(BACKEND_ROOT, "skills")
 
+# A7: 标准子目录
+BUILTIN_DIR = os.path.join(SKILLS_DIR, "builtin")
+TENANT_DIR = os.path.join(SKILLS_DIR, "tenant")
+USER_DIR = os.path.join(SKILLS_DIR, "user")
+
+# A7: 优先级常量 (数值越大优先级越高)
+PRIORITY_BUILTIN = 1
+PRIORITY_PLUGIN = 2
+PRIORITY_TENANT = 3
+PRIORITY_USER = 4
+
 
 def _parse_frontmatter(raw: str) -> tuple[dict, str]:
     """
@@ -29,7 +44,6 @@ def _parse_frontmatter(raw: str) -> tuple[dict, str]:
     Returns:
         (metadata_dict, body_text)
     """
-    # 分离 frontmatter 和 body
     match = re.match(r"^---\s*\n(.*?\n)---\s*\n(.*)", raw, re.DOTALL)
     if not match:
         return {}, raw
@@ -61,7 +75,6 @@ def _parse_frontmatter(raw: str) -> tuple[dict, str]:
             ]
             metadata[key] = items
         else:
-            # 尝试将纯数字转为 int
             if value.isdigit():
                 metadata[key] = int(value)
             else:
@@ -72,27 +85,27 @@ def _parse_frontmatter(raw: str) -> tuple[dict, str]:
 
 class SkillLoader:
     """
-    Skill 加载器。
+    Skill 加载器 — A7 多源加载。
 
-    启动时扫描 skills/ 目录构建注册表。
+    多源加载 (优先级从低到高):
+    1. builtin/  — Claw 自带 (PRIORITY_BUILTIN=1)
+    2. plugins/  — 插件注册 (PRIORITY_PLUGIN=2)
+    3. tenant/   — 租户自定义 (PRIORITY_TENANT=3)
+    4. user/     — 用户自定义 (PRIORITY_USER=4)
 
-    Core methods:
-    - _build_registry(): Scan all SKILL.md, parse YAML frontmatter -> L1 metadata registry
-    - load_for_pipeline(scenario, agent_name, business_type) -> str:
-        Returns matched Skill body text (L2) for injection into Agent System Prompt
-        Matching logic:
-        1. Scenario Skill (match by scenario) -> auto-load depends_on recursively
-        2. Capability Skill (match agent_name in applies_to)
-        3. Domain Skill (match business_type)
-        Deduplicate and merge, return combined text
-    - read_reference(skill_name, ref_path) -> str:
-        L3 on-demand loading, exposed as Agent tool (skill_reference tool)
-    - list_skills() -> list[dict]:
-        Returns all L1 metadata (for management API)
+    同名 Skill 高优先级覆盖低优先级。
     """
 
-    def __init__(self, skills_dir: Optional[str] = None):
+    def __init__(
+        self,
+        skills_dir: Optional[str] = None,
+        max_prompt_chars: int = 30000,
+        max_single_chars: int = 10000,
+    ):
         self._skills_dir = skills_dir or SKILLS_DIR
+        self._max_prompt_chars = max_prompt_chars  # A7: 总预算
+        self._max_single_chars = max_single_chars  # A7: 单个上限
+
         # L1: name -> metadata dict (不含 body)
         self._registry: dict[str, dict] = {}
         # L2 cache: name -> body text
@@ -101,17 +114,28 @@ class SkillLoader:
         self._build_registry()
 
     # ------------------------------------------------------------------
-    # L1 — 元数据注册表
+    # L1 — 元数据注册表 (A7: 多源)
     # ------------------------------------------------------------------
 
     def _build_registry(self) -> None:
-        """扫描 skills/ 下所有 SKILL.md，解析 frontmatter 构建 L1 注册表。"""
-        if not os.path.isdir(self._skills_dir):
-            logger.warning("Skills directory not found: %s", self._skills_dir)
-            return
+        """扫描多源 Skill 目录，构建 L1 注册表。"""
+        # A7 标准目录结构: skills/builtin/ 优先
+        builtin_dir = os.path.join(self._skills_dir, "builtin")
+        if os.path.isdir(builtin_dir):
+            self._scan_directory(builtin_dir, PRIORITY_BUILTIN)
+        else:
+            # 回退: 直接扫描 skills_dir 根目录 (兼容旧结构和测试)
+            self._scan_directory(self._skills_dir, PRIORITY_BUILTIN)
+        logger.info("Skill registry built: %d skills loaded", len(self._registry))
 
-        for entry in os.listdir(self._skills_dir):
-            skill_dir = os.path.join(self._skills_dir, entry)
+    def _scan_directory(self, base_dir: str, priority: int) -> int:
+        """扫描一个目录下的所有 Skill，返回加载数量。"""
+        if not os.path.isdir(base_dir):
+            return 0
+
+        count = 0
+        for entry in os.listdir(base_dir):
+            skill_dir = os.path.join(base_dir, entry)
             skill_file = os.path.join(skill_dir, "SKILL.md")
             if os.path.isdir(skill_dir) and os.path.isfile(skill_file):
                 try:
@@ -121,12 +145,75 @@ class SkillLoader:
                     name = metadata.get("name", entry)
                     metadata.setdefault("name", name)
                     metadata["_dir"] = skill_dir
+                    metadata["_priority"] = priority
+
+                    # A7: 同名 Skill 高优先级覆盖低优先级
+                    existing = self._registry.get(name)
+                    if existing and existing.get("_priority", 0) >= priority:
+                        logger.debug(
+                            "Skipping skill %s (priority %d <= existing %d)",
+                            name, priority, existing.get("_priority", 0),
+                        )
+                        continue
+
                     self._registry[name] = metadata
-                    logger.info("Registered skill: %s (type=%s)", name, metadata.get("type"))
+                    count += 1
+                    logger.info(
+                        "Registered skill: %s (type=%s, priority=%d)",
+                        name, metadata.get("type"), priority,
+                    )
                 except Exception:
                     logger.exception("Failed to parse skill: %s", skill_file)
 
-        logger.info("Skill registry built: %d skills loaded", len(self._registry))
+        return count
+
+    def load_tenant_skills(self, tenant_dir: str) -> int:
+        """
+        A7: 加载租户级 Skill。
+
+        Args:
+            tenant_dir: 租户 Skill 目录路径
+
+        Returns:
+            加载数量
+        """
+        count = self._scan_directory(tenant_dir, PRIORITY_TENANT)
+        if count:
+            logger.info("Loaded %d tenant skills from %s", count, tenant_dir)
+        return count
+
+    def load_user_skills(self, user_dir: str) -> int:
+        """
+        A7: 加载用户级 Skill。
+
+        Args:
+            user_dir: 用户 Skill 目录路径
+
+        Returns:
+            加载数量
+        """
+        count = self._scan_directory(user_dir, PRIORITY_USER)
+        if count:
+            logger.info("Loaded %d user skills from %s", count, user_dir)
+        return count
+
+    def register_plugin_skill(self, name: str, metadata: dict, body: str) -> None:
+        """
+        A7: 插件注册 Skill (通过 A5 PluginContext)。
+
+        由 PluginContext.register_skill() 调用。
+        """
+        existing = self._registry.get(name)
+        if existing and existing.get("_priority", 0) >= PRIORITY_PLUGIN:
+            logger.debug("Skipping plugin skill %s (existing has higher priority)", name)
+            return
+
+        metadata["name"] = name
+        metadata["_priority"] = PRIORITY_PLUGIN
+        metadata["_plugin_body"] = body  # 插件 Skill body 直接存在 metadata 中
+        self._registry[name] = metadata
+        self._body_cache[name] = body
+        logger.info("Registered plugin skill: %s", name)
 
     # ------------------------------------------------------------------
     # L2 — Skill 正文加载（带缓存）
@@ -184,19 +271,15 @@ class SkillLoader:
         """
         根据 pipeline 上下文匹配并加载 Skill 正文。
 
-        匹配逻辑（按优先级）：
-        1. Scenario Skill — type=scenario 且 name 匹配 scenario 参数，
-           自动递归加载 depends_on
-        2. Capability Skill — type=capability 且 agent_name 在 applies_to 中
-        3. Domain Skill — type=domain 且 business_type 在 business_types 中，
-           且 agent_name 在 applies_to 中（如提供了 agent_name）
-
-        去重合并后返回完整文本。
+        A7 增强:
+        - 按 _priority 排序（高优先级在后覆盖低优先级同名 Skill）
+        - 大小预算控制: 超出 max_single_chars 的单个 Skill 被截断
+        - 超出 max_prompt_chars 的低优先级 Skill 被丢弃
         """
         matched_names: list[str] = []
 
         for name, meta in self._registry.items():
-            skill_type = meta.get("type", "capability")  # fallback for Anthropic official format
+            skill_type = meta.get("type", "capability")
 
             # 1) Scenario match
             if skill_type == "scenario" and scenario and name == scenario:
@@ -215,13 +298,12 @@ class SkillLoader:
                 business_types = meta.get("business_types", [])
                 applies_to = meta.get("applies_to", [])
                 if business_type in business_types:
-                    # 空 applies_to 匹配所有 agent，否则检查 agent_name
                     if not applies_to or (agent_name and agent_name in applies_to):
                         matched_names.append(name)
                     elif not agent_name:
                         matched_names.append(name)
 
-        # 展开依赖（依赖在前），并去重
+        # 展开依赖（依赖在前），去重
         ordered: list[str] = []
         seen: set[str] = set()
         for name in matched_names:
@@ -230,28 +312,56 @@ class SkillLoader:
                     seen.add(resolved)
                     ordered.append(resolved)
 
-        # 拼接 body
+        # A7: 按优先级排序（高优先级在前，预算裁剪时保留高优先级）
+        ordered.sort(
+            key=lambda n: self._registry.get(n, {}).get("_priority", 0),
+            reverse=True,
+        )
+
+        # A7: 大小预算控制
         parts: list[str] = []
+        total_chars = 0
+        loaded_names: list[str] = []
+        trimmed_names: list[str] = []
+
         for name in ordered:
             body = self._load_body(name)
-            if body:
-                parts.append(body)
+            if not body:
+                continue
+
+            # 单个 Skill 截断
+            if len(body) > self._max_single_chars:
+                body = body[:self._max_single_chars] + "\n\n[...Skill 内容被截断...]"
+                logger.info("Skill %s truncated (%d > %d chars)", name, len(body), self._max_single_chars)
+
+            # 总预算检查
+            if total_chars + len(body) > self._max_prompt_chars:
+                trimmed_names.append(name)
+                logger.info(
+                    "Skill %s dropped (budget exceeded: %d + %d > %d)",
+                    name, total_chars, len(body), self._max_prompt_chars,
+                )
+                continue
+
+            parts.append(body)
+            total_chars += len(body)
+            loaded_names.append(name)
+
+        if trimmed_names:
+            logger.warning(
+                "A7 budget: %d skills trimmed: %s", len(trimmed_names), trimmed_names
+            )
 
         combined = "\n\n---\n\n".join(parts)
-        if ordered:
+        if loaded_names:
             logger.info(
-                "Loaded %d skills for pipeline (scenario=%s, agent=%s, biz=%s): %s",
-                len(ordered), scenario, agent_name, business_type, ordered,
+                "Loaded %d skills (%d chars) for pipeline (scenario=%s, agent=%s, biz=%s): %s",
+                len(loaded_names), total_chars, scenario, agent_name, business_type, loaded_names,
             )
         return combined
 
     def read_reference(self, skill_name: str, ref_path: str) -> str:
-        """
-        L3 按需加载：读取 Skill 参考资料文件。
-
-        文件路径: skills/{skill_name}/references/{ref_path}
-        暴露为 Agent tool (skill_reference)。
-        """
+        """L3 按需加载：读取 Skill 参考资料文件。"""
         meta = self._registry.get(skill_name)
         if not meta:
             return f"[ERROR] Skill not found: {skill_name}"
@@ -278,8 +388,8 @@ class SkillLoader:
         """返回所有 L1 元数据（用于管理 API）。"""
         result = []
         for name, meta in self._registry.items():
-            # 排除内部字段
             public_meta = {k: v for k, v in meta.items() if not k.startswith("_")}
+            public_meta["priority"] = meta.get("_priority", 0)
             result.append(public_meta)
         return result
 
@@ -288,7 +398,9 @@ class SkillLoader:
         meta = self._registry.get(skill_name)
         if not meta:
             return None
-        return {k: v for k, v in meta.items() if not k.startswith("_")}
+        result = {k: v for k, v in meta.items() if not k.startswith("_")}
+        result["priority"] = meta.get("_priority", 0)
+        return result
 
     # ------------------------------------------------------------------
     # CRUD 操作
@@ -313,7 +425,6 @@ class SkillLoader:
                 items = ", ".join(str(i) for i in metadata[key])
                 lines.append(f"{key}: [{items}]")
 
-        # 保留其他 key
         for key, val in metadata.items():
             if key not in simple_keys and key not in list_keys and not key.startswith("_"):
                 if isinstance(val, list):
@@ -326,18 +437,15 @@ class SkillLoader:
         return "\n".join(lines)
 
     def create_skill(self, name: str, metadata: dict, body: str) -> dict:
-        """
-        创建新 Skill。
-
-        写入 skills/{name}/SKILL.md 并刷新注册表。
-        返回 {"ok": True, "name": name} 或 {"ok": False, "error": "..."}
-        """
+        """创建新 Skill (默认创建到 builtin/ 子目录)。"""
         if name in self._registry:
             return {"ok": False, "error": f"Skill '{name}' already exists"}
 
-        # 安全检查
         safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "_")
-        skill_dir = os.path.join(self._skills_dir, safe_name)
+        # A7: 优先创建到 builtin/ 子目录
+        builtin_dir = os.path.join(self._skills_dir, "builtin")
+        base = builtin_dir if os.path.isdir(builtin_dir) else self._skills_dir
+        skill_dir = os.path.join(base, safe_name)
 
         try:
             os.makedirs(skill_dir, exist_ok=True)
@@ -349,7 +457,6 @@ class SkillLoader:
             with open(skill_file, "w", encoding="utf-8") as f:
                 f.write(content)
 
-            # 刷新注册表
             self._register_single(skill_dir)
             logger.info("Created skill: %s", name)
             return {"ok": True, "name": name}
@@ -373,7 +480,6 @@ class SkillLoader:
             with open(skill_file, "w", encoding="utf-8") as f:
                 f.write(content)
 
-            # 清缓存 + 重新注册
             self._body_cache.pop(name, None)
             self._register_single(meta["_dir"])
             logger.info("Updated skill: %s", name)
@@ -402,11 +508,7 @@ class SkillLoader:
             return {"ok": False, "error": str(e)}
 
     def import_from_content(self, raw_content: str) -> dict:
-        """
-        从原始 SKILL.md 内容导入 Skill。
-
-        解析 frontmatter 提取 name，创建目录并写入。
-        """
+        """从原始 SKILL.md 内容导入 Skill。"""
         metadata, body = _parse_frontmatter(raw_content)
         name = metadata.get("name")
         if not name:
@@ -416,7 +518,9 @@ class SkillLoader:
             return {"ok": False, "error": f"Skill '{name}' already exists, use update instead"}
 
         safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "_")
-        skill_dir = os.path.join(self._skills_dir, safe_name)
+        builtin_dir = os.path.join(self._skills_dir, "builtin")
+        base = builtin_dir if os.path.isdir(builtin_dir) else self._skills_dir
+        skill_dir = os.path.join(base, safe_name)
 
         try:
             os.makedirs(skill_dir, exist_ok=True)
@@ -431,7 +535,7 @@ class SkillLoader:
             logger.exception("Failed to import skill: %s", name)
             return {"ok": False, "error": str(e)}
 
-    def _register_single(self, skill_dir: str) -> None:
+    def _register_single(self, skill_dir: str, priority: int = PRIORITY_BUILTIN) -> None:
         """注册/刷新单个 Skill 目录。"""
         skill_file = os.path.join(skill_dir, "SKILL.md")
         if not os.path.isfile(skill_file):
@@ -443,8 +547,8 @@ class SkillLoader:
             name = metadata.get("name", os.path.basename(skill_dir))
             metadata.setdefault("name", name)
             metadata["_dir"] = skill_dir
+            metadata["_priority"] = priority
             self._registry[name] = metadata
             self._body_cache.pop(name, None)
         except Exception:
             logger.exception("Failed to register skill: %s", skill_file)
-
