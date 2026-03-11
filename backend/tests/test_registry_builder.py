@@ -10,6 +10,7 @@ from tools.registry_builder import (
     build_shared_registry,
     build_capability_registry,
     build_plan_registry,
+    build_mcp_registry,
     build_full_registry,
 )
 
@@ -83,6 +84,32 @@ class TestBuildPlanRegistry:
         assert len(reg.get_tool_names()) == 1
 
 
+class TestBuildMCPRegistry:
+    def test_has_six_tools(self):
+        reg = build_mcp_registry()
+        assert len(reg.get_tool_names()) == 6
+
+    def test_mcp_tool_names(self):
+        reg = build_mcp_registry()
+        names = set(reg.get_tool_names())
+        expected = {
+            "get_form_schema",
+            "get_business_rules",
+            "get_candidate_types",
+            "get_protected_values",
+            "submit_form_data",
+            "query_data",
+        }
+        assert names == expected
+
+    def test_submit_is_write_others_readonly(self):
+        reg = build_mcp_registry()
+        assert reg.is_read_only("submit_form_data") is False
+        for name in ["get_form_schema", "get_business_rules", "get_candidate_types",
+                      "get_protected_values", "query_data"]:
+            assert reg.is_read_only(name) is True
+
+
 class TestBuildFullRegistry:
     def test_contains_all_tools(self):
         reg = build_full_registry()
@@ -95,10 +122,24 @@ class TestBuildFullRegistry:
         assert "save_memory" in names
         # Plan
         assert "propose_plan" in names
+        # MCP
+        assert "get_form_schema" in names
+        assert "submit_form_data" in names
+        assert "query_data" in names
 
     def test_no_duplicates(self):
         reg = build_full_registry()
         names = reg.get_tool_names()
         assert len(names) == len(set(names))
+
+    def test_includes_all_six_mcp_tools(self):
+        reg = build_full_registry()
+        names = reg.get_tool_names()
+        mcp_tools = [
+            "get_form_schema", "get_business_rules", "get_candidate_types",
+            "get_protected_values", "submit_form_data", "query_data",
+        ]
+        for tool in mcp_tools:
+            assert tool in names, f"Missing MCP tool: {tool}"
 
 

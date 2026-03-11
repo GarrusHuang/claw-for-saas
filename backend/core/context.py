@@ -20,7 +20,7 @@ Usage:
 from __future__ import annotations
 
 import contextvars
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.event_bus import EventBus
@@ -95,4 +95,9 @@ current_sandbox: contextvars.ContextVar[SandboxManager | None] = contextvars.Con
 # A6: Data Lock Registry
 current_data_lock: contextvars.ContextVar[DataLockRegistry | None] = contextvars.ContextVar(
     "current_data_lock", default=None
+)
+
+# A2: MCP Provider (SaaS 宿主注入业务数据拉取接口)
+current_mcp_provider: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "current_mcp_provider", default=None
 )

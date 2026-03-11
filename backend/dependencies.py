@@ -19,6 +19,7 @@ from tools.registry_builder import (
     build_shared_registry,
     build_full_registry,
     build_capability_registry,
+    build_mcp_registry,
 )
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,25 @@ def get_plugin_registry():
     return registry
 
 
+def get_mcp_provider():
+    """
+    Get MCP Provider based on config.
+
+    Returns HttpMCPProvider if mcp_base_url is set,
+    otherwise None (tools will fallback to DefaultMCPProvider).
+    """
+    s = get_settings()
+    if not s.mcp_enabled:
+        return None
+    if s.mcp_base_url:
+        from tools.mcp.http_provider import HttpMCPProvider
+        return HttpMCPProvider(
+            base_url=s.mcp_base_url,
+            timeout_s=s.mcp_timeout_s,
+        )
+    return None
+
+
 def build_gateway():
     """
     Build Agent Gateway.
@@ -239,6 +259,7 @@ def build_gateway():
         prompt_builder=prompt_builder,
         subagent_runner=subagent_runner,
         memory_store=get_memory_store(),
+        mcp_provider=get_mcp_provider(),
         hooks=build_default_hooks(),
         runtime_config=get_runtime_config(),
     )

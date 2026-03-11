@@ -178,22 +178,38 @@ class PromptBuilder:
         *,
         message: str,
         materials_summary: str = "",
-    ) -> str:
+        image_blocks: list[dict] | None = None,
+    ) -> str | list:
         """
         构建 L8 用户消息。
 
         Args:
             message: 用户原始消息
             materials_summary: 材料摘要
+            image_blocks: A4-4i 多模态图片列表 [{"base64": ..., "media_type": ...}]
+
+        Returns:
+            str (纯文本) 或 list (OpenAI multimodal content blocks)
         """
-        parts: list[str] = []
+        if not image_blocks:
+            # 原有逻辑不变
+            parts: list[str] = []
+            if materials_summary:
+                parts.append(f"<materials>\n{materials_summary}\n</materials>")
+            parts.append(message)
+            return "\n\n".join(parts)
 
+        # 多模态: 返回 content blocks list
+        blocks: list[dict] = []
         if materials_summary:
-            parts.append(f"<materials>\n{materials_summary}\n</materials>")
-
-        parts.append(message)
-
-        return "\n\n".join(parts)
+            blocks.append({"type": "text", "text": f"<materials>\n{materials_summary}\n</materials>"})
+        for img in image_blocks:
+            blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img['media_type']};base64,{img['base64']}"},
+            })
+        blocks.append({"type": "text", "text": message})
+        return blocks
 
     # ── 默认 sections 注册 ──
 

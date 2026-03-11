@@ -156,7 +156,7 @@ class AgenticRuntime:
     async def run(
         self,
         system_prompt: str,
-        user_message: str,
+        user_message: str | list,
         initial_messages: list[dict] | None = None,
     ) -> RuntimeResult:
         """
@@ -164,7 +164,7 @@ class AgenticRuntime:
 
         Args:
             system_prompt: 系统提示（L1+L2+L3+L4 合并后）
-            user_message: 用户任务消息
+            user_message: 用户任务消息 (str 纯文本 | list 多模态 content blocks)
             initial_messages: 可选的初始对话历史（多轮场景）
 
         Returns:
@@ -1100,7 +1100,7 @@ class AgenticRuntime:
     def _build_initial_messages(
         self,
         system_prompt: str,
-        user_message: str,
+        user_message: str | list,
         initial_messages: list[dict] | None,
     ) -> list[dict]:
         """构建初始消息列表。"""
