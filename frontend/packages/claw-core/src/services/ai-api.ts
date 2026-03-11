@@ -10,9 +10,25 @@ function getBaseUrl(): string {
   return getAIConfig().aiBaseUrl;
 }
 
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const config = getAIConfig();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  // 动态 token 优先
+  if (config.getAuthToken) {
+    const token = await config.getAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } else if (config.authToken) {
+    headers['Authorization'] = `Bearer ${config.authToken}`;
+  }
+
+  return headers;
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${getBaseUrl()}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders,
     ...options,
   });
   if (!res.ok) {
@@ -183,8 +199,19 @@ export async function uploadFile(file: File, userId: string = 'U001'): Promise<F
   formData.append('file', file);
   formData.append('user_id', userId);
 
+  // Auth headers (without Content-Type — browser sets multipart boundary)
+  const headers: Record<string, string> = {};
+  const config = getAIConfig();
+  if (config.getAuthToken) {
+    const token = await config.getAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } else if (config.authToken) {
+    headers['Authorization'] = `Bearer ${config.authToken}`;
+  }
+
   const res = await fetch(`${getBaseUrl()}/api/files/upload`, {
     method: 'POST',
+    headers,
     body: formData,
   });
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);

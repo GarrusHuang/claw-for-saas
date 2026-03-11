@@ -79,8 +79,3 @@ def build_full_registry() -> ToolRegistry:
     capability = build_capability_registry()
     plan = build_plan_registry()
     return shared.merge(capability).merge(plan)
-
-
-# Backwards compatibility aliases
-build_auto_registry = build_full_registry
-build_execute_registry = build_full_registry

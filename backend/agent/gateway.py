@@ -20,7 +20,7 @@ from core.context import (
     current_skill_loader, current_file_service, current_browser_service,
     current_plan_tracker,
     current_memory_store,
-    current_known_field_ids, current_business_context,
+    current_known_field_ids,
 )
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
@@ -55,8 +55,6 @@ class AgentGateway:
         memory_store: Any,  # MarkdownMemoryStore
         hooks: HookRegistry | None = None,
         runtime_config: RuntimeConfig | None = None,
-        # Deprecated — ignored, kept for caller compatibility during transition
-        execute_registry: ToolRegistry | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.tool_registry = tool_registry
@@ -82,9 +80,6 @@ class AgentGateway:
         skill_names: list[str] | None = None,
         event_bus: EventBus | None = None,
         materials: list[dict] | None = None,
-        # Deprecated — ignored, kept for caller compatibility during transition
-        business_context: dict | None = None,
-        plan_mode: bool = True,
     ) -> dict:
         """
         处理用户消息 — 单一入口。
@@ -134,21 +129,6 @@ class AgentGateway:
 
         # 注入 known_field_ids 到 contextvars (供 known_values_guard hook 使用)
         current_known_field_ids.set(set())  # 始终初始化，避免 LookupError
-        if business_context and business_context.get("known_values"):
-            kv = business_context["known_values"]
-            if isinstance(kv, dict):
-                current_known_field_ids.set(set(kv.keys()))
-            elif isinstance(kv, list):
-                ids = {
-                    item.get("field_id")
-                    for item in kv
-                    if isinstance(item, dict) and "field_id" in item
-                }
-                current_known_field_ids.set(ids)
-
-        # Phase 16: 注入 business_context 到 ContextVar (供子智能体继承)
-        if business_context:
-            current_business_context.set(business_context)
 
         # A8: 注入 MarkdownMemoryStore 到 ContextVar (供记忆工具使用)
         if self.memory_store:
@@ -225,8 +205,7 @@ class AgentGateway:
 
         # ── 7. 构建用户消息 ──
         materials_summary = ""
-        # Support both new materials param and legacy business_context.materials
-        mat_list = materials or (business_context or {}).get("materials") or []
+        mat_list = materials or []
         if mat_list:
             summaries = []
             for m in mat_list:

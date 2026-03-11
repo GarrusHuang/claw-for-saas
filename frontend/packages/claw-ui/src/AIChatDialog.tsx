@@ -25,7 +25,6 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
     messages,
     sendMessage,
     isRunning,
-    isPlanAwaiting,
   } = useAIChat();
 
   const [activeTab, setActiveTab] = useState<'chat' | 'cowork' | 'code'>('cowork');
@@ -89,11 +88,7 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
       <ChatInput
         onSend={(text, files) => sendMessage(text, undefined, files)}
         disabled={isRunning}
-        placeholder={
-          isPlanAwaiting
-            ? 'Type feedback on the plan, or approve above...'
-            : 'Reply...'
-        }
+        placeholder="Reply..."
       />
     </div>
   );

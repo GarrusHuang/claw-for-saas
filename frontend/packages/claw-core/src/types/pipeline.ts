@@ -2,7 +2,7 @@
  * Pipeline 类型定义 — 包括 Phase 8/9/13 新增类型。
  */
 
-export type PipelineStatus = 'idle' | 'running' | 'completed' | 'failed' | 'plan_awaiting';
+export type PipelineStatus = 'idle' | 'running' | 'completed' | 'failed';
 
 export interface StepProgress {
   name: string;
@@ -67,7 +67,6 @@ export interface PlanProposal {
   detail: string;
   steps: PlanStep[];
   estimatedActions: number;
-  requiresApproval: boolean;
 }
 
 export interface PipelineEvent {

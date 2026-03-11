@@ -6,7 +6,7 @@
  * 其余: 原有 Mini 组件 (TypeInference, FieldUpdates, AuditSummary, DocumentPreview, PlanCard)
  */
 
-import { Tag, Typography, Progress, Button } from 'antd';
+import { Tag, Typography, Progress } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -303,7 +303,7 @@ function useStepCompletion(steps: Array<{ description: string }>) {
   });
 }
 
-export function MiniPlanCard({ data, onApprove }: { data: PlanProposal; onApprove?: () => void }) {
+export function MiniPlanCard({ data }: { data: PlanProposal }) {
   const steps = Array.isArray(data.steps) ? data.steps : [];
   const normalizedSteps = steps.map((s: unknown, _i: number) => {
     if (typeof s === 'string') return { description: s };
@@ -371,18 +371,6 @@ export function MiniPlanCard({ data, onApprove }: { data: PlanProposal; onApprov
         })}
       </div>
 
-      {data.requiresApproval && pipelineStatus === 'plan_awaiting' && onApprove && (
-        <div style={{ marginTop: 10, textAlign: 'center' }}>
-          <Button
-            type="primary"
-            size="small"
-            onClick={onApprove}
-            style={{ borderRadius: 6, fontSize: 12 }}
-          >
-            确认执行
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

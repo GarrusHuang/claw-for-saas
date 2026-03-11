@@ -11,7 +11,6 @@
  * - 聊天消息管理
  * - Agent 文字回复 (agentMessage SSE → 聊天气泡)
  * - 自由对话 (无场景时使用 general_chat)
- * - Plan 修改：plan_awaiting 时允许用户输入修改意见
  * - 多 Session 管理：通过 sessionAction store 与 CoworkSidebar 通信
  * - Pipeline 完成后自动回调 (fullscreen → sidepanel + onScenarioComplete)
  */
@@ -164,25 +163,6 @@ export function useAIChat() {
       const scenarioKey = scenario || activeScenario;
       const scenarios = getAIConfig().scenarios;
 
-      // plan_awaiting 时允许用户输入修改意见 (同 session, planMode=true)
-      if (pipelineStatus === 'plan_awaiting' && pipeline.sessionId && scenarioKey) {
-        const config = scenarios[scenarioKey];
-        if (!config) return;
-        addMessage('user', text);
-        await pipeline.invoke({
-          action: config.action,
-          businessType: config.businessType,
-          userMessage: text,
-          sessionId: pipeline.sessionId,
-          planMode: true,
-          candidateTypes: config.candidateTypes,
-          formFields: config.formFields,
-          auditRules: config.auditRules,
-          knownValues: config.knownValues,
-        });
-        return;
-      }
-
       // ── 自由对话 (无场景) ──
       if (!scenarioKey) {
         addMessage('user', text);
@@ -243,27 +223,6 @@ export function useAIChat() {
     [sendMessage, setActiveScenario],
   );
 
-  /** 确认执行方案 (Plan Mode → Execute Mode) */
-  const approvePlan = useCallback(async () => {
-    if (!activeScenario || !pipeline.sessionId) return;
-    const config = getAIConfig().scenarios[activeScenario];
-    if (!config) return;
-
-    addMessage('user', '确认执行');
-
-    await pipeline.invoke({
-      action: config.action,
-      businessType: config.businessType,
-      userMessage: '用户已确认方案，请按计划执行。',
-      sessionId: pipeline.sessionId,
-      planMode: false,  // EXECUTE 模式
-      candidateTypes: config.candidateTypes,
-      formFields: config.formFields,
-      auditRules: config.auditRules,
-      knownValues: config.knownValues,
-    });
-  }, [activeScenario, pipeline, addMessage]);
-
   // ── 多 Session 管理 ──
 
   const fetchSessions = useCallback(async () => {
@@ -299,14 +258,12 @@ export function useAIChat() {
   useEffect(() => {
     if (
       prevStatusRef.current === 'running' &&
-      (pipelineStatus === 'completed' || pipelineStatus === 'failed' || pipelineStatus === 'plan_awaiting')
+      (pipelineStatus === 'completed' || pipelineStatus === 'failed')
     ) {
       const currentAgentMsg = usePipelineStore.getState().agentMessage;
       const hasStreamingBubble = !!streamingMsgIdRef.current;
       if (!currentAgentMsg && !hasStreamingBubble) {
-        if (pipelineStatus === 'plan_awaiting') {
-          addMessage('assistant', '方案已制定，请查看执行计划并确认。如需修改，请在下方输入修改意见。');
-        } else if (pipelineStatus === 'completed') {
+        if (pipelineStatus === 'completed') {
           addMessage('assistant', '处理完成！已为您填写好表单，您可以在左侧查看并编辑。');
         } else {
           addMessage('assistant', '处理过程中遇到了问题，请稍后重试或联系管理员。');
@@ -332,7 +289,6 @@ export function useAIChat() {
     sendMessage,
     selectScenario,
     addMessage,
-    approvePlan,
     scenarioConfig,
     // 多 Session
     sessions,
@@ -341,7 +297,6 @@ export function useAIChat() {
     isRunning: pipelineStatus === 'running',
     isCompleted: pipelineStatus === 'completed',
     isFailed: pipelineStatus === 'failed',
-    isPlanAwaiting: pipelineStatus === 'plan_awaiting',
     hasPlan: !!plan,
     plan,
     pipeline,

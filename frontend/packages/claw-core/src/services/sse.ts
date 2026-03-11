@@ -153,9 +153,20 @@ export class AgentSSEClient {
     }, this.connectionTimeoutMs);
 
     try {
+      // Build headers with auth token
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const { getAIConfig } = await import('../config.ts');
+      const config = getAIConfig();
+      if (config.getAuthToken) {
+        const token = await config.getAuthToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      } else if (config.authToken) {
+        headers['Authorization'] = `Bearer ${config.authToken}`;
+      }
+
       const response = await fetch(this.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(this.requestBody),
         signal: this.abortController.signal,
       });

@@ -40,9 +40,8 @@ interface PipelineState {
   steps: StepProgress[];
   currentStep: string;
 
-  // Plan mode
+  // Plan (progress display only)
   plan: PlanProposal | null;
-  planMode: boolean;
   agentPlanProposed: boolean;
   agentMessage: string | null;
 
@@ -100,7 +99,6 @@ interface PipelineState {
   setDocument: (data: GeneratedDocument) => void;
   addDocument: (data: GeneratedDocument) => void;
   setPlan: (data: PlanProposal) => void;
-  setPlanMode: (mode: boolean) => void;
   clearPlan: () => void;
   setAgentPlanProposed: (v: boolean) => void;
   setAgentMessage: (msg: string) => void;
@@ -142,7 +140,6 @@ const initialState = {
   sessionId: null as string | null,
   conversationHistory: [] as ConversationTurn[],
   plan: null as PlanProposal | null,
-  planMode: true,
   agentPlanProposed: false,
   agentMessage: null as string | null,
   streamingText: '',
@@ -257,7 +254,6 @@ export const usePipelineStore = create<PipelineState>((set) => ({
   addDocument: (data) => set((state) => ({ documents: [...state.documents, data] })),
 
   setPlan: (data) => set({ plan: data }),
-  setPlanMode: (mode) => set({ planMode: mode }),
   clearPlan: () => set({ plan: null }),
   setAgentPlanProposed: (v) => set({ agentPlanProposed: v }),
   setAgentMessage: (msg) => set({ agentMessage: msg }),
@@ -292,9 +288,7 @@ export const usePipelineStore = create<PipelineState>((set) => ({
 
   completePipeline: (status, durationMs) =>
     set({
-      status: status === 'plan_awaiting_approval'
-        ? 'plan_awaiting'
-        : status === 'success' ? 'completed' : 'failed',
+      status: status === 'success' ? 'completed' : 'failed',
       completedAt: Date.now(),
       durationMs,
     }),

@@ -176,7 +176,6 @@ describe('MiniPlanCard', () => {
             { step: 3, description: '执行审计规则' },
           ],
           estimatedActions: 15,
-          requiresApproval: false,
         }}
       />,
     );
@@ -198,7 +197,6 @@ describe('MiniPlanCard', () => {
           detail: '',
           steps: [],
           estimatedActions: 0,
-          requiresApproval: false,
         }}
       />,
     );
@@ -216,7 +214,6 @@ describe('MiniPlanCard', () => {
           detail: '',
           steps: ['step one', 'step two'] as unknown as Array<{ step: number; description: string }>,
           estimatedActions: 5,
-          requiresApproval: false,
         }}
       />,
     );

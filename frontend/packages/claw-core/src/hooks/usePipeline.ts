@@ -24,7 +24,6 @@ export interface InvokeParams {
   userId?: string;
   sessionId?: string;
   userMessage?: string;
-  planMode?: boolean;
   materials?: Array<{
     material_id: string;
     material_type: string;
@@ -72,11 +71,7 @@ export function usePipeline() {
         state.fieldValues.length > 0 ||
         state.auditSummary ||
         state.document;
-      // Plan Mode: 有 plan 且 requiresApproval → 视为 plan_awaiting
-      if (state.plan?.requiresApproval) {
-        console.warn('[usePipeline] Idle timeout with requires_approval plan — treating as plan_awaiting');
-        store.completePipeline('plan_awaiting_approval', Date.now() - (state.startedAt || Date.now()));
-      } else if (hasResults) {
+      if (hasResults) {
         console.warn('[usePipeline] Idle timeout but has results — treating as completed');
         store.completePipeline('success', Date.now() - (state.startedAt || Date.now()));
       } else {
@@ -115,23 +110,12 @@ export function usePipeline() {
         store.addConversationTurn('user', params.userMessage);
       }
 
-      // 设置 plan mode 状态
-      const planMode = params.planMode ?? true;
-      store.setPlanMode(planMode);
-
       const requestBody = {
         user_id: params.userId || 'U001',
         session_id: params.sessionId || store.sessionId || undefined,
         message: params.userMessage || `请帮我处理${params.action}`,
         business_type: params.action,
-        plan_mode: planMode,
-        context: {
-          form_fields: params.formFields || [],
-          audit_rules: params.auditRules || [],
-          candidate_types: params.candidateTypes || [],
-          known_values: params.knownValues || [],
-          materials: params.materials || [],
-        },
+        materials: params.materials || [],
       };
 
       const client = new AgentSSEClient('/api/chat', requestBody, {
@@ -330,13 +314,8 @@ export function usePipeline() {
             detail: (data.detail as string) || '',
             steps: safeSteps,
             estimatedActions: (data.estimated_actions as number) || 0,
-            requiresApproval: !!(data.requires_approval),
           });
-          // plan step tracking: 仅 cowork 模式 (不需要确认) 立即初始化 todo list
-          // requires_approval=true 时等 EXECUTE 模式再初始化
-          if (!data.requires_approval) {
-            store.initPlanSteps(safeSteps);
-          }
+          store.initPlanSteps(safeSteps);
           store.addEvent({
             type: 'plan_proposed',
             data,
@@ -361,11 +340,7 @@ export function usePipeline() {
         })
         .on('pipeline_complete', (data) => {
           touchIdleTimer();
-          // Phase 21: 仅执行完成时标记所有步骤完成 (plan_awaiting 时不标记)
-          const pipelineStatus = data.status as string;
-          if (pipelineStatus !== 'plan_awaiting_approval') {
-            store.completePlanSteps();
-          }
+          store.completePlanSteps();
           store.completePipeline(
             data.status as string,
             (data.duration_ms as number) || 0,
@@ -402,7 +377,7 @@ export function usePipeline() {
             timestamp: Date.now(),
           });
         })
-        // ── EXECUTE 模式: 后端推送 plan steps 初始化 todo list ──
+        // ── 后端推送 plan steps 初始化 todo list ──
         .on('plan_steps_init', (data) => {
           touchIdleTimer();
           let rawSteps = data.steps;
@@ -573,10 +548,7 @@ export function usePipeline() {
             state.auditSummary ||
             state.document;
 
-          if (state.plan?.requiresApproval) {
-            console.warn('[usePipeline] Stream ended with requires_approval plan — marking as plan_awaiting');
-            store.completePipeline('plan_awaiting_approval', Date.now() - (state.startedAt || Date.now()));
-          } else if (hasResults) {
+          if (hasResults) {
             console.warn('[usePipeline] Stream ended without pipeline_complete, but has results — marking as completed');
             store.completePipeline('success', Date.now() - (state.startedAt || Date.now()));
           } else {
@@ -607,7 +579,6 @@ export function usePipeline() {
     sessionId: store.sessionId,
     conversationHistory: store.conversationHistory,
     plan: store.plan,
-    planMode: store.planMode,
     steps: store.steps,
     currentStep: store.currentStep,
     inferredType: store.inferredType,
