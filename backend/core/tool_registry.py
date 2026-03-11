@@ -216,6 +216,10 @@ class ToolRegistry:
             pass
         return None
 
+    def list_tools(self) -> list[RegisteredTool]:
+        """返回所有已注册工具。"""
+        return list(self._tools.values())
+
     def get_schemas(self) -> list[dict]:
         """返回所有工具的 OpenAI function calling schema 列表。"""
         return [tool.schema for tool in self._tools.values()]
