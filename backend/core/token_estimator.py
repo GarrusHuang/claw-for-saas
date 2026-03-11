@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from functools import lru_cache
 
 
@@ -88,6 +89,8 @@ def estimate_tokens_conservative(text: str) -> int:
 
 _msg_token_cache: dict[str, int] = {}
 _CACHE_MAX_SIZE = 2000
+_cache_created_at: float = 0.0
+_CACHE_TTL_S = 3600  # 1 hour
 
 
 def _msg_cache_key(msg: dict) -> str:
@@ -109,7 +112,14 @@ def _msg_cache_key(msg: dict) -> str:
 
 def _estimate_single_message_tokens(msg: dict) -> int:
     """估算单条消息的 token 数 (带缓存)。"""
-    global _msg_token_cache
+    global _msg_token_cache, _cache_created_at
+
+    now = time.time()
+    if _cache_created_at == 0.0:
+        _cache_created_at = now
+    elif now - _cache_created_at > _CACHE_TTL_S:
+        _msg_token_cache.clear()
+        _cache_created_at = now
 
     key = _msg_cache_key(msg)
     if key in _msg_token_cache:
@@ -176,5 +186,6 @@ def estimate_messages_tokens(
 
 def invalidate_cache() -> None:
     """清空 token 估算缓存。"""
-    global _msg_token_cache
+    global _msg_token_cache, _cache_created_at
     _msg_token_cache.clear()
+    _cache_created_at = 0.0

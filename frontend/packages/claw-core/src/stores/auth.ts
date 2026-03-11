@@ -103,6 +103,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (user.expiresAt && Date.now() > user.expiresAt) {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
+        set({ token: null, userId: null, tenantId: null, expiresAt: null });
         return;
       }
       set({
@@ -114,6 +115,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
+      set({ token: null, userId: null, tenantId: null, expiresAt: null });
     }
   },
 

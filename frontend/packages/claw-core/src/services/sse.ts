@@ -148,12 +148,10 @@ export class AgentSSEClient {
     this.abortController = new AbortController();
     this._connected = true;
 
-    const timeoutId = setTimeout(() => {
-      this.abortController?.abort();
-    }, this.connectionTimeoutMs);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
-      // Build headers with auth token
+      // Build headers with auth token BEFORE starting timeout
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       const { getAIConfig } = await import('../config.ts');
       const config = getAIConfig();
@@ -164,13 +162,18 @@ export class AgentSSEClient {
         headers['Authorization'] = `Bearer ${config.authToken}`;
       }
 
+      // Start timeout AFTER auth resolution
+      timeoutId = setTimeout(() => {
+        this.abortController?.abort();
+      }, this.connectionTimeoutMs);
+
       const response = await fetch(this.url, {
         method: 'POST',
         headers,
         body: JSON.stringify(this.requestBody),
         signal: this.abortController.signal,
       });
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -208,7 +211,7 @@ export class AgentSSEClient {
         }
       }
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       if (this._userCancelled) return;
       throw err;
     } finally {
