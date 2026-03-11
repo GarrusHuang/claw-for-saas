@@ -76,13 +76,6 @@ describe('Pipeline Store', () => {
     expect(s.completedAt).not.toBeNull();
   });
 
-  it('completePipeline maps plan_awaiting_approval to plan_awaiting', () => {
-    const store = usePipelineStore.getState();
-    store.startPipeline('test', []);
-    store.completePipeline('plan_awaiting_approval', 800);
-    expect(usePipelineStore.getState().status).toBe('plan_awaiting');
-  });
-
   it('completePipeline maps error to failed', () => {
     const store = usePipelineStore.getState();
     store.startPipeline('test', []);
@@ -158,7 +151,6 @@ describe('Pipeline Store', () => {
       detail: '# Plan',
       steps: [{ step: 1, description: 'step 1' }],
       estimatedActions: 10,
-      requiresApproval: true,
     };
 
     store.setPlan(plan);

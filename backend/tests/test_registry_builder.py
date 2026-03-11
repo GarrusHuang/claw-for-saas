@@ -11,8 +11,6 @@ from tools.registry_builder import (
     build_capability_registry,
     build_plan_registry,
     build_full_registry,
-    build_auto_registry,
-    build_execute_registry,
 )
 
 
@@ -104,15 +102,3 @@ class TestBuildFullRegistry:
         assert len(names) == len(set(names))
 
 
-class TestBackwardsCompat:
-    def test_auto_is_full(self):
-        """A2: build_auto_registry is alias for build_full_registry."""
-        auto = build_auto_registry()
-        full = build_full_registry()
-        assert set(auto.get_tool_names()) == set(full.get_tool_names())
-
-    def test_execute_is_full(self):
-        """A2: build_execute_registry is alias for build_full_registry."""
-        execute = build_execute_registry()
-        full = build_full_registry()
-        assert set(execute.get_tool_names()) == set(full.get_tool_names())

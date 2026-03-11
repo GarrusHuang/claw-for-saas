@@ -17,6 +17,10 @@ export interface AIConfig {
   onScenarioComplete?: (scenarioKey: string, status: string) => void;
   /** SPA 导航函数 — 由 React Router 注入，避免 window.location.href 硬刷新 */
   navigateFn?: (path: string) => void;
+  /** 认证 token — 注入后所有 API 请求自动携带 Authorization header */
+  authToken?: string;
+  /** 动态获取 token 的函数 (优先于 authToken 静态值) */
+  getAuthToken?: () => string | null | Promise<string | null>;
 }
 
 let _config: AIConfig = {

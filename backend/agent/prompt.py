@@ -131,9 +131,6 @@ class PromptBuilder:
         session_id: str = "",
         mode: str = "full",
         tool_summaries: list[ToolSummary] | None = None,
-        # Deprecated — ignored, kept for caller compatibility during transition
-        business_context: dict | None = None,
-        plan_mode: bool = True,
     ) -> str:
         """
         构建系统提示。

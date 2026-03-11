@@ -3,7 +3,6 @@ import { Typography, Spin, Button } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
-  ClockCircleOutlined,
   ThunderboltOutlined,
   BulbOutlined,
   ToolOutlined,
@@ -50,8 +49,7 @@ function PlanCard() {
   if (!agentPlanProposed || !plan) return null;
 
   const steps = Array.isArray(plan.steps) ? plan.steps : [];
-  const isPlanAwaiting = plan.requiresApproval && status === 'plan_awaiting';
-  const isConfirmed = plan.requiresApproval && status !== 'plan_awaiting' && status !== 'idle';
+  const isExecuting = status === 'running';
 
   // 是否有完整的 Markdown 文档
   const hasDetail = !!plan.detail && plan.detail.trim().length > 0;
@@ -63,13 +61,10 @@ function PlanCard() {
         <div className="plan-document-title-row">
           <ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 16 }} />
           <span className="plan-document-title">执行方案</span>
-          {isPlanAwaiting && (
-            <span className="plan-document-badge plan-document-badge--awaiting">待确认</span>
-          )}
-          {isConfirmed && (
+          {isExecuting && (
             <span className="plan-document-badge plan-document-badge--confirmed">执行中</span>
           )}
-          {!plan.requiresApproval && (
+          {!isExecuting && (
             <span className="plan-document-badge plan-document-badge--auto">自主执行</span>
           )}
         </div>
@@ -104,11 +99,11 @@ function PlanCard() {
 
       {/* ── 操作区 ── */}
       <div className="plan-document-footer">
-        {isConfirmed && (
+        {isExecuting && (
           <div className="plan-document-actions">
             <Text type="success" style={{ fontSize: 12 }}>
               <CheckCircleOutlined style={{ marginRight: 4 }} />
-              已确认，正在执行...
+              正在执行...
             </Text>
           </div>
         )}
@@ -173,16 +168,6 @@ function InlinePipelineProgress() {
         {auditSummary && <MiniAuditSummary data={auditSummary} />}
         {document && <DocumentPresenter document={document} />}
       </CollapsibleBlock>
-
-      {/* Plan Mode 等待确认 */}
-      {status === 'plan_awaiting' && (
-        <div style={{ textAlign: 'center', marginTop: 8 }}>
-          <Text type="warning" style={{ fontSize: 11 }}>
-            <ClockCircleOutlined style={{ color: '#faad14', marginRight: 4 }} />
-            方案待确认
-          </Text>
-        </div>
-      )}
 
       {/* 完成提示 */}
       {status === 'completed' && durationMs > 0 && (

@@ -47,6 +47,8 @@ export type {
 export { usePipelineStore } from './stores/pipeline.ts';
 export { useAIChatStore } from './stores/ai-chat.ts';
 export type { ChatDialogState, SessionAction, AIChatState } from './stores/ai-chat.ts';
+export { useAuthStore } from './stores/auth.ts';
+export type { AuthState } from './stores/auth.ts';
 
 // ── Services ──
 export { AgentSSEClient } from './services/sse.ts';
