@@ -132,6 +132,49 @@ class DatabaseService:
                     expires_at  REAL,
                     FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
                 );
+
+                -- A10: 用量统计 — 原始 pipeline 执行记录
+                CREATE TABLE IF NOT EXISTS usage_events (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id         TEXT NOT NULL,
+                    user_id           TEXT NOT NULL,
+                    session_id        TEXT NOT NULL,
+                    business_type     TEXT NOT NULL DEFAULT 'general_chat',
+                    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens      INTEGER NOT NULL DEFAULT 0,
+                    tool_call_count   INTEGER NOT NULL DEFAULT 0,
+                    iterations        INTEGER NOT NULL DEFAULT 0,
+                    duration_ms       REAL NOT NULL DEFAULT 0.0,
+                    status            TEXT NOT NULL DEFAULT 'success',
+                    model             TEXT NOT NULL DEFAULT '',
+                    tool_names        TEXT NOT NULL DEFAULT '[]',
+                    created_at        REAL NOT NULL,
+                    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_usage_tenant_date
+                    ON usage_events(tenant_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_usage_user_date
+                    ON usage_events(tenant_id, user_id, created_at);
+
+                -- A10: 用量统计 — 日汇总（UPSERT 更新）
+                CREATE TABLE IF NOT EXISTS usage_daily (
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id               TEXT NOT NULL,
+                    user_id                 TEXT NOT NULL,
+                    date                    TEXT NOT NULL,
+                    total_requests          INTEGER NOT NULL DEFAULT 0,
+                    total_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+                    total_completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens            INTEGER NOT NULL DEFAULT 0,
+                    total_tool_calls        INTEGER NOT NULL DEFAULT 0,
+                    total_duration_ms       REAL NOT NULL DEFAULT 0.0,
+                    success_count           INTEGER NOT NULL DEFAULT 0,
+                    failed_count            INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(tenant_id, user_id, date)
+                );
+                CREATE INDEX IF NOT EXISTS idx_daily_tenant_date
+                    ON usage_daily(tenant_id, date);
             """)
             conn.commit()
             logger.info(f"Database initialized: {self.db_path}")

@@ -27,6 +27,8 @@ from api.file_routes import router as file_router
 from core.logging import setup_logging
 from api.hook_rule_routes import router as hook_rule_router
 from api.plugin_routes import router as plugin_router
+from api.usage_routes import router as usage_admin_router
+from api.my_usage_routes import router as my_usage_router
 
 
 @asynccontextmanager
@@ -96,6 +98,8 @@ app.include_router(skill_router)
 app.include_router(file_router)
 app.include_router(hook_rule_router)
 app.include_router(plugin_router)
+app.include_router(usage_admin_router)
+app.include_router(my_usage_router)
 
 
 @app.get("/")
