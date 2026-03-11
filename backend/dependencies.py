@@ -120,6 +120,44 @@ def get_hook_rule_engine():
     return HookRuleEngine(os.path.join(_BACKEND_ROOT, "data", "hook_rules"))
 
 
+@lru_cache()
+def get_prompt_builder():
+    from agent.prompt import PromptBuilder
+    return PromptBuilder()
+
+
+@lru_cache()
+def get_plugin_registry():
+    """PluginRegistry 单例 — 启动时加载插件。"""
+    from core.plugin import PluginRegistry, PluginContext
+
+    registry = PluginRegistry()
+    s = get_settings()
+
+    # 构建插件上下文 (四维扩展点)
+    plugin_tool_registry = ToolRegistry()
+    ctx = PluginContext(
+        tool_registry=plugin_tool_registry,
+        prompt_builder=get_prompt_builder(),
+        skill_loader=get_skill_loader(),
+    )
+
+    # 从目录加载
+    plugins_dir = os.path.join(_BACKEND_ROOT, s.plugins_dir)
+    dir_count = registry.load_from_directory(plugins_dir, ctx)
+
+    # 从 entry_points 加载
+    ep_count = registry.load_from_entry_points("claw.plugins", ctx)
+
+    if dir_count or ep_count:
+        logger.info(f"Plugins loaded: {dir_count} from directory, {ep_count} from entry_points")
+
+    # 保存插件工具注册表供 build_gateway merge
+    registry._plugin_tool_registry = plugin_tool_registry  # type: ignore[attr-defined]
+
+    return registry
+
+
 def build_gateway():
     """
     Build Agent Gateway.
@@ -127,16 +165,24 @@ def build_gateway():
     Creates a new Gateway instance per request (EventBus is request-scoped).
     """
     from agent.gateway import AgentGateway
-    from agent.prompt import PromptBuilder
     from agent.subagent import SubagentRunner
     from agent.hooks import build_default_hooks
 
     llm_client = get_llm_client()
     shared_registry = get_shared_registry()
     capability_registry = build_capability_registry()
+    prompt_builder = get_prompt_builder()
+
+    # 合并插件工具到 auto/execute registry
+    plugin_registry = get_plugin_registry()
+    plugin_tools: ToolRegistry | None = getattr(plugin_registry, "_plugin_tool_registry", None)
 
     tool_registry = build_auto_registry()
     execute_registry = build_execute_registry()
+
+    if plugin_tools and len(plugin_tools) > 0:
+        tool_registry = tool_registry.merge(plugin_tools)
+        execute_registry = execute_registry.merge(plugin_tools)
 
     session_manager = get_session_manager()
 
@@ -144,6 +190,7 @@ def build_gateway():
         llm_client=llm_client,
         shared_registry=shared_registry,
         capability_registry=capability_registry,
+        prompt_builder=prompt_builder,
     )
 
     return AgentGateway(
@@ -152,7 +199,7 @@ def build_gateway():
         execute_registry=execute_registry,
         session_manager=session_manager,
         skill_loader=get_skill_loader(),
-        prompt_builder=PromptBuilder(),
+        prompt_builder=prompt_builder,
         subagent_runner=subagent_runner,
         correction_memory=get_correction_memory(),
         learning_memory=get_learning_memory(),

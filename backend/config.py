@@ -77,6 +77,12 @@ class Settings(BaseSettings):
         description="External API base URL for custom tool bridges",
     )
 
+    # ─── Plugins ───
+    plugins_dir: str = Field(
+        default="plugins",
+        description="Plugins directory path",
+    )
+
     # ─── Skills ───
     skills_dir: str = Field(
         default="skills",
