@@ -17,6 +17,7 @@ from typing import Any
 
 from core.context import (
     current_event_bus, current_session_id, current_user_id,
+    current_tenant_id,
     current_skill_loader, current_file_service, current_browser_service,
     current_known_field_ids, current_business_context,
     current_plan_tracker,
@@ -78,6 +79,7 @@ class AgentGateway:
     async def chat(
         self,
         *,
+        tenant_id: str = "default",
         user_id: str = "U001",
         session_id: str | None = None,
         message: str,
@@ -108,6 +110,7 @@ class AgentGateway:
         # ── 1. 设置 contextvars ──
         if event_bus:
             current_event_bus.set(event_bus)
+        current_tenant_id.set(tenant_id)
         current_user_id.set(user_id)
 
         # 注入 SubagentRunner 到 contextvars
@@ -160,11 +163,11 @@ class AgentGateway:
         current_correction_memory.set(self.correction_memory)
 
         # ── 2. 解析/创建会话 ──
-        if session_id and self.session_manager.session_exists(user_id, session_id):
+        if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):
             logger.info(f"Resuming session: {session_id}")
         else:
             session_id = self.session_manager.create_session(
-                user_id, {"business_type": business_type}
+                tenant_id, user_id, {"business_type": business_type}
             )
             logger.info(f"New session: {session_id}")
 
@@ -178,7 +181,7 @@ class AgentGateway:
             })
 
         # ── 3. 加载会话历史 ──
-        history_messages = self.session_manager.load_messages(user_id, session_id)
+        history_messages = self.session_manager.load_messages(tenant_id, user_id, session_id)
 
         # ── 4. 加载 Skills ──
         skill_knowledge = ""
@@ -272,7 +275,7 @@ class AgentGateway:
             tools = self.execute_registry  # EXECUTE: 32 tools (无 propose_plan)
 
             # EXECUTE 模式: 从 session 中恢复 PlanTracker
-            self._rebuild_plan_tracker(user_id, session_id, event_bus)
+            self._rebuild_plan_tracker(tenant_id, user_id, session_id, event_bus)
 
         # ── 9. 创建 AgenticRuntime 并执行 ──
         runtime = AgenticRuntime(
@@ -312,19 +315,19 @@ class AgentGateway:
 
         # ── 10. 持久化会话 ──
         self.session_manager.append_message(
-            user_id, session_id,
+            tenant_id, user_id, session_id,
             {"role": "user", "content": message, "ts": start_time},
         )
         self.session_manager.append_message(
-            user_id, session_id,
+            tenant_id, user_id, session_id,
             {"role": "assistant", "content": result.final_answer, "ts": time.time()},
         )
 
         # 上下文压缩检查
-        history = self.session_manager.load_messages(user_id, session_id)
+        history = self.session_manager.load_messages(tenant_id, user_id, session_id)
         if len(history) > 20:
             try:
-                await self.session_manager.compact(user_id, session_id, self.llm_client)
+                await self.session_manager.compact(tenant_id, user_id, session_id, self.llm_client)
             except Exception as e:
                 logger.warning(f"Session compaction failed: {e}")
 
@@ -381,7 +384,7 @@ class AgentGateway:
                 if evt.event_type == "plan_proposed":
                     steps = evt.data.get("steps", [])
                     if steps:
-                        self.session_manager.save_plan_steps(user_id, session_id, steps)
+                        self.session_manager.save_plan_steps(tenant_id, user_id, session_id, steps)
                     break
 
         # ── 13.7. 记录成功经验到 LearningMemory ──
@@ -437,6 +440,7 @@ class AgentGateway:
 
     def _rebuild_plan_tracker(
         self,
+        tenant_id: str,
         user_id: str,
         session_id: str,
         event_bus: EventBus | None,
@@ -444,7 +448,7 @@ class AgentGateway:
         """EXECUTE 模式: 从 session 中读取 plan steps, 重建 PlanTracker。"""
         from agent.plan_tracker import PlanTracker
 
-        steps = self.session_manager.load_plan_steps(user_id, session_id)
+        steps = self.session_manager.load_plan_steps(tenant_id, user_id, session_id)
         if steps:
             tracker = PlanTracker(steps, event_bus=event_bus)
             current_plan_tracker.set(tracker)

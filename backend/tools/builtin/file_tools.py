@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from core.context import current_event_bus, current_user_id
+from core.context import current_event_bus, current_user_id, current_tenant_id
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -40,11 +40,12 @@ def _get_file_service():
 def read_uploaded_file(file_id: str) -> dict:  # 文件 ID
     """读取用户上传的文件，返回提取的文本内容。"""
     service = _get_file_service()
+    tenant_id = current_tenant_id.get()
     user_id = current_user_id.get()
 
     try:
-        text = service.extract_text(user_id, file_id)
-        metadata, _ = service.get_file(user_id, file_id)
+        text = service.extract_text(tenant_id, user_id, file_id)
+        metadata, _ = service.get_file(tenant_id, user_id, file_id)
         return {
             "file_id": file_id,
             "filename": metadata.filename,
@@ -70,10 +71,11 @@ def read_uploaded_file(file_id: str) -> dict:  # 文件 ID
 def list_user_files() -> dict:
     """列出当前用户的所有文件。"""
     service = _get_file_service()
+    tenant_id = current_tenant_id.get()
     user_id = current_user_id.get()
 
     try:
-        files = service.list_files(user_id)
+        files = service.list_files(tenant_id, user_id)
         return {
             "user_id": user_id,
             "file_count": len(files),
@@ -102,10 +104,11 @@ def list_user_files() -> dict:
 def analyze_file(file_id: str) -> dict:  # 文件 ID
     """分析文件结构，返回详细元信息。"""
     service = _get_file_service()
+    tenant_id = current_tenant_id.get()
     user_id = current_user_id.get()
 
     try:
-        metadata, content = service.get_file(user_id, file_id)
+        metadata, content = service.get_file(tenant_id, user_id, file_id)
         ext = metadata.filename.rsplit(".", 1)[-1].lower() if "." in metadata.filename else ""
 
         analysis = {

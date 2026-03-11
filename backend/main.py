@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from api.auth import router as auth_router
+from api.admin import router as admin_router
 from api.routes import router as agent_router
 from api.session_routes import router as session_router
 from api.correction_routes import router as correction_router
@@ -33,6 +35,11 @@ async def lifespan(app: FastAPI):
     setup_logging(level="INFO", format="console")
     logger = logging.getLogger(__name__)
     logger.info("Claw-for-SaaS backend starting...")
+
+    # Initialize database (creates default tenant + admin if needed)
+    from dependencies import get_database
+    get_database()
+    logger.info("Database initialized")
 
     # Load plugins
     from dependencies import get_plugin_registry
@@ -79,6 +86,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(agent_router)
 app.include_router(session_router)
 app.include_router(correction_router)

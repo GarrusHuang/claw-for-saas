@@ -8,9 +8,11 @@ from __future__ import annotations
 import logging
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from core.auth import AuthUser, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ class SkillImportRequest(BaseModel):
 # ── CRUD 端点 ──
 
 @router.get("")
-async def list_skills():
+async def list_skills(_user: AuthUser = Depends(get_current_user)):
     """列出所有已注册的 Skills。"""
     from dependencies import get_skill_loader
 
@@ -50,7 +52,7 @@ async def list_skills():
 
 
 @router.get("/{skill_name}")
-async def get_skill_detail(skill_name: str):
+async def get_skill_detail(skill_name: str, _user: AuthUser = Depends(get_current_user)):
     """获取单个 Skill 的元数据和正文。"""
     from dependencies import get_skill_loader
 
@@ -64,7 +66,7 @@ async def get_skill_detail(skill_name: str):
 
 
 @router.post("")
-async def create_skill(req: SkillCreateRequest):
+async def create_skill(req: SkillCreateRequest, _user: AuthUser = Depends(get_current_user)):
     """创建新 Skill。"""
     from dependencies import get_skill_loader
 
@@ -104,7 +106,7 @@ async def create_skill(req: SkillCreateRequest):
 
 
 @router.put("/{skill_name}")
-async def update_skill(skill_name: str, req: SkillCreateRequest):
+async def update_skill(skill_name: str, req: SkillCreateRequest, _user: AuthUser = Depends(get_current_user)):
     """更新已有 Skill。"""
     from dependencies import get_skill_loader
 
@@ -129,7 +131,7 @@ async def update_skill(skill_name: str, req: SkillCreateRequest):
 
 
 @router.delete("/{skill_name}")
-async def delete_skill(skill_name: str):
+async def delete_skill(skill_name: str, _user: AuthUser = Depends(get_current_user)):
     """删除 Skill。"""
     from dependencies import get_skill_loader
 
@@ -141,7 +143,7 @@ async def delete_skill(skill_name: str):
 
 
 @router.post("/import")
-async def import_skill(req: SkillImportRequest):
+async def import_skill(req: SkillImportRequest, _user: AuthUser = Depends(get_current_user)):
     """
     导入 Skill — 支持两种方式:
     1. content: 直接粘贴 SKILL.md 原始内容

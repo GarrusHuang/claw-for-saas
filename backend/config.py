@@ -111,6 +111,42 @@ class Settings(BaseSettings):
         description="User correction memory decay days",
     )
 
+    # ─── Auth ───
+    auth_enabled: bool = Field(
+        default=False,
+        description="Enable authentication (False = dev mode with default user)",
+    )
+    auth_mode: str = Field(
+        default="jwt",
+        description="Auth mode: jwt | api_key",
+    )
+    auth_jwt_secret: str = Field(
+        default="",
+        description="JWT HS256 secret key",
+    )
+    auth_jwt_algorithm: str = Field(
+        default="HS256",
+        description="JWT algorithm",
+    )
+    auth_session_expire_s: int = Field(
+        default=86400,
+        description="JWT token lifetime in seconds",
+    )
+    auth_default_tenant_id: str = Field(
+        default="default",
+        description="Default tenant ID when auth is disabled",
+    )
+    auth_default_user_id: str = Field(
+        default="U001",
+        description="Default user ID when auth is disabled",
+    )
+
+    # ─── Database ───
+    db_path: str = Field(
+        default="data/claw.db",
+        description="SQLite database file path",
+    )
+
     # ─── Logging ───
     log_level: str = Field(default="INFO")
     log_format: str = Field(

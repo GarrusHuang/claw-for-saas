@@ -2,21 +2,22 @@
 文件管理 API 路由。
 
 端点:
-- POST /api/files/upload           — 上传文件
-- GET  /api/files/{user_id}        — 列出用户文件
-- GET  /api/files/{user_id}/{fid}  — 文件元数据
-- GET  /api/files/{user_id}/{fid}/text — 提取文本
-- GET  /api/files/{user_id}/{fid}/download — 下载文件
-- DELETE /api/files/{user_id}/{fid} — 删除文件
+- POST /api/files/upload        — 上传文件
+- GET  /api/files/              — 列出用户文件
+- GET  /api/files/{file_id}     — 文件元数据
+- GET  /api/files/{file_id}/text — 提取文本
+- GET  /api/files/{file_id}/download — 下载文件
+- DELETE /api/files/{file_id}   — 删除文件
 """
 
 from __future__ import annotations
 
 import logging
 from urllib.parse import quote
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 
+from core.auth import AuthUser, get_current_user
 from dependencies import get_file_service
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    user_id: str = Form(default="U001"),
+    user: AuthUser = Depends(get_current_user),
 ):
     """上传文件到用户空间。"""
     service = get_file_service()
@@ -36,7 +37,7 @@ async def upload_file(
         content = await file.read()
         filename = file.filename or "unnamed"
 
-        metadata = service.save_file(user_id, filename, content)
+        metadata = service.save_file(user.tenant_id, user.user_id, filename, content)
 
         return {
             "file_id": metadata.file_id,
@@ -52,14 +53,14 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
 
-@router.get("/{user_id}")
-async def list_user_files(user_id: str):
+@router.get("/")
+async def list_user_files(user: AuthUser = Depends(get_current_user)):
     """列出用户所有文件。"""
     service = get_file_service()
 
-    files = service.list_files(user_id)
+    files = service.list_files(user.tenant_id, user.user_id)
     return {
-        "user_id": user_id,
+        "user_id": user.user_id,
         "files": [
             {
                 "file_id": f.file_id,
@@ -73,13 +74,13 @@ async def list_user_files(user_id: str):
     }
 
 
-@router.get("/{user_id}/{file_id}")
-async def get_file_metadata(user_id: str, file_id: str):
+@router.get("/{file_id}")
+async def get_file_metadata(file_id: str, user: AuthUser = Depends(get_current_user)):
     """获取文件元数据。"""
     service = get_file_service()
 
     try:
-        metadata, _ = service.get_file(user_id, file_id)
+        metadata, _ = service.get_file(user.tenant_id, user.user_id, file_id)
         return {
             "file_id": metadata.file_id,
             "filename": metadata.filename,
@@ -92,13 +93,13 @@ async def get_file_metadata(user_id: str, file_id: str):
         raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
 
 
-@router.get("/{user_id}/{file_id}/text")
-async def get_extracted_text(user_id: str, file_id: str):
+@router.get("/{file_id}/text")
+async def get_extracted_text(file_id: str, user: AuthUser = Depends(get_current_user)):
     """提取文件文本内容。"""
     service = get_file_service()
 
     try:
-        text = service.extract_text(user_id, file_id)
+        text = service.extract_text(user.tenant_id, user.user_id, file_id)
         return {
             "file_id": file_id,
             "text": text,
@@ -107,13 +108,13 @@ async def get_extracted_text(user_id: str, file_id: str):
         raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
 
 
-@router.get("/{user_id}/{file_id}/download")
-async def download_file(user_id: str, file_id: str):
+@router.get("/{file_id}/download")
+async def download_file(file_id: str, user: AuthUser = Depends(get_current_user)):
     """下载文件（返回原始文件内容）。"""
     service = get_file_service()
 
     try:
-        metadata, content = service.get_file(user_id, file_id)
+        metadata, content = service.get_file(user.tenant_id, user.user_id, file_id)
         # RFC 5987: 中文文件名用 UTF-8 编码
         encoded_name = quote(metadata.filename)
         return Response(
@@ -128,12 +129,12 @@ async def download_file(user_id: str, file_id: str):
         raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
 
 
-@router.delete("/{user_id}/{file_id}")
-async def delete_file(user_id: str, file_id: str):
+@router.delete("/{file_id}")
+async def delete_file(file_id: str, user: AuthUser = Depends(get_current_user)):
     """删除文件。"""
     service = get_file_service()
 
-    deleted = service.delete_file(user_id, file_id)
+    deleted = service.delete_file(user.tenant_id, user.user_id, file_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
     return {"status": "ok", "file_id": file_id}

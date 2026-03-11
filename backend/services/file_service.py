@@ -84,19 +84,19 @@ class FileService:
             name = name[:200 - len(ext)] + ext
         return name or "unnamed_file"
 
-    def _user_dir(self, user_id: str) -> Path:
-        """获取用户目录，防止穿越。"""
-        # 清理 user_id
+    def _user_dir(self, tenant_id: str, user_id: str) -> Path:
+        """获取 tenant/user 目录，防止穿越。"""
+        safe_tid = re.sub(r'[^\w\-]', '_', tenant_id)
         safe_uid = re.sub(r'[^\w\-]', '_', user_id)
-        user_dir = self.base_dir / safe_uid
+        user_dir = self.base_dir / safe_tid / safe_uid
         # 验证路径在 base_dir 下
         resolved = user_dir.resolve()
         if not str(resolved).startswith(str(self.base_dir.resolve())):
-            raise ValueError(f"Path traversal detected: {user_id}")
+            raise ValueError(f"Path traversal detected: {tenant_id}/{user_id}")
         return user_dir
 
     def save_file(
-        self, user_id: str, filename: str, content: bytes
+        self, tenant_id: str, user_id: str, filename: str, content: bytes
     ) -> FileMetadata:
         """
         保存文件到用户空间。
@@ -128,7 +128,7 @@ class FileService:
             raise ValueError(f"Unsupported file extension: {ext}")
 
         # 4. 创建用户目录
-        user_dir = self._user_dir(user_id)
+        user_dir = self._user_dir(tenant_id, user_id)
         user_dir.mkdir(parents=True, exist_ok=True)
 
         # 5. 生成 file_id
@@ -171,7 +171,7 @@ class FileService:
         return metadata
 
     def get_file(
-        self, user_id: str, file_id: str
+        self, tenant_id: str, user_id: str, file_id: str
     ) -> tuple[FileMetadata, bytes]:
         """
         获取文件。
@@ -182,16 +182,16 @@ class FileService:
         Raises:
             FileNotFoundError: 文件不存在
         """
-        metadata = self._load_metadata(user_id, file_id)
+        metadata = self._load_metadata(tenant_id, user_id, file_id)
         ext = Path(metadata.filename).suffix.lower()
-        file_path = self._user_dir(user_id) / f"{file_id}{ext}"
+        file_path = self._user_dir(tenant_id, user_id) / f"{file_id}{ext}"
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_id}")
         return metadata, file_path.read_bytes()
 
-    def list_files(self, user_id: str) -> list[FileMetadata]:
+    def list_files(self, tenant_id: str, user_id: str) -> list[FileMetadata]:
         """列出用户所有文件。"""
-        user_dir = self._user_dir(user_id)
+        user_dir = self._user_dir(tenant_id, user_id)
         if not user_dir.exists():
             return []
 
@@ -204,21 +204,21 @@ class FileService:
                 logger.warning(f"Failed to load metadata: {meta_file}: {e}")
         return results
 
-    def delete_file(self, user_id: str, file_id: str) -> bool:
+    def delete_file(self, tenant_id: str, user_id: str, file_id: str) -> bool:
         """
         删除文件。
 
         Returns:
             True 表示成功删除, False 表示文件不存在
         """
-        user_dir = self._user_dir(user_id)
+        user_dir = self._user_dir(tenant_id, user_id)
         meta_path = user_dir / f"{file_id}.meta.json"
 
         if not meta_path.exists():
             return False
 
         try:
-            metadata = self._load_metadata(user_id, file_id)
+            metadata = self._load_metadata(tenant_id, user_id, file_id)
             ext = Path(metadata.filename).suffix.lower()
             file_path = user_dir / f"{file_id}{ext}"
 
@@ -236,7 +236,7 @@ class FileService:
             logger.error(f"Failed to delete file {file_id}: {e}")
             return False
 
-    def extract_text(self, user_id: str, file_id: str) -> str:
+    def extract_text(self, tenant_id: str, user_id: str, file_id: str) -> str:
         """
         从文件提取文本。
 
@@ -249,7 +249,7 @@ class FileService:
         Returns:
             提取的文本内容
         """
-        metadata, content = self.get_file(user_id, file_id)
+        metadata, content = self.get_file(tenant_id, user_id, file_id)
         ext = Path(metadata.filename).suffix.lower()
 
         try:
@@ -277,9 +277,9 @@ class FileService:
                 f"(文本提取失败: {e})"
             )
 
-    def _load_metadata(self, user_id: str, file_id: str) -> FileMetadata:
+    def _load_metadata(self, tenant_id: str, user_id: str, file_id: str) -> FileMetadata:
         """加载文件元数据。"""
-        user_dir = self._user_dir(user_id)
+        user_dir = self._user_dir(tenant_id, user_id)
         meta_path = user_dir / f"{file_id}.meta.json"
         if not meta_path.exists():
             raise FileNotFoundError(f"File not found: {file_id}")
