@@ -201,6 +201,14 @@ def get_hook_rule_engine():
 
 
 @lru_cache()
+def get_usage_service():
+    from services.usage_service import UsageService
+    s = get_settings()
+    db_path = os.path.join(_BACKEND_ROOT, s.db_path)
+    return UsageService(db_path=db_path)
+
+
+@lru_cache()
 def get_prompt_builder():
     from agent.prompt import PromptBuilder
     return PromptBuilder()

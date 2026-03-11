@@ -29,6 +29,8 @@ from api.hook_rule_routes import router as hook_rule_router
 from api.plugin_routes import router as plugin_router
 from api.schedule_routes import router as schedule_router
 from api.webhook_routes import router as webhook_router
+from api.usage_routes import router as usage_admin_router
+from api.my_usage_routes import router as my_usage_router
 
 
 @asynccontextmanager
@@ -116,6 +118,8 @@ app.include_router(hook_rule_router)
 app.include_router(plugin_router)
 app.include_router(schedule_router)
 app.include_router(webhook_router)
+app.include_router(usage_admin_router)
+app.include_router(my_usage_router)
 
 
 @app.get("/")
