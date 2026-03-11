@@ -445,3 +445,221 @@ class TestRegistryBuilder:
         tool_names = set(registry.get_tool_names())
         assert "spawn_subagent" in tool_names
         assert "spawn_subagents" in tool_names
+
+
+# ── A4-4h Subagent Context Isolation Tests ──
+
+
+class TestSubagentContextIsolation:
+    """A4-4h: 验证子智能体上下文隔离 — 独立 config / 工具集 / prompt / 执行。"""
+
+    @pytest.mark.asyncio
+    async def test_separate_runtime_config(self):
+        """子智能体创建独立的 RuntimeConfig(max_iterations=15)，不复用父级。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(task="测试任务")
+
+        # 验证 RuntimeConfig 是新创建的，max_iterations=15
+        call_kwargs = MockRuntime.call_args[1]
+        config = call_kwargs["config"]
+        assert config.max_iterations == 15
+        assert config.max_tokens_per_turn == 4096
+
+    @pytest.mark.asyncio
+    async def test_config_independent_from_parent(self):
+        """每次调用 run_subagent 都创建新的 RuntimeConfig 实例。"""
+        from core.runtime import RuntimeConfig
+
+        runner = _make_runner()
+
+        configs_seen = []
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(task="任务1")
+            configs_seen.append(MockRuntime.call_args[1]["config"])
+
+            await runner.run_subagent(task="任务2")
+            configs_seen.append(MockRuntime.call_args[1]["config"])
+
+        # 两次调用应该创建不同的 config 实例
+        assert configs_seen[0] is not configs_seen[1]
+        # 但值相同
+        assert configs_seen[0].max_iterations == configs_seen[1].max_iterations == 15
+
+    @pytest.mark.asyncio
+    async def test_separate_tool_registry_with_whitelist(self):
+        """白名单过滤产生的工具集与父级 shared/capability registry 不同。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(task="任务", tools="arithmetic")
+
+        child_registry = MockRuntime.call_args[1]["tool_registry"]
+        child_names = set(child_registry.get_tool_names())
+
+        # 子智能体只有白名单中的工具
+        assert child_names == {"arithmetic"}
+
+        # 父级 registry 未被修改
+        parent_shared_names = set(runner.shared_registry.get_tool_names())
+        parent_cap_names = set(runner.capability_registry.get_tool_names())
+        assert len(parent_shared_names) == 2  # arithmetic, read_reference
+        assert len(parent_cap_names) == 3  # read_source_file, write_source_file, run_command
+
+    @pytest.mark.asyncio
+    async def test_separate_tool_registry_is_new_instance(self):
+        """子智能体的工具 registry 是新实例，不是父级引用。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(task="任务", tools="arithmetic,read_source_file")
+
+        child_registry = MockRuntime.call_args[1]["tool_registry"]
+
+        # 子智能体 registry 不是父级的 shared 或 capability registry
+        assert child_registry is not runner.shared_registry
+        assert child_registry is not runner.capability_registry
+
+    @pytest.mark.asyncio
+    async def test_separate_system_prompt_dynamic(self):
+        """子智能体使用动态传入的 prompt，不是父级 prompt。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(
+                task="分析数据",
+                prompt="你是财务分析专家，专注于数据准确性。",
+            )
+
+        call_args = mock_runtime.run.call_args[0]
+        system_prompt = call_args[0]
+        assert "财务分析专家" in system_prompt
+        # 不应包含默认子智能体 prompt
+        assert "负责执行分配的子任务" not in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_separate_system_prompt_default(self):
+        """不传 prompt 时使用默认子智能体 prompt，而非父级。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(task="简单任务")
+
+        call_args = mock_runtime.run.call_args[0]
+        system_prompt = call_args[0]
+        assert "负责执行分配的子任务" in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_separate_system_prompt_with_prompt_builder(self):
+        """有 PromptBuilder 时，子智能体用 minimal 模式构建基础 prompt。"""
+        mock_pb = MagicMock()
+        mock_pb.build_system_prompt.return_value = "MINIMAL_BASE"
+
+        runner = _make_runner(prompt_builder=mock_pb)
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(task="任务", prompt="自定义角色")
+
+        # PromptBuilder 以 minimal 模式调用
+        mock_pb.build_system_prompt.assert_called_once_with(mode="minimal")
+
+        system_prompt = mock_runtime.run.call_args[0][0]
+        assert "MINIMAL_BASE" in system_prompt
+        assert "自定义角色" in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_independent_execution_with_asyncio(self):
+        """子智能体通过 asyncio.wait_for 独立执行，支持超时。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult(final_answer="独立完成")
+            MockRuntime.return_value = mock_runtime
+
+            with patch("agent.subagent.asyncio.wait_for", new_callable=AsyncMock) as mock_wait:
+                mock_wait.return_value = FakeRuntimeResult(final_answer="独立完成")
+
+                result = await runner.run_subagent(task="独立任务", timeout_s=60)
+
+                # 验证 asyncio.wait_for 被调用，带正确的超时
+                mock_wait.assert_called_once()
+                _, kwargs = mock_wait.call_args
+                assert kwargs["timeout"] == 60
+
+        assert result == "独立完成"
+
+    @pytest.mark.asyncio
+    async def test_independent_runtime_per_call(self):
+        """每次 run_subagent 创建独立的 AgenticRuntime 实例。"""
+        runner = _make_runner()
+
+        runtimes_created = []
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+
+            def capture_runtime(*args, **kwargs):
+                instance = AsyncMock()
+                instance.run.return_value = FakeRuntimeResult()
+                runtimes_created.append(instance)
+                return instance
+
+            MockRuntime.side_effect = capture_runtime
+
+            await runner.run_subagent(task="任务A")
+            await runner.run_subagent(task="任务B")
+
+        # 两次调用创建了两个独立的 runtime
+        assert len(runtimes_created) == 2
+        assert runtimes_created[0] is not runtimes_created[1]
+
+    @pytest.mark.asyncio
+    async def test_child_tool_parser_is_independent(self):
+        """子智能体获得独立的 ToolCallParser 实例。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult()
+            MockRuntime.return_value = mock_runtime
+
+            await runner.run_subagent(task="任务")
+
+        call_kwargs = MockRuntime.call_args[1]
+        tool_parser = call_kwargs["tool_parser"]
+
+        # 验证 ToolCallParser 被传入
+        from core.tool_protocol import ToolCallParser
+        assert isinstance(tool_parser, ToolCallParser)
