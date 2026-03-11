@@ -28,6 +28,55 @@ from typing import Any, Callable, Literal, Optional, Union, get_args, get_origin
 
 logger = logging.getLogger(__name__)
 
+# ─── 最低保留字符数 ───
+_MIN_TRUNCATE_CHARS = 2000
+
+
+def smart_truncate(text: str, max_chars: int) -> str:
+    """
+    智能 head+tail 截断 (A4: 4a)。
+
+    策略:
+    1. 检测尾部是否有重要内容 (错误信息、JSON 闭合、总结段落)
+    2. 有 → 30% 给尾部, 70% 给头部
+    3. 无 → 全部给头部
+    4. 中间插入 "[...truncated N chars...]" 标记
+    """
+    if len(text) <= max_chars:
+        return text
+
+    # 小预算时直接简单截断 (不强制拉高到 _MIN_TRUNCATE_CHARS)
+    if max_chars < _MIN_TRUNCATE_CHARS:
+        return text[:max_chars] + "...[truncated]"
+
+    marker_template = "\n...[truncated {} chars]...\n"
+
+    # 检测尾部是否包含重要内容
+    tail_500 = text[-500:] if len(text) > 500 else text
+    has_important_tail = any(sig in tail_500 for sig in (
+        '"error"', '"Error"', '"status"', '"total"', '"summary"',
+        "Exception", "Traceback", "错误", "失败", "总计",
+        "}", "]",  # JSON 闭合标签
+    ))
+
+    if has_important_tail:
+        # 30% 尾部, 70% 头部
+        tail_budget = int(max_chars * 0.3)
+        head_budget = max_chars - tail_budget - 40  # 40 for marker
+    else:
+        # 全部给头部
+        head_budget = max_chars - 40
+        tail_budget = 0
+
+    head_budget = max(head_budget, 200)
+    truncated_count = len(text) - head_budget - tail_budget
+    marker = marker_template.format(truncated_count)
+
+    if tail_budget > 0:
+        return text[:head_budget] + marker + text[-tail_budget:]
+    else:
+        return text[:head_budget] + marker
+
 
 @dataclass
 class ToolResult:
@@ -38,11 +87,11 @@ class ToolResult:
 
     def to_json(self, max_chars: int = 0) -> str:
         """
-        序列化为 JSON 字符串。
+        序列化为 JSON 字符串 (A4: 智能 head+tail 截断)。
 
         Args:
             max_chars: 最大字符数限制。0 表示不限制（向后兼容）。
-                       超出时截断并追加 '...[truncated]' 标记。
+                       超出时使用 head+tail 策略截断。
         """
         if self.success:
             raw = json.dumps(self.data, ensure_ascii=False, default=str)
@@ -50,7 +99,7 @@ class ToolResult:
             raw = json.dumps({"error": self.error}, ensure_ascii=False)
 
         if max_chars > 0 and len(raw) > max_chars:
-            return raw[:max_chars] + "...[truncated]"
+            return smart_truncate(raw, max_chars)
         return raw
 
 

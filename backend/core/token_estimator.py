@@ -1,5 +1,5 @@
 """
-Token 估算器 — 中英混合字符启发式估算。
+Token 估算器 — 中英混合字符启发式估算 + 消息级缓存。
 
 用于 ReAct 循环中的上下文预算检查，避免 LLM 上下文窗口溢出。
 无外部依赖（不需要 tiktoken），纯字符统计。
@@ -7,14 +7,21 @@ Token 估算器 — 中英混合字符启发式估算。
 估算规则:
 - 英文/ASCII: ~4 字符 = 1 token
 - 中文/CJK: ~1.3 字符 = 1 token
+- JSON/工具结果: ~2 字符 = 1 token (更保守)
 - JSON 结构开销: 每条消息 ~4 tokens (role/content 标记)
 - 工具 schema: 直接序列化后用文本估算
+
+A4 增强:
+- 消息级缓存 (content hash → token count)
+- 差量估算 (新增消息只估算增量)
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from functools import lru_cache
 
 
 def _is_cjk(char: str) -> bool:
@@ -66,6 +73,78 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(cjk_tokens + ascii_tokens + 0.5))
 
 
+def estimate_tokens_conservative(text: str) -> int:
+    """
+    更保守的 token 估算 — 用于 JSON/工具结果。
+
+    JSON 内容空白和结构符号多，用 ~2 字符/token 估算。
+    """
+    if not text:
+        return 0
+    return max(1, len(text) // 2)
+
+
+# ─── 消息级缓存 (A4: 4g) ───
+
+_msg_token_cache: dict[str, int] = {}
+_CACHE_MAX_SIZE = 2000
+
+
+def _msg_cache_key(msg: dict) -> str:
+    """生成消息的缓存 key (基于内容 hash)。"""
+    content = msg.get("content", "")
+    role = msg.get("role", "")
+    tool_calls = msg.get("tool_calls")
+    # 用 role + content 前 64 字符 + content 长度 + hash 做 key
+    # 避免对超长内容做完整 hash
+    content_str = str(content)
+    prefix = content_str[:64]
+    if tool_calls:
+        tc_str = json.dumps(tool_calls, ensure_ascii=False, default=str)
+        sig = hashlib.md5(f"{role}:{content_str}:{tc_str}".encode(), usedforsecurity=False).hexdigest()[:12]
+    else:
+        sig = hashlib.md5(f"{role}:{content_str}".encode(), usedforsecurity=False).hexdigest()[:12]
+    return f"{role}:{len(content_str)}:{sig}"
+
+
+def _estimate_single_message_tokens(msg: dict) -> int:
+    """估算单条消息的 token 数 (带缓存)。"""
+    global _msg_token_cache
+
+    key = _msg_cache_key(msg)
+    if key in _msg_token_cache:
+        return _msg_token_cache[key]
+
+    # 消息结构开销
+    total = 4
+
+    # content
+    content = msg.get("content", "")
+    if content:
+        role = msg.get("role", "")
+        # 工具结果用保守估算
+        if role == "tool":
+            total += estimate_tokens_conservative(str(content))
+        else:
+            total += estimate_tokens(str(content))
+
+    # tool_calls (assistant 消息中)
+    tool_calls = msg.get("tool_calls", [])
+    if tool_calls:
+        tc_text = json.dumps(tool_calls, ensure_ascii=False, default=str)
+        total += estimate_tokens_conservative(tc_text)
+
+    # 缓存 (LRU 式清理)
+    if len(_msg_token_cache) >= _CACHE_MAX_SIZE:
+        # 清掉前半部分
+        keys = list(_msg_token_cache.keys())
+        for k in keys[:_CACHE_MAX_SIZE // 2]:
+            del _msg_token_cache[k]
+
+    _msg_token_cache[key] = total
+    return total
+
+
 def estimate_messages_tokens(
     messages: list[dict],
     tools: list[dict] | None = None,
@@ -73,8 +152,7 @@ def estimate_messages_tokens(
     """
     估算完整 messages 数组 + 工具 schema 的 token 数量。
 
-    每条消息有 ~4 tokens 的结构开销 (role, content 标记等)。
-    工具 schema 序列化后按文本估算。
+    A4 增强: 消息级缓存 + 工具结果保守估算。
 
     Args:
         messages: OpenAI 格式的消息列表
@@ -86,19 +164,7 @@ def estimate_messages_tokens(
     total = 0
 
     for msg in messages:
-        # 消息结构开销: role + content 标记
-        total += 4
-
-        # content
-        content = msg.get("content", "")
-        if content:
-            total += estimate_tokens(str(content))
-
-        # tool_calls (assistant 消息中)
-        tool_calls = msg.get("tool_calls", [])
-        if tool_calls:
-            tc_text = json.dumps(tool_calls, ensure_ascii=False, default=str)
-            total += estimate_tokens(tc_text)
+        total += _estimate_single_message_tokens(msg)
 
     # 工具 schema 开销
     if tools:
@@ -106,3 +172,9 @@ def estimate_messages_tokens(
         total += estimate_tokens(tools_text)
 
     return total
+
+
+def invalidate_cache() -> None:
+    """清空 token 估算缓存。"""
+    global _msg_token_cache
+    _msg_token_cache.clear()

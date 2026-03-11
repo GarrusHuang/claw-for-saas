@@ -61,9 +61,30 @@ class Settings(BaseSettings):
         default=3000,
         description="Max chars per tool result (0=unlimited)",
     )
+    # ─── A4: Context Management ───
+    agent_model_context_window: int = Field(
+        default=32000,
+        description="Model context window size in tokens (0=use agent_context_budget_tokens directly)",
+    )
+    agent_context_budget_ratio: float = Field(
+        default=0.8,
+        description="Context budget as ratio of model window (reserve 20% for output)",
+    )
+    agent_compress_threshold_ratio: float = Field(
+        default=0.85,
+        description="Trigger compression at this fraction of budget (early trigger)",
+    )
     agent_context_budget_tokens: int = Field(
-        default=28000,
-        description="Messages array max token budget",
+        default=0,
+        description="Override: fixed token budget (0=auto from model_context_window * ratio)",
+    )
+    agent_context_budget_min: int = Field(
+        default=16000,
+        description="Minimum context budget (hard floor)",
+    )
+    agent_file_page_size: int = Field(
+        default=50000,
+        description="Default file page size in characters for pagination",
     )
 
     # ─── Server ───

@@ -34,11 +34,18 @@ def _get_file_service():
         "传入 file_id (从 list_user_files 获取)，返回文件的提取文本。"
         "支持 PDF/DOCX/TXT/CSV/JSON 等格式的文本提取。"
         "图片文件返回尺寸等元信息。"
+        "大文件自动分页 — 使用 offset/limit 参数分段读取。"
     ),
     read_only=True,
 )
-def read_uploaded_file(file_id: str) -> dict:  # 文件 ID
-    """读取用户上传的文件，返回提取的文本内容。"""
+def read_uploaded_file(
+    file_id: str,           # 文件 ID
+    offset: int = 0,        # 起始字符偏移 (默认从头)
+    limit: int = 0,         # 读取字符数 (0 = 使用默认页大小)
+) -> dict:
+    """读取用户上传的文件，返回提取的文本内容 (支持分页)。"""
+    from config import settings
+
     service = _get_file_service()
     tenant_id = current_tenant_id.get()
     user_id = current_user_id.get()
@@ -46,12 +53,56 @@ def read_uploaded_file(file_id: str) -> dict:  # 文件 ID
     try:
         text = service.extract_text(tenant_id, user_id, file_id)
         metadata, _ = service.get_file(tenant_id, user_id, file_id)
+
+        total_chars = len(text)
+
+        # 动态页大小: 上下文窗口 * 0.2 * 4 (4字符≈1token)
+        # 范围: 50K - 512K
+        dynamic_page = int(settings.agent_model_context_window * 0.2 * 4)
+        page_size = max(50000, min(512000, dynamic_page))
+        # 如果用户显式传了 limit > 0，用用户的 limit
+        if limit > 0:
+            page_size = limit
+
+        # 分页: 如果文本超过 page_size 且未指定全量读取
+        if total_chars > page_size and limit != -1:
+            # 对齐到换行边界
+            end = min(offset + page_size, total_chars)
+            if end < total_chars:
+                newline_pos = text.rfind("\n", offset, end)
+                if newline_pos > offset:
+                    end = newline_pos + 1
+
+            page_text = text[offset:end]
+            has_more = end < total_chars
+
+            result = {
+                "file_id": file_id,
+                "filename": metadata.filename,
+                "content_type": metadata.content_type,
+                "size_bytes": metadata.size_bytes,
+                "text": page_text,
+                "pagination": {
+                    "offset": offset,
+                    "length": len(page_text),
+                    "total_chars": total_chars,
+                    "has_more": has_more,
+                    "next_offset": end if has_more else None,
+                },
+            }
+            if has_more:
+                result["hint"] = (
+                    f"文件共 {total_chars} 字符，当前显示 {offset}-{end}。"
+                    f"使用 offset={end} 继续读取下一段。"
+                )
+            return result
+
         return {
             "file_id": file_id,
             "filename": metadata.filename,
             "content_type": metadata.content_type,
             "size_bytes": metadata.size_bytes,
-            "text": text,
+            "text": text[offset:] if offset > 0 else text,
         }
     except FileNotFoundError:
         return {"error": f"File not found: {file_id}"}
@@ -172,4 +223,62 @@ def analyze_file(file_id: str) -> dict:  # 文件 ID
         return {"error": f"File not found: {file_id}"}
     except Exception as e:
         logger.error(f"analyze_file error: {e}")
+        return {"error": str(e)}
+
+
+@file_capability_registry.tool(
+    description=(
+        "处理文件的多模态内容 (A4: 4i)。"
+        "图片文件: 转 base64 (自动压缩大图)。"
+        "PDF文件: 提取文本内容 (支持多页)。"
+        "文本文件: 直接返回内容。"
+        "返回结构包含 content_type 和对应的数据。"
+    ),
+    read_only=True,
+)
+def process_file_content(file_id: str) -> dict:  # 文件 ID
+    """处理文件内容，返回适合 LLM 消费的格式。"""
+    from services.content_processor import process_file
+
+    service = _get_file_service()
+    tenant_id = current_tenant_id.get()
+    user_id = current_user_id.get()
+
+    try:
+        metadata, content = service.get_file(tenant_id, user_id, file_id)
+        result = process_file(content, metadata.filename)
+
+        response = {
+            "file_id": file_id,
+            "filename": metadata.filename,
+            "content_type": result.content_type,
+        }
+
+        if result.metadata:
+            response["metadata"] = result.metadata
+
+        if result.content_type == "text" and result.text:
+            # 文本截断到合理长度
+            text = result.text
+            if len(text) > 100000:
+                text = text[:100000] + f"\n[... truncated, total {len(result.text)} chars ...]"
+            response["text"] = text
+
+        elif result.content_type == "image" and result.image_base64:
+            response["image"] = {
+                "base64": result.image_base64[:100] + "...",  # 摘要（完整 base64 太长）
+                "media_type": result.image_media_type,
+                "base64_length": len(result.image_base64),
+            }
+            response["hint"] = "图片已转为 base64。可直接用于多模态 LLM 调用。"
+
+        elif result.error:
+            response["error"] = result.error
+
+        return response
+
+    except FileNotFoundError:
+        return {"error": f"File not found: {file_id}"}
+    except Exception as e:
+        logger.error(f"process_file_content error: {e}")
         return {"error": str(e)}
