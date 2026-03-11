@@ -17,8 +17,7 @@ from memory.markdown_store import MarkdownMemoryStore
 from skills.loader import SkillLoader
 from tools.registry_builder import (
     build_shared_registry,
-    build_auto_registry,
-    build_execute_registry,
+    build_full_registry,
     build_capability_registry,
 )
 
@@ -181,16 +180,14 @@ def build_gateway():
     capability_registry = build_capability_registry()
     prompt_builder = get_prompt_builder()
 
-    # 合并插件工具到 auto/execute registry
+    # 合并插件工具到统一 registry
     plugin_registry = get_plugin_registry()
     plugin_tools: ToolRegistry | None = getattr(plugin_registry, "_plugin_tool_registry", None)
 
-    tool_registry = build_auto_registry()
-    execute_registry = build_execute_registry()
+    tool_registry = build_full_registry()
 
     if plugin_tools and len(plugin_tools) > 0:
         tool_registry = tool_registry.merge(plugin_tools)
-        execute_registry = execute_registry.merge(plugin_tools)
 
     session_manager = get_session_manager()
 
@@ -204,7 +201,6 @@ def build_gateway():
     return AgentGateway(
         llm_client=llm_client,
         tool_registry=tool_registry,
-        execute_registry=execute_registry,
         session_manager=session_manager,
         skill_loader=get_skill_loader(),
         prompt_builder=prompt_builder,

@@ -1,6 +1,9 @@
 """
 Tool registry builder — assembles built-in tool sets.
 
+A2 简化: 去掉 AUTO/EXECUTE 双模式，统一为单一 registry。
+propose_plan 始终可用，作为纯进度展示工具。
+
 Built-in tools (no domain-specific tools):
 - calculator: numeric_compare, sum_values, calculate_ratio, date_diff, arithmetic
 - skill_reference: read_reference
@@ -71,21 +74,17 @@ def build_plan_registry() -> ToolRegistry:
     return plan_capability_registry
 
 
-def build_execute_registry() -> ToolRegistry:
+def build_full_registry() -> ToolRegistry:
     """
-    Build EXECUTE mode registry (shared + capability, no plan).
-    Used when user has confirmed a plan.
+    Build full tool registry (shared + capability + plan).
+    Single unified registry — no more AUTO/EXECUTE split.
     """
     shared = build_shared_registry()
     capability = build_capability_registry()
-    return shared.merge(capability)
-
-
-def build_auto_registry() -> ToolRegistry:
-    """
-    Build AUTO mode registry (shared + capability + plan).
-    Agent has all tools, decides autonomously whether to plan or execute.
-    """
-    execute = build_execute_registry()
     plan = build_plan_registry()
-    return execute.merge(plan)
+    return shared.merge(capability).merge(plan)
+
+
+# Backwards compatibility aliases
+build_auto_registry = build_full_registry
+build_execute_registry = build_full_registry

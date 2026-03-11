@@ -273,15 +273,7 @@ class SubagentRunner:
         return prompt
 
     def _get_business_context(self) -> str:
-        """从 ContextVar 获取当前业务上下文。"""
-        try:
-            from core.context import current_business_context
-            ctx = current_business_context.get()
-            if ctx:
-                import json
-                return json.dumps(ctx, ensure_ascii=False, indent=2)[:3000]
-        except Exception:
-            pass
+        """No longer used — business context removed in A2 (MCP pull mode)."""
         return ""
 
     def get_available_roles(self) -> list[str]:

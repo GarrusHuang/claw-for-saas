@@ -35,7 +35,7 @@ class PipelineCompleteEvent(BaseModel):
     """Pipeline completion event"""
 
     event: Literal["pipeline_complete"] = "pipeline_complete"
-    status: Literal["success", "partial", "failed", "plan_awaiting_approval"] = "success"
+    status: Literal["success", "partial", "failed"] = "success"
     duration_ms: float = 0.0
     summary: dict[str, Any] = Field(default_factory=dict)
     trace_id: str = ""
@@ -48,7 +48,6 @@ class PlanProposedEvent(BaseModel):
     summary: str = ""
     steps: list[dict[str, Any]] = Field(default_factory=list)
     estimated_actions: int = 0
-    requires_approval: bool = False
 
 
 class ErrorEvent(BaseModel):
