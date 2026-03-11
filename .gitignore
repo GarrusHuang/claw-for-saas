@@ -42,3 +42,5 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+frontend/e2e/screenshots/*.png
+frontend/test-results/
