@@ -2,10 +2,12 @@
 编码能力工具。
 
 Agent 可读写源代码文件、执行 Shell 命令。
-安全性由 code_safety_hook (pre_tool_use) 保障:
-- 路径白名单 (CODE_ALLOWED_PATHS 环境变量)
-- 命令黑名单 (危险命令阻止)
-- 敏感文件保护 (.env, credentials, private keys)
+安全性由 A6 SandboxManager 保障:
+- 文件操作限制在 workspace 内 (SandboxManager.validate_path)
+- 命令执行通过沙箱 (本地 subprocess 或 Docker 容器)
+- 磁盘配额检查 (写入前)
+- 命令黑名单快速拒绝
+- 回退: 无 sandbox 时使用 CODE_ALLOWED_PATHS 环境变量
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import logging
 import os
 import time
 
-from core.context import current_event_bus
+from core.context import current_event_bus, current_sandbox, current_tenant_id, current_user_id, current_session_id
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -28,14 +30,39 @@ MAX_READ_SIZE = 50 * 1024
 MAX_OUTPUT_SIZE = 10 * 1024
 
 
+def _get_workspace() -> tuple:
+    """
+    获取当前 workspace 和 SandboxManager。
+
+    Returns:
+        (sandbox, workspace) 或 (None, None)
+    """
+    sandbox = current_sandbox.get(None)
+    if sandbox is None:
+        return None, None
+    tenant_id = current_tenant_id.get("default")
+    user_id = current_user_id.get("anonymous")
+    session_id = current_session_id.get("")
+    workspace = sandbox.get_workspace(tenant_id, user_id, session_id)
+    return sandbox, workspace
+
+
 def _resolve_safe_path(path: str) -> str:
     """
     解析并验证路径安全性。
 
-    - realpath 解析符号链接
-    - 检查白名单目录 (CODE_ALLOWED_PATHS 环境变量, 逗号分隔)
-    - 默认白名单: 当前工作目录
+    优先使用 SandboxManager (A6)，回退到 CODE_ALLOWED_PATHS 环境变量。
     """
+    sandbox, workspace = _get_workspace()
+
+    # A6: 使用 SandboxManager 验证
+    if sandbox and workspace:
+        # 如果 path 是相对路径，基于 workspace 解析
+        if not os.path.isabs(path):
+            path = os.path.join(workspace, path)
+        return sandbox.validate_path(path, workspace)
+
+    # 回退: CODE_ALLOWED_PATHS (兼容无 sandbox 的场景)
     resolved = os.path.realpath(os.path.expanduser(path))
 
     allowed_raw = os.environ.get("CODE_ALLOWED_PATHS", "")
@@ -129,6 +156,15 @@ def write_source_file(
     except PermissionError as e:
         return {"error": str(e)}
 
+    # A6: 磁盘配额检查
+    sandbox = current_sandbox.get(None)
+    if sandbox:
+        tenant_id = current_tenant_id.get("default")
+        user_id = current_user_id.get("anonymous")
+        quota = sandbox.check_disk_quota(tenant_id, user_id)
+        if quota["exceeded"]:
+            return {"error": f"磁盘配额超限: 已使用 {quota['used_mb']}MB / {quota['quota_mb']}MB"}
+
     backup_path = None
 
     try:
@@ -198,10 +234,40 @@ def run_command(
     """在沙箱中执行 Shell 命令。"""
     import subprocess
 
-    # 限制 timeout
+    sandbox, workspace = _get_workspace()
+
+    # A6: 优先使用 SandboxManager 执行 (Docker 或本地沙箱)
+    if sandbox and workspace:
+        # cwd 必须在 workspace 内
+        work_dir = workspace
+        if cwd:
+            try:
+                work_dir = sandbox.validate_path(
+                    cwd if os.path.isabs(cwd) else os.path.join(workspace, cwd),
+                    workspace,
+                )
+            except PermissionError as e:
+                return {"error": str(e)}
+            if not os.path.isdir(work_dir):
+                return {"error": f"工作目录不存在: {cwd}"}
+
+        result = sandbox.run_command(command, work_dir, timeout)
+
+        # 发射 SSE 事件
+        bus = current_event_bus.get()
+        if bus:
+            bus.emit("command_executed", {
+                "command": command[:200],
+                "exit_code": result.get("exit_code", -1),
+                "duration_ms": result.get("duration_ms", 0),
+                "sandbox": result.get("sandbox", "unknown"),
+            })
+
+        return result
+
+    # 回退: 直接 subprocess (兼容无 sandbox 场景)
     timeout = min(max(1, timeout), 120)
 
-    # 工作目录
     work_dir = None
     if cwd:
         try:
@@ -229,7 +295,6 @@ def run_command(
         stdout = proc.stdout or ""
         stderr = proc.stderr or ""
 
-        # 截断过长输出
         stdout_truncated = False
         stderr_truncated = False
         if len(stdout.encode("utf-8")) > MAX_OUTPUT_SIZE:
@@ -239,7 +304,6 @@ def run_command(
             stderr = stderr[:MAX_OUTPUT_SIZE]
             stderr_truncated = True
 
-        # 发射 SSE 事件
         bus = current_event_bus.get()
         if bus:
             bus.emit("command_executed", {

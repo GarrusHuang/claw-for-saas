@@ -83,6 +83,44 @@ class Settings(BaseSettings):
         description="Plugins directory path",
     )
 
+    # ─── Security Sandbox (A6) ───
+    sandbox_workspace_dir: str = Field(
+        default="data/workspace",
+        description="Workspace base directory for file sandbox",
+    )
+    sandbox_max_disk_quota_mb: int = Field(
+        default=500,
+        description="Max disk quota per user in MB",
+    )
+    sandbox_network_whitelist: str = Field(
+        default="",
+        description="Comma-separated allowed domains/URL prefixes (empty=allow all non-private)",
+    )
+    sandbox_block_private_networks: bool = Field(
+        default=True,
+        description="Block access to private/internal network addresses",
+    )
+    sandbox_rate_limit_per_minute: int = Field(
+        default=100,
+        description="Max tool calls per session per minute",
+    )
+    sandbox_docker_enabled: bool = Field(
+        default=False,
+        description="Enable Docker sandbox for command execution (requires Docker)",
+    )
+    sandbox_docker_image: str = Field(
+        default="python:3.11-slim",
+        description="Docker image for command sandbox",
+    )
+    sandbox_docker_cpu_limit: str = Field(
+        default="1",
+        description="Docker CPU limit",
+    )
+    sandbox_docker_memory_limit: str = Field(
+        default="512m",
+        description="Docker memory limit",
+    )
+
     # ─── Skills ───
     skills_dir: str = Field(
         default="skills",
@@ -91,6 +129,14 @@ class Settings(BaseSettings):
     skill_max_l2_tokens: int = Field(
         default=5000,
         description="Max token estimate for single Skill L2 body",
+    )
+    skill_max_prompt_chars: int = Field(
+        default=30000,
+        description="A7: Max total chars for all Skills in system prompt",
+    )
+    skill_max_single_chars: int = Field(
+        default=10000,
+        description="A7: Max chars for a single Skill body",
     )
 
     # ─── Memory (A8: Markdown 分层笔记) ───

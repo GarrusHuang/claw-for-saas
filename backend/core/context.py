@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.event_bus import EventBus
+    from core.sandbox import SandboxManager
+    from core.data_lock import DataLockRegistry
     from services.file_service import FileService
     from services.browser_service import BrowserService
     from skills.loader import SkillLoader
@@ -88,4 +90,14 @@ current_business_context: contextvars.ContextVar[dict | None] = contextvars.Cont
 # Memory system ContextVar (A8: Markdown 分层笔记)
 current_memory_store: contextvars.ContextVar[MarkdownMemoryStore | None] = contextvars.ContextVar(
     "current_memory_store", default=None
+)
+
+# A6: Security Sandbox
+current_sandbox: contextvars.ContextVar[SandboxManager | None] = contextvars.ContextVar(
+    "current_sandbox", default=None
+)
+
+# A6: Data Lock Registry
+current_data_lock: contextvars.ContextVar[DataLockRegistry | None] = contextvars.ContextVar(
+    "current_data_lock", default=None
 )

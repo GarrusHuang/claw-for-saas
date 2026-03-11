@@ -21,6 +21,7 @@ from core.context import (
     current_plan_tracker,
     current_memory_store,
     current_known_field_ids, current_business_context,
+    current_sandbox, current_data_lock,
 )
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
@@ -154,6 +155,14 @@ class AgentGateway:
         if self.memory_store:
             current_memory_store.set(self.memory_store)
 
+        # A6: 注入 SandboxManager + DataLockRegistry 到 ContextVar
+        try:
+            from dependencies import get_sandbox_manager, get_data_lock_registry
+            current_sandbox.set(get_sandbox_manager())
+            current_data_lock.set(get_data_lock_registry())
+        except Exception:
+            pass  # Sandbox/DataLock 可选，不阻塞启动
+
         # ── 2. 解析/创建会话 ──
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):
             logger.info(f"Resuming session: {session_id}")
@@ -175,10 +184,23 @@ class AgentGateway:
         # ── 3. 加载会话历史 ──
         history_messages = self.session_manager.load_messages(tenant_id, user_id, session_id)
 
-        # ── 4. 加载 Skills ──
+        # ── 4. 加载 Skills (A7: 多源) ──
         skill_knowledge = ""
 
         if self.skill_loader:
+            # A7: 加载租户级和用户级 Skill (追加到 registry)
+            try:
+                import os
+                from skills.loader import SKILLS_DIR, TENANT_DIR, USER_DIR
+                tenant_skill_dir = os.path.join(TENANT_DIR, tenant_id)
+                user_skill_dir = os.path.join(USER_DIR, f"{tenant_id}_{user_id}")
+                if os.path.isdir(tenant_skill_dir):
+                    self.skill_loader.load_tenant_skills(tenant_skill_dir)
+                if os.path.isdir(user_skill_dir):
+                    self.skill_loader.load_user_skills(user_skill_dir)
+            except Exception as e:
+                logger.debug(f"Tenant/user skill loading skipped: {e}")
+
             # 场景推断
             scenario = business_type  # e.g. "reimbursement_create"
             bt = business_type.split("_")[0] if "_" in business_type else business_type
