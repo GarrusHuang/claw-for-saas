@@ -216,9 +216,11 @@ def build_default_hooks() -> HookRegistry:
     from agent.quality_gate import quality_gate_hook
     registry.register("agent_stop", quality_gate_hook)
     # Phase 17: 安全防护 Hook
-    from agent.security_hooks import parameter_validation_hook, sensitive_data_hook
+    from agent.security_hooks import parameter_validation_hook, sensitive_data_hook, data_lock_hook
     registry.register("pre_tool_use", parameter_validation_hook)
     registry.register("post_tool_use", sensitive_data_hook)
+    # A6: DataLock 字段锁定校验
+    registry.register("pre_tool_use", data_lock_hook)
     # Phase 27: 编码工具安全 Hook (no matcher — checks tool_name internally)
     registry.register("pre_tool_use", code_safety_hook)
     return registry

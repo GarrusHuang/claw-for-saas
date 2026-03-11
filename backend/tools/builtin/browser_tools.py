@@ -4,6 +4,7 @@
 通过 contextvars 获取 BrowserService，
 Agent 可访问外部网页，用于供应商核查/药品比价/发票验真/政策查询。
 
+A6 集成: 访问前通过 SandboxManager.validate_url() 校验网络白名单。
 所有工具为 read_only=True（只读取网页，不修改）。
 """
 
@@ -11,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from core.context import current_event_bus
+from core.context import current_event_bus, current_sandbox
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,19 @@ def _get_browser_service():
     if service is None:
         raise RuntimeError("BrowserService not available (not injected)")
     return service
+
+
+def _validate_url(url: str) -> str | None:
+    """
+    A6: 通过 SandboxManager 验证 URL 安全性。
+
+    Returns:
+        None 如果允许，否则返回拒绝原因。
+    """
+    sandbox = current_sandbox.get(None)
+    if sandbox is None:
+        return None  # 无 sandbox 时不阻止 (由 security_hooks 兜底)
+    return sandbox.validate_url(url)
 
 
 def _emit_event(event_type: str, data: dict):
@@ -46,6 +60,11 @@ def _emit_event(event_type: str, data: dict):
 )
 async def open_url(url: str) -> dict:
     """打开网页，返回标题/URL/状态码。"""
+    # A6: URL 安全校验
+    reject = _validate_url(url)
+    if reject:
+        raise RuntimeError(f"URL 访问被拒绝: {reject}")
+
     service = _get_browser_service()
     result = await service.open_page(url)
 
@@ -70,6 +89,10 @@ async def open_url(url: str) -> dict:
 )
 async def page_screenshot(url: str) -> dict:
     """对网页截图，返回 base64 PNG。"""
+    reject = _validate_url(url)
+    if reject:
+        raise RuntimeError(f"URL 访问被拒绝: {reject}")
+
     service = _get_browser_service()
     result = await service.screenshot(url)
 
@@ -94,6 +117,10 @@ async def page_screenshot(url: str) -> dict:
 )
 async def page_extract_text(url: str) -> dict:
     """提取网页文本内容。"""
+    reject = _validate_url(url)
+    if reject:
+        raise RuntimeError(f"URL 访问被拒绝: {reject}")
+
     service = _get_browser_service()
     result = await service.extract_text(url)
 

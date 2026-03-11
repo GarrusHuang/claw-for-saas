@@ -122,6 +122,38 @@ def _has_path_traversal(path: str) -> bool:
     return False
 
 
+def data_lock_hook(event: HookEvent) -> HookResult:
+    """
+    A6 PreToolUse: DataLock 校验。
+
+    检查写操作是否涉及被锁定的字段。
+    readonly 级别阻止, audit 级别记录但放行。
+    """
+    from core.context import current_data_lock
+
+    registry = current_data_lock.get(None)
+    if registry is None:
+        return HookResult(action="allow")
+
+    tool_input = event.tool_input
+
+    # 检查所有可能包含字段标识的参数
+    field_keys = ("field_id", "field_name", "key", "name")
+    for fk in field_keys:
+        field_id = tool_input.get(fk, "")
+        if not field_id:
+            continue
+        value = tool_input.get("value", tool_input.get("content", ""))
+        violation = registry.check(field_id, str(value) if value else "")
+        if violation:
+            return HookResult(
+                action="block",
+                message=f"数据锁定: 字段 '{field_id}' 被锁定 ({violation.level.value}) — {violation.reason}",
+            )
+
+    return HookResult(action="allow")
+
+
 def sensitive_data_hook(event: HookEvent) -> HookResult:
     """
     PostToolUse 敏感数据检测。
