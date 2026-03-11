@@ -128,12 +128,19 @@ def _estimate_single_message_tokens(msg: dict) -> int:
     # 消息结构开销
     total = 4
 
-    # content
+    # content (A4-4i: 支持 list 多模态 content blocks)
     content = msg.get("content", "")
     if content:
         role = msg.get("role", "")
-        # 工具结果用保守估算
-        if role == "tool":
+        if isinstance(content, list):
+            # 多模态 content blocks
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        total += estimate_tokens(block.get("text", ""))
+                    elif block.get("type") == "image_url":
+                        total += 256  # 保守估算: 图片 ~256 tokens
+        elif role == "tool":
             total += estimate_tokens_conservative(str(content))
         else:
             total += estimate_tokens(str(content))

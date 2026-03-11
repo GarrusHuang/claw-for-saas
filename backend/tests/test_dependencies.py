@@ -123,6 +123,44 @@ def test_build_gateway():
     assert hasattr(result, "session_manager")
     assert hasattr(result, "prompt_builder")
     assert hasattr(result, "memory_store")
+    assert hasattr(result, "mcp_provider")
+
+
+def test_get_mcp_provider_disabled():
+    """MCP disabled → returns None."""
+    from dependencies import get_mcp_provider
+    # Default mcp_enabled=False
+    result = get_mcp_provider()
+    assert result is None
+
+
+def test_get_mcp_provider_enabled_no_url(monkeypatch):
+    """MCP enabled but no base_url → returns None (DefaultMCPProvider fallback in tools)."""
+    import dependencies
+    for name in dir(dependencies):
+        obj = getattr(dependencies, name)
+        if hasattr(obj, "cache_clear"):
+            obj.cache_clear()
+
+    monkeypatch.setenv("MCP_ENABLED", "true")
+    monkeypatch.setenv("MCP_BASE_URL", "")
+    result = dependencies.get_mcp_provider()
+    assert result is None
+
+
+def test_get_mcp_provider_enabled_with_url(monkeypatch):
+    """MCP enabled + base_url → returns HttpMCPProvider."""
+    import dependencies
+    from tools.mcp.http_provider import HttpMCPProvider
+    for name in dir(dependencies):
+        obj = getattr(dependencies, name)
+        if hasattr(obj, "cache_clear"):
+            obj.cache_clear()
+
+    monkeypatch.setenv("MCP_ENABLED", "true")
+    monkeypatch.setenv("MCP_BASE_URL", "http://localhost:9000/api")
+    result = dependencies.get_mcp_provider()
+    assert isinstance(result, HttpMCPProvider)
 
 
 def test_get_database():

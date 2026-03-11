@@ -14,6 +14,8 @@ Built-in tools (no domain-specific tools):
 - code: read_source_file, write_source_file, run_command
 - memory: save_memory, recall_memory
 - skill: create_skill, update_skill
+- mcp: get_form_schema, get_business_rules, get_candidate_types,
+       get_protected_values, submit_form_data, query_data
 """
 from __future__ import annotations
 
@@ -70,12 +72,19 @@ def build_plan_registry() -> ToolRegistry:
     return plan_capability_registry
 
 
+def build_mcp_registry() -> ToolRegistry:
+    """Build MCP standard tool registry (6 tools)."""
+    from tools.mcp.mcp_tools import mcp_registry
+    return mcp_registry
+
+
 def build_full_registry() -> ToolRegistry:
     """
-    Build full tool registry (shared + capability + plan).
+    Build full tool registry (shared + capability + plan + mcp).
     Single unified registry — no more AUTO/EXECUTE split.
     """
     shared = build_shared_registry()
     capability = build_capability_registry()
     plan = build_plan_registry()
-    return shared.merge(capability).merge(plan)
+    mcp = build_mcp_registry()
+    return shared.merge(capability).merge(plan).merge(mcp)

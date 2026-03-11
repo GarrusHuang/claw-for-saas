@@ -87,6 +87,26 @@ class Settings(BaseSettings):
         description="Default file page size in characters for pagination",
     )
 
+    # ─── LLM Vision (A4-4i: 多模态) ───
+    llm_supports_vision: bool = Field(
+        default=False,
+        description="Whether the LLM model supports vision/image input",
+    )
+
+    # ─── MCP (A2: 标准工具接口) ───
+    mcp_enabled: bool = Field(
+        default=False,
+        description="Enable MCP standard tool interface",
+    )
+    mcp_base_url: str = Field(
+        default="",
+        description="MCP HTTP provider base URL (empty=use DefaultMCPProvider)",
+    )
+    mcp_timeout_s: float = Field(
+        default=30.0,
+        description="MCP HTTP request timeout in seconds",
+    )
+
     # ─── Server ───
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)

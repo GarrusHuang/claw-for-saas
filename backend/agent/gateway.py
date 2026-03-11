@@ -14,6 +14,8 @@ import logging
 import time
 from typing import Any
 
+import mimetypes
+
 from core.context import (
     current_event_bus, current_session_id, current_user_id,
     current_tenant_id,
@@ -22,6 +24,7 @@ from core.context import (
     current_memory_store,
     current_known_field_ids,
     current_sandbox, current_data_lock,
+    current_mcp_provider,
 )
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
@@ -54,6 +57,7 @@ class AgentGateway:
         prompt_builder: PromptBuilder,
         subagent_runner: SubagentRunner,
         memory_store: Any,  # MarkdownMemoryStore
+        mcp_provider: Any = None,  # MCPProvider (A2: MCP 标准工具接口)
         hooks: HookRegistry | None = None,
         runtime_config: RuntimeConfig | None = None,
     ) -> None:
@@ -64,6 +68,7 @@ class AgentGateway:
         self.prompt_builder = prompt_builder
         self.subagent_runner = subagent_runner
         self.memory_store = memory_store
+        self.mcp_provider = mcp_provider
         self.hooks = hooks or build_default_hooks()
         self.runtime_config = runtime_config or RuntimeConfig(
             max_iterations=25,
@@ -142,6 +147,10 @@ class AgentGateway:
             current_data_lock.set(get_data_lock_registry())
         except Exception:
             pass  # Sandbox/DataLock 可选，不阻塞启动
+
+        # A2: 注入 MCPProvider 到 ContextVar (供 MCP 工具使用)
+        if self.mcp_provider:
+            current_mcp_provider.set(self.mcp_provider)
 
         # ── 2. 解析/创建会话 ──
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):
@@ -225,21 +234,30 @@ class AgentGateway:
             tool_summaries=tool_summaries,
         )
 
-        # ── 7. 构建用户消息 ──
-        materials_summary = ""
-        mat_list = materials or []
-        if mat_list:
-            summaries = []
-            for m in mat_list:
-                if isinstance(m, dict):
-                    content = m.get("content", "")
-                    filename = m.get("filename", "")
-                    summaries.append(f"[{filename}]\n{content[:2000]}")
-            materials_summary = "\n\n".join(summaries)
+        # ── 7. 构建用户消息 (A4-4i: 多模态支持) ──
+        from config import settings
+        text_summaries: list[str] = []
+        image_blocks: list[dict] = []
+        for m in (materials or []):
+            if not isinstance(m, dict):
+                continue
+            mat_type = m.get("material_type", "text")
+            filename = m.get("filename", "")
+            content = m.get("content", "")
+
+            if mat_type == "image" and content and settings.llm_supports_vision:
+                media_type = mimetypes.guess_type(filename)[0] or "image/png"
+                image_blocks.append({"base64": content, "media_type": media_type})
+                text_summaries.append(f"[Image: {filename}]")
+            else:
+                text_summaries.append(f"[{filename}]\n{content[:2000]}")
+
+        materials_summary = "\n\n".join(text_summaries)
 
         user_message = self.prompt_builder.build_user_message(
             message=message,
             materials_summary=materials_summary,
+            image_blocks=image_blocks or None,
         )
 
         # ── 8. 创建 AgenticRuntime 并执行 ──
