@@ -294,3 +294,267 @@ Body without name in frontmatter for testing error handling.
         result = loader.import_from_content(raw)
         assert result["ok"] is False
         assert "name" in result["error"].lower()
+
+
+# ──────────────────────────────────────────────
+# A7: 多源加载 + 优先级合并 + 大小预算
+# ──────────────────────────────────────────────
+
+class TestA7MultiSource:
+    """Tests for A7 multi-source loading with priority merging."""
+
+    def test_higher_priority_overrides_same_name(self, tmp_path):
+        """Higher priority skill overrides lower priority same-name skill."""
+        # Create builtin skill
+        builtin_dir = tmp_path / "builtin"
+        d1 = builtin_dir / "my-skill"
+        d1.mkdir(parents=True)
+        (d1 / "SKILL.md").write_text('''---
+name: my-skill
+type: capability
+---
+
+Builtin version of my-skill with lower priority content.
+''')
+
+        # Create tenant skill with same name
+        tenant_dir = tmp_path / "tenant"
+        d2 = tenant_dir / "my-skill"
+        d2.mkdir(parents=True)
+        (d2 / "SKILL.md").write_text('''---
+name: my-skill
+type: capability
+---
+
+Tenant version of my-skill with higher priority content.
+''')
+
+        loader = SkillLoader(skills_dir=str(builtin_dir))
+        loader.load_tenant_skills(str(tenant_dir))
+
+        # Tenant should override builtin
+        result = loader.load_for_pipeline(agent_name="universal")
+        assert "Tenant version" in result
+        assert "Builtin version" not in result
+
+    def test_lower_priority_does_not_override(self, tmp_path):
+        """Lower priority skill does NOT override higher priority same-name skill."""
+        # Create tenant skill first (priority 3)
+        tenant_dir = tmp_path / "tenant"
+        d1 = tenant_dir / "my-skill"
+        d1.mkdir(parents=True)
+        (d1 / "SKILL.md").write_text('''---
+name: my-skill
+type: capability
+---
+
+Tenant version with higher priority.
+''')
+
+        # Create builtin with same name (priority 1)
+        builtin_dir = tmp_path / "builtin"
+        d2 = builtin_dir / "my-skill"
+        d2.mkdir(parents=True)
+        (d2 / "SKILL.md").write_text('''---
+name: my-skill
+type: capability
+---
+
+Builtin version with lower priority.
+''')
+
+        loader = SkillLoader(skills_dir=str(builtin_dir))
+        loader.load_tenant_skills(str(tenant_dir))
+
+        # Now try to re-scan builtin — should NOT override tenant
+        from skills.loader import PRIORITY_BUILTIN
+        loader._scan_directory(str(builtin_dir), PRIORITY_BUILTIN)
+
+        result = loader.load_for_pipeline(agent_name="universal")
+        assert "Tenant version" in result
+
+    def test_load_tenant_skills(self, tmp_path):
+        """load_tenant_skills loads from tenant directory."""
+        tenant_dir = tmp_path / "tenant"
+        d = tenant_dir / "tenant-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text('''---
+name: tenant-skill
+type: capability
+---
+
+Tenant skill body content for testing tenant loading.
+''')
+
+        loader = SkillLoader(skills_dir=str(tmp_path / "empty"))
+        count = loader.load_tenant_skills(str(tenant_dir))
+        assert count == 1
+        skills = loader.list_skills()
+        assert any(s["name"] == "tenant-skill" for s in skills)
+
+    def test_load_user_skills(self, tmp_path):
+        """load_user_skills loads from user directory."""
+        user_dir = tmp_path / "user"
+        d = user_dir / "user-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text('''---
+name: user-skill
+type: capability
+---
+
+User skill body content for testing user loading.
+''')
+
+        loader = SkillLoader(skills_dir=str(tmp_path / "empty"))
+        count = loader.load_user_skills(str(user_dir))
+        assert count == 1
+        skills = loader.list_skills()
+        assert any(s["name"] == "user-skill" for s in skills)
+
+    def test_register_plugin_skill(self, tmp_path):
+        """register_plugin_skill adds skill with PRIORITY_PLUGIN."""
+        loader = SkillLoader(skills_dir=str(tmp_path / "empty"))
+        loader.register_plugin_skill(
+            name="plugin-skill",
+            metadata={"type": "capability", "description": "From plugin"},
+            body="Plugin skill body content for testing plugin registration.",
+        )
+        skills = loader.list_skills()
+        assert any(s["name"] == "plugin-skill" for s in skills)
+
+    def test_list_skills_shows_priority(self, tmp_path):
+        """list_skills includes priority field."""
+        loader = SkillLoader(skills_dir=str(tmp_path / "empty"))
+        loader.register_plugin_skill(
+            name="p-skill",
+            metadata={"type": "capability"},
+            body="Body.",
+        )
+        skills = loader.list_skills()
+        assert skills[0]["priority"] == 2  # PRIORITY_PLUGIN
+
+
+class TestA7Budget:
+    """Tests for A7 size budget control."""
+
+    def test_single_skill_truncation(self, tmp_path):
+        """Single skill exceeding max_single_chars is truncated."""
+        d = tmp_path / "big-skill"
+        d.mkdir()
+        big_body = "x" * 15000
+        (d / "SKILL.md").write_text(f'''---
+name: big-skill
+type: capability
+---
+
+{big_body}
+''')
+
+        loader = SkillLoader(skills_dir=str(tmp_path), max_single_chars=5000)
+        result = loader.load_for_pipeline(agent_name="universal")
+        assert len(result) < 15000
+        assert "截断" in result
+
+    def test_total_budget_drops_low_priority(self, tmp_path):
+        """Skills exceeding total budget are dropped (low priority first)."""
+        # Create two skills, each ~6000 chars
+        for i, name in enumerate(["skill-a", "skill-b"]):
+            d = tmp_path / name
+            d.mkdir()
+            body = f"Content for {name} " * 400  # ~6000 chars
+            (d / "SKILL.md").write_text(f'''---
+name: {name}
+type: capability
+---
+
+{body}
+''')
+
+        loader = SkillLoader(skills_dir=str(tmp_path), max_prompt_chars=8000)
+        result = loader.load_for_pipeline(agent_name="universal")
+        # At least one skill should be loaded, one might be dropped
+        assert len(result) <= 8000
+
+    def test_budget_respects_max_prompt_chars(self, tmp_path):
+        """Total output respects max_prompt_chars."""
+        for name in ["s1", "s2", "s3"]:
+            d = tmp_path / name
+            d.mkdir()
+            body = "y" * 5000
+            (d / "SKILL.md").write_text(f'''---
+name: {name}
+type: capability
+---
+
+{body}
+''')
+
+        loader = SkillLoader(skills_dir=str(tmp_path), max_prompt_chars=7000)
+        result = loader.load_for_pipeline(agent_name="universal")
+        assert len(result) <= 7000
+
+
+class TestA7DirectoryStructure:
+    """Tests for A7 skills/builtin/ directory structure."""
+
+    def test_builtin_subdir_scanned(self, tmp_path):
+        """When skills/builtin/ exists, skills are scanned from there."""
+        builtin = tmp_path / "builtin"
+        d = builtin / "my-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text('''---
+name: my-skill
+type: capability
+---
+
+Skill from builtin subdirectory for testing directory structure.
+''')
+
+        loader = SkillLoader(skills_dir=str(tmp_path))
+        skills = loader.list_skills()
+        assert len(skills) == 1
+        assert skills[0]["name"] == "my-skill"
+
+    def test_fallback_to_root_when_no_builtin(self, tmp_path):
+        """When no builtin/ subdir exists, falls back to scanning root."""
+        d = tmp_path / "root-skill"
+        d.mkdir()
+        (d / "SKILL.md").write_text('''---
+name: root-skill
+type: capability
+---
+
+Skill from root directory for testing fallback behavior.
+''')
+
+        loader = SkillLoader(skills_dir=str(tmp_path))
+        skills = loader.list_skills()
+        assert len(skills) == 1
+        assert skills[0]["name"] == "root-skill"
+
+    def test_create_skill_goes_to_builtin(self, tmp_path):
+        """create_skill puts new skills in builtin/ when it exists."""
+        (tmp_path / "builtin").mkdir()
+        loader = SkillLoader(skills_dir=str(tmp_path))
+        result = loader.create_skill(
+            name="new-skill",
+            metadata={"type": "capability"},
+            body="New skill body content for testing create location.",
+        )
+        assert result["ok"] is True
+        assert (tmp_path / "builtin" / "new-skill" / "SKILL.md").exists()
+
+    def test_import_goes_to_builtin(self, tmp_path):
+        """import_from_content puts imported skills in builtin/ when it exists."""
+        (tmp_path / "builtin").mkdir()
+        loader = SkillLoader(skills_dir=str(tmp_path))
+        raw = '''---
+name: imported-skill
+type: capability
+---
+
+Imported skill body for testing import location.
+'''
+        result = loader.import_from_content(raw)
+        assert result["ok"] is True
+        assert (tmp_path / "builtin" / "imported-skill" / "SKILL.md").exists()
