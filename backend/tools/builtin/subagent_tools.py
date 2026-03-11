@@ -1,19 +1,21 @@
 """
-子智能体工具。
+子智能体工具 — A3 动态化重构。
 
-主 Agent 通过 spawn_subagent 工具调用子智能体。
+主 Agent 通过 spawn_subagent / spawn_subagents 调用子智能体。
 子智能体有独立的 AgenticRuntime 实例和独立上下文。
 
-实际执行由 SubagentRunner 完成（通过 contextvars 注入）。
-
-Phase 16 增强:
-- agent_role: 指定专业角色 (如 "data-validator", "compliance-reviewer")
-- inherit_context: 是否继承主 Agent 的业务上下文
+A3 改造:
+- 去掉预定义角色 (agents/*.md) 和 subagent_type (query/task)
+- 主 Agent 动态生成 prompt 即角色
+- 支持工具白名单 (逗号分隔)
+- 支持批量并行 (spawn_subagents)
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
+import json
 from typing import Any
 
 from core.tool_registry import ToolRegistry
@@ -29,24 +31,18 @@ _subagent_runner: contextvars.ContextVar[Any] = contextvars.ContextVar(
 @subagent_capability_registry.tool(
     description=(
         "派遣子智能体执行子任务。子智能体有独立上下文，完成后返回结果。"
-        "适用场景: "
-        "1) 需要大量 MCP 查询的数据收集 (subagent_type='query')  "
-        "2) 需要执行具体子任务 (subagent_type='task')  "
-        "3) 需要专业角色审查 (agent_role='data-validator'/'compliance-reviewer'/'document-reviewer')。"
-        "task 是子任务描述。"
-        "subagent_type: 'query' = 只读查询, 'task' = 全部工具 (向后兼容)。"
-        "agent_role: 指定专业角色 (优先于 subagent_type)，角色有工具白名单和专业 prompt。"
-        "context 是传递给子智能体的上下文信息。"
-        "inherit_context: 是否继承当前业务上下文 (默认 true)。"
+        "task: 子任务描述（必填）。"
+        "prompt: 子智能体的角色/行为 prompt（可选，不填则用默认通用 prompt）。"
+        "tools: 工具白名单，逗号分隔（可选，不填则继承全部工具）。"
+        "timeout_s: 超时秒数（默认 120）。"
     ),
     read_only=False,
 )
 async def spawn_subagent(
     task: str,  # 子任务描述
-    subagent_type: str = "query",  # "query" = 只读查询, "task" = 全能执行
-    context: str = "",  # 传递给子智能体的上下文
-    agent_role: str = "",  # Phase 16: 专业角色名称
-    inherit_context: bool = True,  # Phase 16: 是否继承业务上下文
+    prompt: str = "",  # 动态角色 prompt
+    tools: str = "",  # 工具白名单，逗号分隔
+    timeout_s: int = 120,  # 超时秒数
 ) -> str:
     """派遣子智能体执行子任务，返回子智能体的最终回答。"""
     runner = _subagent_runner.get()
@@ -55,9 +51,64 @@ async def spawn_subagent(
 
     result = await runner.run_subagent(
         task=task,
-        subagent_type=subagent_type,
-        context=context,
-        agent_role=agent_role,
-        inherit_context=inherit_context,
+        prompt=prompt,
+        tools=tools,
+        timeout_s=timeout_s,
     )
     return result
+
+
+@subagent_capability_registry.tool(
+    description=(
+        "批量并行派遣多个子智能体。所有子智能体同时执行，全部完成后返回汇总结果。"
+        "tasks: JSON 数组，每项包含 task(必填)、prompt(可选)、tools(可选)。"
+        "示例: [{\"task\":\"检查数据\",\"prompt\":\"你是数据验证专家\"},{\"task\":\"检查合规\"}]"
+        "timeout_s: 所有子智能体的超时秒数（默认 120）。"
+    ),
+    read_only=False,
+)
+async def spawn_subagents(
+    tasks: str,  # JSON 数组
+    timeout_s: int = 120,
+) -> str:
+    """批量并行派遣多个子智能体，返回汇总结果。"""
+    runner = _subagent_runner.get()
+    if runner is None:
+        return "错误: SubagentRunner 未初始化。"
+
+    # 解析 tasks JSON
+    try:
+        task_list = json.loads(tasks)
+        if not isinstance(task_list, list) or len(task_list) == 0:
+            return "错误: tasks 必须是非空 JSON 数组。"
+    except json.JSONDecodeError as e:
+        return f"错误: tasks JSON 解析失败: {e}"
+
+    # 并行执行
+    coros = []
+    for item in task_list:
+        if isinstance(item, str):
+            item = {"task": item}
+        if not isinstance(item, dict) or "task" not in item:
+            return "错误: tasks 数组每项必须包含 task 字段。"
+        coros.append(
+            runner.run_subagent(
+                task=item["task"],
+                prompt=item.get("prompt", ""),
+                tools=item.get("tools", ""),
+                timeout_s=timeout_s,
+            )
+        )
+
+    results = await asyncio.gather(*coros, return_exceptions=True)
+
+    # 格式化结果
+    parts = []
+    for i, (item, result) in enumerate(zip(task_list, results)):
+        task_desc = item["task"] if isinstance(item, dict) else item
+        if isinstance(result, Exception):
+            parts.append(f"## 子任务 {i+1}: {task_desc}\n**错误**: {result}")
+        else:
+            parts.append(f"## 子任务 {i+1}: {task_desc}\n{result}")
+
+    return "\n\n".join(parts)
