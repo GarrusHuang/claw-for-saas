@@ -5,6 +5,11 @@
     "packages/*",
     "app"
   ],
+  "scripts": {
+    "test:unit": "vitest run --config packages/claw-core/vitest.config.ts && vitest run --config packages/claw-ui/vitest.config.ts && vitest run --config app/vitest.config.ts",
+    "test:e2e": "npx playwright test",
+    "test": "npm run test:unit && npm run test:e2e"
+  },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.9.1",
