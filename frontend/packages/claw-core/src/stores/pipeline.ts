@@ -26,6 +26,17 @@ export type {
 } from '../types/pipeline.ts';
 
 
+export interface TimelineEntry {
+  id: string;
+  type: 'thinking' | 'tool' | 'text';
+  timestamp: number;
+  // thinking / text
+  iteration?: number;
+  content?: string;
+  // tool
+  toolExecution?: ToolExecution;
+}
+
 interface PipelineState {
   // Status
   status: PipelineStatus;
@@ -49,6 +60,9 @@ interface PipelineState {
   streamingText: string;
   isStreaming: boolean;
   thinkingText: string;
+
+  // Timeline: thinking + tool_executed 按时间顺序排列
+  timelineEntries: TimelineEntry[];
 
   // Results
   inferredType: InferredType | null;
@@ -105,7 +119,8 @@ interface PipelineState {
   appendStreamingText: (text: string) => void;
   setIsStreaming: (v: boolean) => void;
   clearStreamingText: () => void;
-  appendThinkingText: (text: string) => void;
+  appendThinkingText: (text: string, iteration?: number) => void;
+  appendTextToTimeline: (text: string, iteration: number) => void;
   addToolExecution: (data: ToolExecution) => void;
   setCallingTools: (tools: string[]) => void;
   setAgentIterationInfo: (current: number, max: number) => void;
@@ -145,6 +160,7 @@ const initialState = {
   streamingText: '',
   isStreaming: false,
   thinkingText: '',
+  timelineEntries: [] as TimelineEntry[],
   steps: [] as StepProgress[],
   currentStep: '',
   inferredType: null as InferredType | null,
@@ -264,14 +280,53 @@ export const usePipelineStore = create<PipelineState>((set) => ({
     set((state) => ({ streamingText: state.streamingText + text, isStreaming: true })),
   setIsStreaming: (v) => set({ isStreaming: v }),
   clearStreamingText: () => set({ streamingText: '', isStreaming: false }),
-  appendThinkingText: (text) =>
-    set((state) => ({
-      thinkingText: state.thinkingText ? state.thinkingText + '\n\n' + text : text,
-    })),
+  appendThinkingText: (text, iteration) =>
+    set((state) => {
+      const entries = [...state.timelineEntries];
+      // 同一迭代的 thinking 追加到同一条 entry
+      const last = entries[entries.length - 1];
+      if (last && last.type === 'thinking' && last.iteration === iteration) {
+        last.content = (last.content || '') + text;
+      } else {
+        entries.push({
+          id: `think-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'thinking',
+          timestamp: Date.now(),
+          iteration: iteration || 0,
+          content: text,
+        });
+      }
+      return { thinkingText: state.thinkingText + text, timelineEntries: entries };
+    }),
+
+  appendTextToTimeline: (text: string, iteration: number) =>
+    set((state) => {
+      const entries = [...state.timelineEntries];
+      // 同一迭代的 text 追加到同一条 entry
+      const last = entries[entries.length - 1];
+      if (last && last.type === 'text' && last.iteration === iteration) {
+        last.content = (last.content || '') + text;
+      } else {
+        entries.push({
+          id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'text',
+          timestamp: Date.now(),
+          iteration: iteration || 0,
+          content: text,
+        });
+      }
+      return { timelineEntries: entries };
+    }),
 
   addToolExecution: (data) =>
     set((state) => ({
       toolExecutions: [...state.toolExecutions, data],
+      timelineEntries: [...state.timelineEntries, {
+        id: data.id,
+        type: 'tool' as const,
+        timestamp: data.timestamp || Date.now(),
+        toolExecution: data,
+      }],
       agentIteration: {
         ...state.agentIteration,
         callingTools: state.agentIteration.callingTools.filter((t) => t !== data.toolName),

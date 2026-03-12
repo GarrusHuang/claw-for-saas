@@ -10,6 +10,8 @@ const { TextArea } = Input;
 export interface AttachedFile {
   fileId: string;
   filename: string;
+  contentType?: string;
+  sizeBytes?: number;
 }
 
 interface ChatInputProps {
@@ -68,6 +70,8 @@ export default function ChatInput({
         setAttachedFiles(prev => [...prev, {
           fileId: result.file_id,
           filename: result.filename,
+          contentType: result.content_type,
+          sizeBytes: result.size_bytes,
         }]);
         message.success(`${result.filename} 上传成功`);
       }

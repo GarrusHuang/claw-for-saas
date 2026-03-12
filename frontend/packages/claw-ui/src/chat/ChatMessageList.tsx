@@ -1,5 +1,5 @@
-import { useEffect, useRef, memo } from 'react';
-import { Typography, Spin, Button } from 'antd';
+import React, { useEffect, useRef, useState, memo } from 'react';
+import { Typography, Spin, Button, Modal } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -7,11 +7,18 @@ import {
   BulbOutlined,
   ToolOutlined,
   StopOutlined,
+  FileOutlined,
+  FilePdfOutlined,
+  FileExcelOutlined,
+  FileWordOutlined,
+  FileImageOutlined,
+  FileZipOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { usePipelineStore } from '@claw/core';
-import type { PendingInteraction, ToolExecution } from '@claw/core';
+import { usePipelineStore, getAIConfig } from '@claw/core';
+import type { PendingInteraction, ToolExecution, TimelineEntry } from '@claw/core';
 import {
   MiniTypeInference,
   MiniFieldUpdates,
@@ -22,7 +29,7 @@ import InlineUploader from './InlineUploader';
 import InteractiveMessage from './InteractiveMessage';
 import CollapsibleBlock from './CollapsibleBlock';
 
-import type { ChatMessage } from '@claw/core';
+import type { ChatMessage, ChatMessageFile, ChatTimelineEntry } from '@claw/core';
 
 const { Text } = Typography;
 
@@ -190,62 +197,539 @@ function InlinePipelineProgress() {
 
 // ── 工具调用折叠行 — 逐条嵌入文档流 ──
 
-function ToolExecutionLog() {
-  const toolExecutions = usePipelineStore((s) => s.toolExecutions) as ToolExecution[];
-
-  if (toolExecutions.length === 0) return null;
-
-  // 构建一行汇总
-  const summaryParts: string[] = [];
-  const toolNames = new Set(toolExecutions.map((te) => te.toolName));
-  summaryParts.push(`执行了 ${toolExecutions.length} 条命令`);
-
-  // 提取文件相关操作
-  const fileOps = toolExecutions.filter(
-    (te) => te.argsSummary && (te.argsSummary.file_path || te.argsSummary.filename || te.argsSummary.path),
+// ── 单个工具执行行 ──
+function ToolExecutionItem({ te }: { te: ToolExecution }) {
+  return (
+    <div style={{ padding: '3px 0', fontSize: 11, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+      <span style={{ flexShrink: 0, marginTop: 1 }}>
+        {te.blocked ? (
+          <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
+        ) : te.success ? (
+          <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
+        ) : (
+          <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
+        )}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontWeight: 500, color: '#333' }}>{te.toolName}</span>
+        <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latencyMs)}ms)</span>
+        {te.argsSummary && Object.keys(te.argsSummary).length > 0 && (
+          <div style={{ color: '#888', fontSize: 10 }}>
+            {'→ '}
+            {Object.entries(te.argsSummary)
+              .map(([k, v]) => `${k}=${v}`)
+              .join(', ')}
+          </div>
+        )}
+        {te.resultSummary && (
+          <div style={{ color: '#666', fontSize: 10 }}>
+            {'← '}{te.resultSummary}
+          </div>
+        )}
+      </div>
+    </div>
   );
-  if (fileOps.length > 0) summaryParts.push(`操作了 ${fileOps.length} 个文件`);
+}
 
-  const blocked = toolExecutions.filter((te) => te.blocked);
-  if (blocked.length > 0) summaryParts.push(`${blocked.length} 个被阻止`);
+// ── 按迭代分组 — 对标 Claude Code: thinking→折叠块, text→正文, tools→折叠块 ──
+const HIDDEN_TOOLS = ['propose_plan', 'update_plan_step'];
+
+interface IterGroup {
+  id: string;
+  thinking?: string;
+  text?: string;
+  tools: ToolExecution[];
+}
+
+interface PersistedIterGroup {
+  id: string;
+  thinking?: string;
+  text?: string;
+  tools: ChatTimelineEntry[];
+}
+
+/** live entries → 按迭代分组 (thinking/text 开始新组, tool 追加到当前组) */
+function groupByIteration(entries: TimelineEntry[]): IterGroup[] {
+  const groups: IterGroup[] = [];
+  let cur: IterGroup | null = null;
+  let curIter: number | undefined;
+  for (const e of entries) {
+    if (e.type === 'thinking') {
+      if (cur) groups.push(cur);
+      cur = { id: e.id, thinking: e.content || '', tools: [] };
+      curIter = e.iteration;
+    } else if (e.type === 'text') {
+      // 当前组已有 tools 或 iteration 变了 → 新组 (防止正文推着工具走)
+      const iterChanged = e.iteration !== undefined && e.iteration !== curIter;
+      if (!cur || cur.tools.length > 0 || iterChanged) {
+        if (cur) groups.push(cur);
+        cur = { id: e.id, text: e.content || '', tools: [] };
+        curIter = e.iteration;
+      } else {
+        cur.text = (cur.text || '') + (e.content || '');
+      }
+    } else if (e.type === 'tool' && e.toolExecution) {
+      if (!cur) cur = { id: e.id, tools: [] };
+      if (!HIDDEN_TOOLS.includes(e.toolExecution.toolName)) {
+        cur.tools.push(e.toolExecution);
+      }
+    }
+  }
+  if (cur) groups.push(cur);
+  return groups;
+}
+
+/** persisted entries → 按迭代分组 */
+function groupPersistedByIteration(entries: ChatTimelineEntry[]): PersistedIterGroup[] {
+  const groups: PersistedIterGroup[] = [];
+  let cur: PersistedIterGroup | null = null;
+  let curIter: number | undefined;
+  for (const e of entries) {
+    if (e.type === 'thinking') {
+      if (cur && cur.tools.length === 0 && cur.thinking !== undefined && !cur.text) {
+        cur.thinking = (cur.thinking || '') + (e.content || '');
+      } else {
+        if (cur) groups.push(cur);
+        cur = { id: `pg-${groups.length}`, thinking: e.content || '', tools: [] };
+        curIter = e.iteration;
+      }
+    } else if (e.type === 'text') {
+      const iterChanged = e.iteration !== undefined && e.iteration !== curIter;
+      if (!cur || cur.tools.length > 0 || iterChanged) {
+        if (cur) groups.push(cur);
+        cur = { id: `pg-${groups.length}`, text: e.content || '', tools: [] };
+        curIter = e.iteration;
+      } else {
+        cur.text = (cur.text || '') + (e.content || '');
+      }
+    } else if (e.type === 'tool') {
+      if (!cur) cur = { id: `pg-${groups.length}`, tools: [] };
+      if (!HIDDEN_TOOLS.includes(e.tool_name || '')) {
+        cur.tools.push(e);
+      }
+    }
+  }
+  if (cur) groups.push(cur);
+  return groups;
+}
+
+/** 工具折叠块标签: "tool1, tool2 ×2" */
+function buildToolLabel(toolNames: string[], isActive?: boolean): string {
+  if (toolNames.length === 0) return '工具调用';
+  const counts = new Map<string, number>();
+  for (const n of toolNames) counts.set(n, (counts.get(n) || 0) + 1);
+  const tp: string[] = [];
+  for (const [name, count] of counts) tp.push(count > 1 ? `${name} ×${count}` : name);
+  let label: string;
+  if (tp.length <= 3) label = tp.join(', ');
+  else label = `${tp.slice(0, 2).join(', ')} 等 ${toolNames.length} 个工具`;
+  if (isActive) label += '...';
+  return label;
+}
+
+/** 检查 timeline 是否包含 text 条目 (有则抑制 message body 避免重复) */
+function timelineHasText(entries: TimelineEntry[] | ChatTimelineEntry[] | undefined): boolean {
+  if (!entries || entries.length === 0) return false;
+  return entries.some((e) => e.type === 'text' && e.content);
+}
+
+// ── 实时时间线: thinking→折叠块, text→正文, tools→折叠块 ──
+function AgentTimeline() {
+  const timelineEntries = usePipelineStore((s) => s.timelineEntries) as TimelineEntry[];
+  const pipelineStatus = usePipelineStore((s) => s.status);
+
+  if (!timelineEntries || timelineEntries.length === 0) return null;
+
+  const groups = groupByIteration(timelineEntries);
+  if (groups.length === 0) return null;
+
+  const isActive = pipelineStatus === 'running';
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      <CollapsibleBlock
-        icon={<ToolOutlined style={{ color: '#722ed1', fontSize: 12 }} />}
-        summary={summaryParts.join(', ')}
-      >
-        {toolExecutions.map((te) => (
-          <div key={te.id} style={{ padding: '3px 0', fontSize: 11, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-            <span style={{ flexShrink: 0, marginTop: 1 }}>
-              {te.blocked ? (
-                <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
-              ) : te.success ? (
-                <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
-              ) : (
-                <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
-              )}
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontWeight: 500, color: '#333' }}>{te.toolName}</span>
-              <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latencyMs)}ms)</span>
-              {te.argsSummary && Object.keys(te.argsSummary).length > 0 && (
-                <div style={{ color: '#888', fontSize: 10 }}>
-                  {'→ '}
-                  {Object.entries(te.argsSummary)
-                    .map(([k, v]) => `${k}=${v}`)
-                    .join(', ')}
-                </div>
-              )}
-              {te.resultSummary && (
-                <div style={{ color: '#666', fontSize: 10 }}>
-                  {'← '}{te.resultSummary}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </CollapsibleBlock>
+    <>
+      {groups.map((g, gi) => {
+        const isLastGroup = gi === groups.length - 1;
+        const hasThinking = !!g.thinking;
+        const hasText = !!g.text;
+        const hasTools = g.tools.length > 0;
+        if (!hasThinking && !hasText && !hasTools) return null;
+
+        return (
+          <React.Fragment key={g.id}>
+            {/* thinking → 折叠块 */}
+            {hasThinking && (
+              <div style={{ marginBottom: hasText || hasTools ? 4 : 12 }}>
+                <CollapsibleBlock
+                  icon={<BulbOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />}
+                  summary="思考过程"
+                >
+                  <div style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap' }}>{g.thinking}</div>
+                </CollapsibleBlock>
+              </div>
+            )}
+            {/* text → 正文 (ReactMarkdown) */}
+            {hasText && (
+              <div className="msg-ai markdown-body" style={{ marginBottom: hasTools ? 4 : 12 }}>
+                <Markdown remarkPlugins={REMARK_PLUGINS}>{g.text!}</Markdown>
+              </div>
+            )}
+            {/* tools → 折叠块 */}
+            {hasTools && (
+              <div style={{ marginBottom: 12 }}>
+                <CollapsibleBlock
+                  icon={
+                    isActive && isLastGroup
+                      ? <ToolOutlined style={{ color: '#722ed1', fontSize: 12 }} />
+                      : <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+                  }
+                  summary={buildToolLabel(g.tools.map((t) => t.toolName), isActive && isLastGroup)}
+                >
+                  {g.tools.map((te) => (
+                    <ToolExecutionItem key={te.id} te={te} />
+                  ))}
+                </CollapsibleBlock>
+              </div>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+// ── 持久化时间线 ──
+// showText=false(默认): 只渲染 thinking + tools，正文由 MessageItem 负责
+// showText=true: 也渲染 text entries (当 msg.content 为空时，text 是唯一内容来源)
+function PersistedTimeline({ entries, showText = false }: { entries: ChatTimelineEntry[]; showText?: boolean }) {
+  if (!entries || entries.length === 0) return null;
+
+  const groups = groupPersistedByIteration(entries);
+  if (groups.length === 0) return null;
+
+  return (
+    <>
+      {groups.map((g) => {
+        const hasThinking = !!g.thinking;
+        const hasText = showText && !!g.text?.trim();
+        const hasTools = g.tools.length > 0;
+        if (!hasThinking && !hasText && !hasTools) return null;
+
+        return (
+          <React.Fragment key={g.id}>
+            {hasThinking && (
+              <div style={{ marginBottom: (hasText || hasTools) ? 4 : 12 }}>
+                <CollapsibleBlock
+                  icon={<BulbOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />}
+                  summary="思考过程"
+                >
+                  <div style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap' }}>{g.thinking}</div>
+                </CollapsibleBlock>
+              </div>
+            )}
+            {hasText && (
+              <div className="msg-ai markdown-body" style={{ marginBottom: hasTools ? 4 : 12 }}>
+                <Markdown remarkPlugins={REMARK_PLUGINS}>{g.text!}</Markdown>
+              </div>
+            )}
+            {hasTools && (
+              <div style={{ marginBottom: 12 }}>
+                <CollapsibleBlock
+                  icon={<CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />}
+                  summary={buildToolLabel(g.tools.map((t) => t.tool_name || ''))}
+                >
+                  {g.tools.map((te, ti) => (
+                    <div key={ti} style={{ padding: '3px 0', fontSize: 11, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                      <span style={{ flexShrink: 0, marginTop: 1 }}>
+                        {te.blocked ? (
+                          <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
+                        ) : te.success ? (
+                          <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
+                        ) : (
+                          <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
+                        )}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: 500, color: '#333' }}>{te.tool_name}</span>
+                        {te.latency_ms != null && (
+                          <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latency_ms)}ms)</span>
+                        )}
+                        {te.args_summary && Object.keys(te.args_summary).length > 0 && (
+                          <div style={{ color: '#888', fontSize: 10 }}>
+                            {'→ '}
+                            {Object.entries(te.args_summary).map(([k, v]) => `${k}=${v}`).join(', ')}
+                          </div>
+                        )}
+                        {te.result_summary && (
+                          <div style={{ color: '#666', fontSize: 10 }}>
+                            {'← '}{te.result_summary}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </CollapsibleBlock>
+              </div>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+// ── 文件附件渲染 ──
+
+function isImageFile(file: ChatMessageFile): boolean {
+  if (file.contentType?.startsWith('image/')) return true;
+  const ext = file.filename.split('.').pop()?.toLowerCase() || '';
+  return ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext);
+}
+
+function getFileIcon(file: ChatMessageFile) {
+  const ext = file.filename.split('.').pop()?.toLowerCase() || '';
+  if (isImageFile(file)) return <FileImageOutlined style={{ color: '#1890ff' }} />;
+  if (ext === 'pdf') return <FilePdfOutlined style={{ color: '#ff4d4f' }} />;
+  if (['doc', 'docx'].includes(ext)) return <FileWordOutlined style={{ color: '#2f54eb' }} />;
+  if (['xls', 'xlsx', 'csv'].includes(ext)) return <FileExcelOutlined style={{ color: '#52c41a' }} />;
+  if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) return <FileZipOutlined style={{ color: '#faad14' }} />;
+  return <FileOutlined style={{ color: '#8c8c8c' }} />;
+}
+
+function formatFileSize(bytes?: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileDownloadUrl(fileId: string): string {
+  return `${getAIConfig().aiBaseUrl}/files/${fileId}/download`;
+}
+
+/** 带认证的文件 URL 获取 (img 标签不支持 Authorization header) */
+function useAuthBlobUrl(fileId: string) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const blobRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const config = getAIConfig();
+        const headers: Record<string, string> = {};
+        if (config.getAuthToken) {
+          const token = await config.getAuthToken();
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+        } else if (config.authToken) {
+          headers['Authorization'] = `Bearer ${config.authToken}`;
+        }
+        const res = await fetch(getFileDownloadUrl(fileId), { headers });
+        if (!res.ok) { setError(true); return; }
+        const blob = await res.blob();
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        blobRef.current = url;
+        setBlobUrl(url);
+      } catch {
+        setError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+    };
+  }, [fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { blobUrl, error };
+}
+
+function ImageThumb({ file, onClick }: { file: ChatMessageFile; onClick: () => void }) {
+  const { blobUrl, error } = useAuthBlobUrl(file.fileId);
+  const [imgError, setImgError] = useState(false);
+  const showFallback = error || imgError;
+  return (
+    <div
+      style={{
+        position: 'relative', width: 120, height: 120, borderRadius: 8,
+        overflow: 'hidden', border: '1px solid #e8e8e8', cursor: 'pointer', background: '#fafafa',
+      }}
+      onClick={onClick}
+    >
+      {blobUrl && !showFallback ? (
+        <img
+          src={blobUrl}
+          alt={file.filename}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          onError={() => setImgError(true)}
+        />
+      ) : showFallback ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 4, height: '100%' }}>
+          <FileImageOutlined style={{ fontSize: 24, color: '#bfbfbf' }} />
+          <span style={{ fontSize: 10, color: '#999', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 4px' }}>{file.filename}</span>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+          <Spin size="small" />
+        </div>
+      )}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        background: 'linear-gradient(transparent, rgba(0,0,0,0.5))',
+        padding: '12px 6px 4px', color: '#fff', fontSize: 10,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {file.filename}
+      </div>
+    </div>
+  );
+}
+
+/** 判断是否可以在浏览器中预览 */
+function isPdfFile(file: ChatMessageFile): boolean {
+  if (file.contentType === 'application/pdf') return true;
+  return file.filename.toLowerCase().endsWith('.pdf');
+}
+
+function isTextFile(file: ChatMessageFile): boolean {
+  if (file.contentType?.startsWith('text/')) return true;
+  const ext = file.filename.split('.').pop()?.toLowerCase() || '';
+  return ['txt', 'csv', 'json', 'xml', 'yaml', 'yml', 'md', 'log', 'ini', 'conf'].includes(ext);
+}
+
+/** 通用文件预览 Modal — 图片/PDF/文本 */
+function FilePreviewModal({ file, onClose }: { file: ChatMessageFile; onClose: () => void }) {
+  const { blobUrl } = useAuthBlobUrl(file.fileId);
+  const [textContent, setTextContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // 文本文件: 先尝试 /text 端点，失败则直接下载原文
+  useEffect(() => {
+    if (!isTextFile(file) || isImageFile(file)) return;
+    setLoading(true);
+    (async () => {
+      try {
+        const config = getAIConfig();
+        const headers: Record<string, string> = {};
+        if (config.getAuthToken) {
+          const token = await config.getAuthToken();
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+        } else if (config.authToken) {
+          headers['Authorization'] = `Bearer ${config.authToken}`;
+        }
+        // 优先 /text 端点
+        let text = '';
+        const textRes = await fetch(`${config.aiBaseUrl}/files/${file.fileId}/text`, { headers });
+        if (textRes.ok) {
+          const data = await textRes.json();
+          text = data.text || '';
+        }
+        // 为空则直接读取原始文件
+        if (!text) {
+          const rawRes = await fetch(getFileDownloadUrl(file.fileId), { headers });
+          if (rawRes.ok) text = await rawRes.text();
+        }
+        setTextContent(text);
+      } catch { /* ignore */ }
+      setLoading(false);
+    })();
+  }, [file.fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isImg = isImageFile(file);
+  const isPdf = isPdfFile(file);
+  const isTxt = isTextFile(file);
+
+  return (
+    <Modal
+      open
+      footer={null}
+      onCancel={onClose}
+      width={isPdf ? '80vw' : isTxt ? 720 : 'auto'}
+      style={{ maxWidth: '90vw' }}
+      styles={{ body: { padding: isPdf ? 0 : undefined } }}
+      centered
+      title={file.filename}
+    >
+      {isImg && blobUrl && (
+        <img src={blobUrl} alt={file.filename} style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain' }} />
+      )}
+      {isPdf && blobUrl && (
+        <iframe
+          src={blobUrl}
+          style={{ width: '100%', height: '80vh', border: 'none' }}
+          title={file.filename}
+        />
+      )}
+      {isTxt && !isImg && (
+        loading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : (
+          <pre style={{
+            maxHeight: '70vh', overflow: 'auto', padding: 16,
+            background: '#fafafa', borderRadius: 6, fontSize: 13,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}>
+            {textContent ?? ''}
+          </pre>
+        )
+      )}
+      {!isImg && !isPdf && !isTxt && (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
+          <FileOutlined style={{ fontSize: 48, marginBottom: 12 }} />
+          <div>该文件类型不支持预览</div>
+        </div>
+      )}
+      {!blobUrl && (isImg || isPdf) && (
+        <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+      )}
+    </Modal>
+  );
+}
+
+function FileAttachments({ files }: { files: ChatMessageFile[] }) {
+  const [previewFile, setPreviewFile] = useState<ChatMessageFile | null>(null);
+  const images = files.filter(isImageFile);
+  const others = files.filter((f) => !isImageFile(f));
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {/* 图片预览网格 */}
+      {images.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: others.length > 0 ? 8 : 0 }}>
+          {images.map((file) => (
+            <ImageThumb key={file.fileId} file={file} onClick={() => setPreviewFile(file)} />
+          ))}
+        </div>
+      )}
+
+      {/* 非图片文件卡片 — 点击预览 */}
+      {others.map((file) => (
+        <div
+          key={file.fileId}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 10px', marginBottom: 4,
+            background: '#f5f5f5', borderRadius: 6,
+            border: '1px solid #e8e8e8', fontSize: 12,
+            cursor: 'pointer',
+          }}
+          onClick={() => setPreviewFile(file)}
+        >
+          {getFileIcon(file)}
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#333' }}>
+            {file.filename}
+          </span>
+          {file.sizeBytes != null && (
+            <span style={{ color: '#999', fontSize: 11, flexShrink: 0 }}>{formatFileSize(file.sizeBytes)}</span>
+          )}
+          <EyeOutlined style={{ color: '#1890ff', flexShrink: 0 }} title="预览" />
+        </div>
+      ))}
+
+      {/* 文件预览 Modal (图片/PDF/文本) */}
+      {previewFile && (
+        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      )}
     </div>
   );
 }
@@ -258,6 +742,7 @@ const MessageItem = memo(function MessageItem({ msg }: { msg: ChatMessage }) {
       {msg.role === 'user' ? (
         <div className="msg-user">
           <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
+          {msg.files && msg.files.length > 0 && <FileAttachments files={msg.files} />}
         </div>
       ) : (
         <div className="msg-ai markdown-body">
@@ -279,7 +764,7 @@ export default function ChatMessageList({
   const pipelineStatus = usePipelineStore((s) => s.status);
   const pipelineScenario = usePipelineStore((s) => s.scenario);
   const thinkingText = usePipelineStore((s) => s.thinkingText);
-  const isStreaming = usePipelineStore((s) => s.isStreaming);
+  const liveTimelineEntries = usePipelineStore((s) => s.timelineEntries) as TimelineEntry[];
   const pendingInteraction = usePipelineStore((s) => s.pendingInteraction) as PendingInteraction | null;
   const resolveInteraction = usePipelineStore((s) => s.resolveInteraction);
 
@@ -287,6 +772,9 @@ export default function ChatMessageList({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, pipelineStatus, thinkingText]);
+
+  // 找到最后一条用户消息的索引，用于定位时间线插入点
+  const lastUserIdx = messages.reduce((acc, m, i) => (m.role === 'user' ? i : acc), -1);
 
   return (
     <div
@@ -296,26 +784,33 @@ export default function ChatMessageList({
         padding: '16px 24px 8px',
       }}
     >
-      {messages.map((msg) => (
-        <MessageItem key={msg.id} msg={msg} />
-      ))}
+      {messages.map((msg, idx) => {
+        // 每条 assistant 消息前渲染其持久化的时间线 (历史数据)
+        const hasPersistedTimeline = msg.role === 'assistant' && msg.timeline && msg.timeline.length > 0;
+        // 实时时间线: 当 store 中有 entries 时优先使用 (保持交错布局，避免完成后跳动)
+        const showLiveTimeline = idx === lastUserIdx + 1 && msg.role === 'assistant' && (liveTimelineEntries?.length ?? 0) > 0;
+        // 持久化时间线: 仅当无实时数据时才使用 (加载历史 session 时)
+        const showPersistedTimeline = hasPersistedTimeline && !showLiveTimeline;
+        // 实时 timeline 有 text 条目时抑制 body (避免和 timeline 正文重复)
+        // 不论 running/completed 都保持同样布局，防止完成瞬间元素跳动
+        const suppressBody = msg.role === 'assistant' &&
+          showLiveTimeline && timelineHasText(liveTimelineEntries);
+        // 持久化时间线: 当 msg.content 为空时，text entries 是唯一内容来源，需要渲染
+        const emptyContent = msg.role === 'assistant' && (!msg.content || msg.content.trim() === '');
+        const persistedShowText = emptyContent;
+        // 如果 content 为空且 timeline 有 text，body 也要抑制 (内容由 PersistedTimeline 渲染)
+        const suppressPersistedBody = showPersistedTimeline && emptyContent && timelineHasText(msg.timeline);
+        return (
+          <React.Fragment key={msg.id}>
+            {showPersistedTimeline && <PersistedTimeline entries={msg.timeline!} showText={persistedShowText} />}
+            {showLiveTimeline && <AgentTimeline />}
+            {!suppressBody && !suppressPersistedBody && <MessageItem msg={msg} />}
+          </React.Fragment>
+        );
+      })}
 
-      {/* 思考过程 — 始终可见但默认折叠 */}
-      {thinkingText && (isStreaming || pipelineStatus === 'running') && (
-        <div style={{ marginBottom: 16 }}>
-          <CollapsibleBlock
-            icon={<BulbOutlined style={{ color: '#faad14', fontSize: 12 }} />}
-            summary="思考过程"
-          >
-            <div style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-              {thinkingText}
-            </div>
-          </CollapsibleBlock>
-        </div>
-      )}
-
-      {/* 工具调用日志 — 逐条折叠行嵌入文档流 */}
-      <ToolExecutionLog />
+      {/* 无 assistant 响应时 (pipeline 进行中)，实时时间线显示在消息末尾 */}
+      {lastUserIdx === messages.length - 1 && <AgentTimeline />}
 
       {/* Pipeline 实时进度 — 折叠摘要 */}
       {showPipelineProgress && pipelineStatus !== 'idle' && pipelineScenario !== 'general_chat' && (

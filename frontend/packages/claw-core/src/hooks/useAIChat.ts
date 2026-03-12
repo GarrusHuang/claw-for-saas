@@ -24,12 +24,38 @@ import { listSessions as apiListSessions, getSessionHistory } from '../services/
 import type { SessionInfo } from '../services/ai-api.ts';
 import type { ScenarioConfig } from '../types/scenario.ts';
 
+/** 时间线条目 (持久化到 session，加载时恢复) */
+export interface ChatTimelineEntry {
+  type: 'thinking' | 'tool' | 'text';
+  content?: string;
+  iteration?: number;
+  tool_name?: string;
+  success?: boolean;
+  blocked?: boolean;
+  latency_ms?: number;
+  args_summary?: Record<string, string>;
+  result_summary?: string;
+  ts: number;
+}
+
+/** 消息附件文件 */
+export interface ChatMessageFile {
+  fileId: string;
+  filename: string;
+  contentType?: string;
+  sizeBytes?: number;
+}
+
 /** 聊天消息 */
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** 该消息关联的时间线 (thinking + tool 记录) */
+  timeline?: ChatTimelineEntry[];
+  /** 用户消息附带的文件 */
+  files?: ChatMessageFile[];
 }
 
 /**
@@ -64,7 +90,7 @@ export function useAIChat() {
 
   /** 添加消息 */
   const addMessage = useCallback(
-    (role: 'user' | 'assistant', content: string) => {
+    (role: 'user' | 'assistant', content: string, files?: ChatMessageFile[]) => {
       setMessages((prev) => [
         ...prev,
         {
@@ -72,6 +98,7 @@ export function useAIChat() {
           role,
           content,
           timestamp: Date.now(),
+          ...(files && files.length > 0 ? { files } : {}),
         },
       ]);
     },
@@ -133,17 +160,85 @@ export function useAIChat() {
       const loadSession = async (sessionId: string) => {
         try {
           const detail = await getSessionHistory(defaultUserId, sessionId);
-          const loaded: ChatMessage[] = detail.messages
-            .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .map((m, i) => ({
-              id: `hist-${sessionId}-${i}`,
-              role: m.role as 'user' | 'assistant',
-              content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-              timestamp: Date.now() - (detail.messages.length - i) * 1000,
-            }));
+          // 构建 timeline 查找表: turn_index → entries
+          const timelineMap = new Map<number, ChatTimelineEntry[]>();
+          if (detail.timelines) {
+            for (const tl of detail.timelines) {
+              const entries = (tl.entries || []).map((e) => ({
+                type: e.type as 'thinking' | 'tool' | 'text',
+                content: e.content,
+                iteration: e.iteration,
+                tool_name: e.tool_name,
+                success: e.success,
+                blocked: e.blocked,
+                latency_ms: e.latency_ms,
+                args_summary: e.args_summary,
+                result_summary: e.result_summary,
+                ts: e.ts,
+              }));
+              // 合并同一 turn 的 entries
+              const existing = timelineMap.get(tl.turn_index) || [];
+              timelineMap.set(tl.turn_index, [...existing, ...entries]);
+            }
+          }
+
+          // 构建消息列表:
+          // - 跳过 ReAct 循环中的中间 assistant 消息 (仅保留每轮最后一条)
+          // - 附加 timeline 到对应的 assistant 消息
+          const filtered = detail.messages.filter(
+            (m) => m.role === 'user' || m.role === 'assistant',
+          );
+          let assistantIdx = 0;
+          const loaded: ChatMessage[] = [];
+          for (let i = 0; i < filtered.length; i++) {
+            const m = filtered[i];
+            if (m.role === 'assistant') {
+              const isLastInRun =
+                i + 1 >= filtered.length || filtered[i + 1].role !== 'assistant';
+              if (isLastInRun) {
+                // 仅保留连续 assistant 消息中的最后一条 (最终回复)
+                const msg: ChatMessage = {
+                  id: `hist-${sessionId}-${loaded.length}`,
+                  role: 'assistant',
+                  content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+                  timestamp: Date.now() - (filtered.length - i) * 1000,
+                };
+                const tl = timelineMap.get(assistantIdx);
+                if (tl && tl.length > 0) {
+                  msg.timeline = tl;
+                }
+                loaded.push(msg);
+              }
+              assistantIdx++;
+            } else {
+              loaded.push({
+                id: `hist-${sessionId}-${loaded.length}`,
+                role: 'user',
+                content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+                timestamp: Date.now() - (filtered.length - i) * 1000,
+              });
+            }
+          }
           setMessages(loaded);
           usePipelineStore.getState().reset();
           usePipelineStore.getState().setSessionId(sessionId);
+          // 恢复 plan steps (右栏常驻显示)
+          if (detail.plan_steps && detail.plan_steps.length > 0) {
+            usePipelineStore.getState().initPlanSteps(
+              detail.plan_steps.map((s) => ({
+                step: s.index,
+                description: s.description || s.action || '',
+              })),
+            );
+            // 恢复每个步骤的完成状态
+            for (const s of detail.plan_steps) {
+              if (s.status === 'completed') {
+                usePipelineStore.getState().completePlanStep(s.index);
+              } else if (s.status === 'failed') {
+                usePipelineStore.getState().failPlanStep(s.index);
+              }
+            }
+          }
           autoStartedRef.current = 'loaded';
           prevAgentMessageRef.current = null;
         } catch (e) {
@@ -162,9 +257,17 @@ export function useAIChat() {
       const scenarioKey = scenario || activeScenario;
       const scenarios = getAIConfig().scenarios;
 
+      // 转换附件信息
+      const msgFiles: ChatMessageFile[] | undefined = files?.map((f) => ({
+        fileId: f.fileId,
+        filename: f.filename,
+        contentType: (f as { contentType?: string }).contentType,
+        sizeBytes: (f as { sizeBytes?: number }).sizeBytes,
+      }));
+
       // ── 自由对话 (无场景) ──
       if (!scenarioKey) {
-        addMessage('user', text);
+        addMessage('user', text, msgFiles);
         const fileMaterials = files?.map((f) => ({
           material_id: `file-${f.fileId}`,
           material_type: 'file' as const,
@@ -189,7 +292,7 @@ export function useAIChat() {
         setActiveScenario(scenarioKey);
       }
 
-      addMessage('user', text);
+      addMessage('user', text, msgFiles);
 
       const fileMaterials = files?.map(f => ({
         material_id: `file-${f.fileId}`,
@@ -267,6 +370,36 @@ export function useAIChat() {
         } else {
           addMessage('assistant', '处理过程中遇到了问题，请稍后重试或联系管理员。');
         }
+      }
+
+      // 将当前 pipeline 的 timeline 附加到最后一条 assistant 消息
+      const { timelineEntries } = usePipelineStore.getState();
+      if (timelineEntries && timelineEntries.length > 0) {
+        setMessages((prev) => {
+          const copy = [...prev];
+          // 找到最后一条 assistant 消息
+          for (let i = copy.length - 1; i >= 0; i--) {
+            if (copy[i].role === 'assistant') {
+              copy[i] = {
+                ...copy[i],
+                timeline: timelineEntries.map((e) => ({
+                  type: e.type,
+                  content: e.content,
+                  iteration: e.iteration,
+                  tool_name: e.toolExecution?.toolName,
+                  success: e.toolExecution?.success,
+                  blocked: e.toolExecution?.blocked,
+                  latency_ms: e.toolExecution?.latencyMs,
+                  args_summary: e.toolExecution?.argsSummary as Record<string, string> | undefined,
+                  result_summary: e.toolExecution?.resultSummary,
+                  ts: e.timestamp,
+                })),
+              };
+              break;
+            }
+          }
+          return copy;
+        });
       }
 
       // 智能缩小: 填单场景 (有字段值) → 缩到侧边让表单可见
