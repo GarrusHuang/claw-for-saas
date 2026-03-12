@@ -16,7 +16,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
@@ -63,8 +63,8 @@ class ScheduledTask:
 
 
 def compute_next_run(cron_expr: str, base_time: float | None = None) -> float:
-    """计算 cron 表达式的下次执行时间。"""
-    base = datetime.fromtimestamp(base_time) if base_time else datetime.now()
+    """计算 cron 表达式的下次执行时间 (UTC)。"""
+    base = datetime.fromtimestamp(base_time or time.time(), tz=timezone.utc)
     cron = croniter(cron_expr, base)
     return cron.get_next(float)
 
