@@ -15,6 +15,7 @@ import {
 import {
   useAIChatStore, usePipelineStore, aiApi,
   type SessionInfo, type SkillMetadata, type SkillDetail,
+  type ContentView,
 } from '@claw/core';
 import SkillEditorModal from '../skills/SkillEditorModal.tsx';
 import ImportModal from '../skills/ImportModal.tsx';
@@ -63,6 +64,8 @@ const DEFAULT_USER_ID = 'U001';
 export default function CoworkSidebar() {
   const currentSessionId = usePipelineStore((s) => s.sessionId);
   const dispatchSessionAction = useAIChatStore((s) => s.dispatchSessionAction);
+  const contentView = useAIChatStore((s) => s.contentView);
+  const setContentView = useAIChatStore((s) => s.setContentView);
 
   // ── Sessions state ──
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -105,12 +108,18 @@ export default function CoworkSidebar() {
 
   // ── Handlers ──
   const handleNewSession = useCallback(() => {
+    setContentView('chat');
     dispatchSessionAction({ type: 'new' });
-  }, [dispatchSessionAction]);
+  }, [dispatchSessionAction, setContentView]);
 
   const handleSelectSession = useCallback((sessionId: string) => {
+    setContentView('chat');
     dispatchSessionAction({ type: 'load', sessionId });
-  }, [dispatchSessionAction]);
+  }, [dispatchSessionAction, setContentView]);
+
+  const handleScheduledClick = useCallback(() => {
+    setContentView('schedule');
+  }, [setContentView]);
 
   const handleSkillsClick = useCallback(() => {
     if (!skillsExpanded) {
@@ -163,7 +172,10 @@ export default function CoworkSidebar() {
           <SearchOutlined style={{ fontSize: 13 }} />
           <span>Search</span>
         </div>
-        <div className="sidebar-entry sidebar-entry--disabled">
+        <div
+          className={`sidebar-entry${contentView === 'schedule' ? ' sidebar-entry--active' : ''}`}
+          onClick={handleScheduledClick}
+        >
           <CalendarOutlined style={{ fontSize: 13 }} />
           <span>Scheduled</span>
         </div>

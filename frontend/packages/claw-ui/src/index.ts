@@ -36,6 +36,9 @@ export { default as DiffBlock } from './results/DiffBlock.tsx';
 export type { DiffSection, DiffDecision, DiffType } from './results/DiffBlock.tsx';
 export type { ContractAnnotation } from './results/ContractDiffEditor.tsx';
 
+// ── Schedule 组件 ──
+export { default as ScheduleView } from './schedule/ScheduleView.tsx';
+
 // ── Skills 组件 ──
 export { default as SkillEditorModal } from './skills/SkillEditorModal.tsx';
 export { default as ImportModal } from './skills/ImportModal.tsx';

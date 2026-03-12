@@ -46,7 +46,7 @@ export type {
 // ── Stores ──
 export { usePipelineStore } from './stores/pipeline.ts';
 export { useAIChatStore } from './stores/ai-chat.ts';
-export type { ChatDialogState, SessionAction, AIChatState } from './stores/ai-chat.ts';
+export type { ChatDialogState, ContentView, SessionAction, AIChatState } from './stores/ai-chat.ts';
 export { useAuthStore } from './stores/auth.ts';
 export type { AuthState } from './stores/auth.ts';
 
@@ -60,6 +60,7 @@ export type {
   MemoryStats,
   FileInfo, ToolInfo,
   CorrectionPayload, CorrectionResult,
+  ScheduledTask, ScheduleCreatePayload, ScheduleUpdatePayload,
 } from './services/ai-api.ts';
 
 // ── Hooks ──

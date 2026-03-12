@@ -4,6 +4,7 @@ import ChatMessageList from './chat/ChatMessageList';
 import ChatInput from './chat/ChatInput';
 import CoworkSidebar from './chat/CoworkSidebar';
 import ProgressPanel from './chat/ProgressPanel';
+import ScheduleView from './schedule/ScheduleView';
 
 export type DialogMode = 'expanded' | 'collapsed';
 
@@ -18,6 +19,7 @@ interface AIChatDialogProps {
  */
 export default function AIChatDialog({ onResize }: AIChatDialogProps) {
   const chatDialogState = useAIChatStore((s) => s.chatDialogState);
+  const contentView = useAIChatStore((s) => s.contentView);
   const closeChat = useAIChatStore((s) => s.closeChat);
 
   const {
@@ -54,24 +56,36 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
       <div className="chat-dialog-body-wrapper">
         <CoworkSidebar />
 
-        {/* Center chat */}
-        <div className="chat-dialog-body">
-          <ChatMessageList
-            messages={messages}
-            showPipelineProgress
-            onInteractionRespond={(value, files) => sendMessage(value, undefined, files)}
-          />
-        </div>
+        {contentView === 'chat' && (
+          <>
+            {/* Center chat */}
+            <div className="chat-dialog-body">
+              <ChatMessageList
+                messages={messages}
+                showPipelineProgress
+                onInteractionRespond={(value, files) => sendMessage(value, undefined, files)}
+              />
+            </div>
 
-        <ProgressPanel />
+            <ProgressPanel />
+          </>
+        )}
+
+        {contentView === 'schedule' && (
+          <div className="chat-dialog-body">
+            <ScheduleView />
+          </div>
+        )}
       </div>
 
       {/* ── Input ── */}
-      <ChatInput
-        onSend={(text, files) => sendMessage(text, undefined, files)}
-        disabled={isRunning}
-        placeholder="Reply..."
-      />
+      {contentView === 'chat' && (
+        <ChatInput
+          onSend={(text, files) => sendMessage(text, undefined, files)}
+          disabled={isRunning}
+          placeholder="Reply..."
+        />
+      )}
     </div>
   );
 }
