@@ -55,4 +55,33 @@ describe('useAIChat (from @claw/core)', () => {
     expect(useAIChatStore.getState().chatDialogState).toBe('closed');
     expect(useAIChatStore.getState().activeScenario).toBeNull();
   });
+
+  // ── F5: contentView ──
+
+  it('contentView defaults to chat', () => {
+    expect(useAIChatStore.getState().contentView).toBe('chat');
+  });
+
+  it('setContentView switches to schedule', () => {
+    useAIChatStore.getState().setContentView('schedule');
+    expect(useAIChatStore.getState().contentView).toBe('schedule');
+  });
+
+  it('openChat resets contentView to chat', () => {
+    useAIChatStore.getState().setContentView('schedule');
+    useAIChatStore.getState().openChat('test');
+    expect(useAIChatStore.getState().contentView).toBe('chat');
+  });
+
+  it('closeChat resets contentView to chat', () => {
+    useAIChatStore.getState().setContentView('schedule');
+    useAIChatStore.getState().closeChat();
+    expect(useAIChatStore.getState().contentView).toBe('chat');
+  });
+
+  it('dispatchSessionAction resets contentView to chat', () => {
+    useAIChatStore.getState().setContentView('schedule');
+    useAIChatStore.getState().dispatchSessionAction({ type: 'new' });
+    expect(useAIChatStore.getState().contentView).toBe('chat');
+  });
 });

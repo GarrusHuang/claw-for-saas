@@ -171,3 +171,63 @@ test.describe('F1: Document Flow Style', () => {
     await expect(thinkingToggle).toHaveCount(0);
   });
 });
+
+// ── F5: Schedule 视图切换 ──
+
+test.describe('F5: Schedule View', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => {
+      localStorage.setItem('claw_auth_token', 'e2e-test-token');
+      localStorage.setItem('claw_auth_user', JSON.stringify({
+        userId: 'admin',
+        tenantId: 'default',
+        expiresAt: Date.now() + 86400000,
+      }));
+    });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+  });
+
+  test('clicking "定时任务" switches to schedule view', async ({ page }) => {
+    // 点击侧边栏 "定时任务"
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    // Schedule 视图应显示标题和新建按钮
+    await expect(page.locator('h2', { hasText: '定时任务' })).toBeVisible();
+    await expect(page.locator('button', { hasText: '新建任务' })).toBeVisible();
+
+    // Chat 组件应隐藏
+    await expect(page.locator('.chat-input-area')).toHaveCount(0);
+    await expect(page.locator('.progress-panel')).toHaveCount(0);
+
+    await page.screenshot({ path: 'e2e/screenshots/schedule-view.png', fullPage: true });
+  });
+
+  test('clicking "新任务" switches back to chat view', async ({ page }) => {
+    // 先切到 schedule
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    // 再切回 chat
+    await page.click('.cowork-sidebar >> text=新任务');
+    await page.waitForTimeout(500);
+
+    // Chat 组件应恢复
+    await expect(page.locator('.chat-input-area')).toBeVisible();
+
+    await page.screenshot({ path: 'e2e/screenshots/schedule-back-to-chat.png' });
+  });
+
+  test('sidebar "定时任务" gets active state', async ({ page }) => {
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    // 应有 active class
+    const entry = page.locator('.sidebar-entry--active');
+    await expect(entry).toBeVisible();
+  });
+});
