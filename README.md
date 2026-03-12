@@ -149,7 +149,7 @@ function MyPage() {
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/tools` | 列出已注册工具 |
 | GET/POST/PUT/DELETE | `/api/skills/*` | Skill CRUD |
-| GET/DELETE | `/api/session/{user_id}/*` | 会话管理 |
+| GET/DELETE | `/api/session/*` | 会话管理 (列表/搜索/详情/删除) |
 | POST | `/api/files/upload` | 文件上传 |
 | GET/POST/PUT/DELETE | `/api/schedules/*` | 定时任务 |
 | GET/POST/DELETE | `/api/webhooks/*` | Webhook 配置 |
@@ -159,10 +159,10 @@ function MyPage() {
 ## 测试
 
 ```bash
-# 后端 (1684 tests)
+# 后端 (1666 tests)
 cd backend && python3 -m pytest tests/ -v
 
-# 前端 (183 tests)
+# 前端 (162 tests)
 cd frontend && npm test
 ```
 

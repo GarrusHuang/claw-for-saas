@@ -1,8 +1,11 @@
 """
-Plan 能力工具 — 纯进度展示。
+Plan 能力工具 — 进度展示 + AI 主动更新。
 
-A2 简化: 去掉 requires_approval 审批机制，Plan 变为纯进度展示工具。
-Agent 自主判断任务复杂度，多步任务用 propose_plan 记录计划后立即执行。
+工作流:
+1. AI 调用 propose_plan 制定计划 → 前端展示 todo list
+2. AI 执行每个步骤前调用 update_plan_step(i, "running")
+3. AI 完成每个步骤后调用 update_plan_step(i, "completed")
+4. 前端实时更新步骤状态 (pending → running → completed)
 """
 
 from __future__ import annotations
@@ -22,14 +25,17 @@ plan_capability_registry = ToolRegistry()
         "summary: 一句话概述 (显示在标题栏)。\n"
         "detail: 完整的 Markdown 格式计划文档，包含:\n"
         "  - 任务分析 (## 任务分析)\n"
-        "  - 执行步骤 (## 执行步骤, 用 ### 分步, 列出每步的具体操作和涉及的工具)\n"
+        "  - 执行步骤 (## 执行步骤, 用 ### 分步, 列出每步的具体操作)\n"
         "  - 预期结果 (## 预期结果)\n"
         "  用 Markdown 标题/列表/加粗等格式化，写出完整清晰的计划文档。\n"
-        "steps: 执行步骤摘要列表，每个 step 必须包含 tools 字段:\n"
-        "  [{'action': '推断单据类型', 'description': '...', 'tools': ['classify_type']}, ...]\n"
-        "  tools 列出该步骤会调用的工具名 (用于自动进度追踪)。\n"
-        "estimated_actions: 预计的工具调用次数。\n"
-        "调用后立即按计划开始执行，不需要等待用户确认。"
+        "steps: 执行步骤摘要列表:\n"
+        "  [{'action': '推断单据类型', 'description': '分析材料确定单据类型'}, ...]\n"
+        "estimated_actions: 预计的工具调用次数。\n\n"
+        "【重要】调用 propose_plan 后，必须在执行每个步骤前后调用 update_plan_step 更新进度:\n"
+        "  1. 开始步骤前: update_plan_step(step_index=0, status='running')\n"
+        "  2. 完成步骤后: update_plan_step(step_index=0, status='completed')\n"
+        "  3. 然后开始下一步: update_plan_step(step_index=1, status='running')\n"
+        "  以此类推，确保用户能看到实时进度。"
     ),
     read_only=False,
 )
@@ -57,11 +63,43 @@ def propose_plan(
     if bus:
         bus.emit("plan_proposed", event_data)
 
-    # 创建 PlanTracker 并存入 ContextVar (后端驱动步骤推进)
+    # 创建 PlanTracker 并存入 ContextVar
     tracker = PlanTracker(steps, event_bus=bus)
     current_plan_tracker.set(tracker)
 
     return {
         "status": "ok",
-        "message": "计划已记录。请立即按计划开始执行，依次调用能力工具完成各步骤。",
+        "message": (
+            "计划已记录。请立即按计划开始执行。"
+            "执行每个步骤前后必须调用 update_plan_step 更新进度状态。"
+        ),
     }
+
+
+@plan_capability_registry.tool(
+    description=(
+        "更新执行计划中某个步骤的状态。在执行每个步骤前后必须调用此工具，"
+        "让用户能看到实时进度。\n"
+        "step_index: 步骤索引 (从 0 开始)。\n"
+        "status: 目标状态:\n"
+        "  - 'running': 开始执行此步骤 (步骤变为蓝色加载状态)\n"
+        "  - 'completed': 此步骤已完成 (步骤变为绿色完成状态)\n"
+        "  - 'failed': 此步骤执行失败 (步骤变为红色失败状态)\n\n"
+        "典型用法:\n"
+        "  update_plan_step(step_index=0, status='running')   # 开始第1步\n"
+        "  ... 调用其他工具完成实际工作 ...\n"
+        "  update_plan_step(step_index=0, status='completed') # 第1步完成\n"
+        "  update_plan_step(step_index=1, status='running')   # 开始第2步"
+    ),
+    read_only=False,
+)
+def update_plan_step(
+    step_index: int,  # 步骤索引 (0-based)
+    status: str,  # 目标状态: "running" | "completed" | "failed"
+) -> dict:
+    """更新计划步骤状态，推送实时进度到前端。"""
+    tracker = current_plan_tracker.get(None)
+    if tracker is None:
+        return {"ok": False, "error": "尚未创建计划，请先调用 propose_plan"}
+
+    return tracker.update_step(step_index, status)

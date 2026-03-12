@@ -271,14 +271,24 @@ describe('Pipeline Store', () => {
 
   // ── Thinking text ──
 
-  it('appendThinkingText joins with double newlines', () => {
+  it('appendThinkingText concatenates chunks and groups by iteration in timeline', () => {
     const store = usePipelineStore.getState();
 
-    store.appendThinkingText('analyzing...');
+    store.appendThinkingText('analyzing...', 1);
     expect(usePipelineStore.getState().thinkingText).toBe('analyzing...');
+    expect(usePipelineStore.getState().timelineEntries).toHaveLength(1);
+    expect(usePipelineStore.getState().timelineEntries[0].type).toBe('thinking');
 
-    store.appendThinkingText('determined type');
-    expect(usePipelineStore.getState().thinkingText).toBe('analyzing...\n\ndetermined type');
+    // Same iteration — appends to same timeline entry
+    store.appendThinkingText(' more thoughts', 1);
+    expect(usePipelineStore.getState().thinkingText).toBe('analyzing... more thoughts');
+    expect(usePipelineStore.getState().timelineEntries).toHaveLength(1);
+    expect(usePipelineStore.getState().timelineEntries[0].content).toBe('analyzing... more thoughts');
+
+    // New iteration — creates new timeline entry
+    store.appendThinkingText('determined type', 2);
+    expect(usePipelineStore.getState().thinkingText).toBe('analyzing... more thoughtsdetermined type');
+    expect(usePipelineStore.getState().timelineEntries).toHaveLength(2);
   });
 
   // ── setError ──

@@ -34,6 +34,7 @@ class LLMClientConfig:
     retry_delay_s: float = 2.0
     default_temperature: float = 0.7
     default_top_p: float = 0.8
+    enable_thinking: bool = False
 
 
 @dataclass
@@ -339,6 +340,9 @@ class LLMGatewayClient:
             "max_tokens": max_tokens or 4096,
             "stream": stream,
         }
+
+        if self.config.enable_thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": True}
 
         if tools:
             payload["tools"] = tools

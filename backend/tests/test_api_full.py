@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
+import config
 import dependencies
 import api.file_routes as file_routes_mod
 import api.session_routes as session_routes_mod
@@ -74,6 +75,7 @@ def isolated_app(tmp_path):
     from main import app
 
     with (
+        patch.object(config.settings, "auth_enabled", False),
         patch.object(dependencies, "get_session_manager", return_value=sm),
         patch.object(dependencies, "get_memory_store", return_value=ms),
         patch.object(dependencies, "get_file_service", return_value=fs),

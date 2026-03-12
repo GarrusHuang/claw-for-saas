@@ -880,3 +880,53 @@ body {
 .progress-panel::-webkit-scrollbar-thumb:hover {
   background: #bfbfbf;
 }
+
+/* ══════════════════════════════════════════════
+   Search Modal
+   ══════════════════════════════════════════════ */
+
+.search-modal .ant-modal-content {
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 0;
+}
+
+.search-modal-input-wrapper {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.search-modal-input-wrapper .ant-input-affix-wrapper {
+  font-size: 15px;
+}
+
+.search-modal-results {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.search-modal-hint {
+  padding: 32px 0;
+  text-align: center;
+}
+
+.search-result-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.search-result-item:hover {
+  background: #f5f7fa;
+}
+
+.search-result-item:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: -2px;
+}
+
+.search-result-header {
+  display: flex;
+  align-items: center;
+}

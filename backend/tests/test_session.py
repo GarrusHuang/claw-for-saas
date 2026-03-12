@@ -100,6 +100,70 @@ class TestSessionManager:
         assert len(msgs) == 1
         assert msgs[0]["content"] == "real msg"
 
+    # ── Search ──
+
+    def test_search_by_title(self):
+        self.sm.create_session(TENANT, USER, metadata={"title": "报销审核"})
+        self.sm.create_session(TENANT, USER, metadata={"title": "合同起草"})
+
+        results = self.sm.search_sessions(TENANT, USER, "报销")
+        assert len(results) == 1
+        assert results[0]["title"] == "报销审核"
+        assert results[0]["title_match"] is True
+
+    def test_search_by_message_content(self):
+        sid = self.sm.create_session(TENANT, USER, metadata={"title": "对话"})
+        self.sm.append_message(TENANT, USER, sid, {
+            "role": "user", "content": "请帮我查一下发票信息"
+        })
+
+        results = self.sm.search_sessions(TENANT, USER, "发票")
+        assert len(results) == 1
+        assert "发票" in results[0]["match_snippet"]
+
+    def test_search_empty_query_returns_empty(self):
+        self.sm.create_session(TENANT, USER, metadata={"title": "test"})
+        assert self.sm.search_sessions(TENANT, USER, "") == []
+        assert self.sm.search_sessions(TENANT, USER, "   ") == []
+
+    def test_search_no_match(self):
+        self.sm.create_session(TENANT, USER, metadata={"title": "报销"})
+        results = self.sm.search_sessions(TENANT, USER, "zzz_not_found")
+        assert results == []
+
+    def test_search_case_insensitive(self):
+        sid = self.sm.create_session(TENANT, USER)
+        self.sm.append_message(TENANT, USER, sid, {
+            "role": "user", "content": "Hello World test"
+        })
+        results = self.sm.search_sessions(TENANT, USER, "hello")
+        assert len(results) == 1
+
+    def test_search_respects_limit(self):
+        for i in range(5):
+            self.sm.create_session(TENANT, USER, metadata={"title": f"会话{i}"})
+        results = self.sm.search_sessions(TENANT, USER, "会话", limit=3)
+        assert len(results) == 3
+
+    def test_search_snippet_context(self):
+        sid = self.sm.create_session(TENANT, USER)
+        self.sm.append_message(TENANT, USER, sid, {
+            "role": "user", "content": "前面的文字" + "x" * 50 + "关键词在这里" + "y" * 80 + "后面文字"
+        })
+        results = self.sm.search_sessions(TENANT, USER, "关键词")
+        assert len(results) == 1
+        snippet = results[0]["match_snippet"]
+        assert "关键词" in snippet
+        assert "..." in snippet  # 截断标志
+
+    def test_search_tenant_isolation(self):
+        self.sm.create_session("T1", USER, metadata={"title": "T1的会话"})
+        self.sm.create_session("T2", USER, metadata={"title": "T2的会话"})
+
+        results = self.sm.search_sessions("T1", USER, "会话")
+        assert len(results) == 1
+        assert results[0]["title"] == "T1的会话"
+
     # ── A5: compact 原子写 ──
 
     def test_compact_atomic_write_no_temp_files(self):

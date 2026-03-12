@@ -79,9 +79,13 @@ class TestBuildPlanRegistry:
         reg = build_plan_registry()
         assert "propose_plan" in reg.get_tool_names()
 
-    def test_only_one_tool(self):
+    def test_contains_update_plan_step(self):
         reg = build_plan_registry()
-        assert len(reg.get_tool_names()) == 1
+        assert "update_plan_step" in reg.get_tool_names()
+
+    def test_plan_tool_count(self):
+        reg = build_plan_registry()
+        assert len(reg.get_tool_names()) == 2
 
 
 class TestBuildMCPRegistry:

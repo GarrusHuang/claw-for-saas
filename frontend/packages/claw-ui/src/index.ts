@@ -24,6 +24,7 @@ export {
 export { default as ProgressPanel } from './chat/ProgressPanel.tsx';
 export { default as InlineUploader } from './chat/InlineUploader.tsx';
 export { default as InteractiveMessage } from './chat/InteractiveMessage.tsx';
+export { default as SearchModal } from './chat/SearchModal.tsx';
 
 // ── Results 组件 ──
 export { default as TypeInferenceCard } from './results/TypeInferenceCard.tsx';

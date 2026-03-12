@@ -43,6 +43,10 @@ class Settings(BaseSettings):
         default=4096,
         description="Max tokens per LLM call",
     )
+    llm_enable_thinking: bool = Field(
+        default=False,
+        description="Enable thinking mode (chat_template_kwargs.enable_thinking)",
+    )
 
     # ─── Agent Runtime ───
     agent_max_iterations: int = Field(

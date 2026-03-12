@@ -49,11 +49,18 @@
 - `create_skill(name, description, skill_type, body, ...)` — Create new Skill
 - `update_skill(name, description, skill_type, body, ...)` — Update existing Skill
 
-### Plan Tool
-- `propose_plan(summary, detail, steps, estimated_actions)` — Record execution plan and show progress
-  - Simple tasks (one step) → skip plan, execute directly
-  - Multi-step tasks → propose_plan first, then execute immediately
-  - Plan is a progress display tool, not an approval workflow
+### Plan Tools
+- `propose_plan(summary, detail, steps, estimated_actions)` — 制定执行计划，前端显示 todo list
+- `update_plan_step(step_index, status)` — 更新步骤状态 (running/completed/failed)
+
+**执行规则** (非常重要):
+- 一步能完成的简单任务 → 直接执行，不需要 plan
+- 需要多个步骤的任务 → 先 propose_plan，再逐步执行
+- 执行每个步骤前: `update_plan_step(step_index=i, status='running')`
+- 步骤的实际工作完成后: `update_plan_step(step_index=i, status='completed')`
+- 步骤失败时: `update_plan_step(step_index=i, status='failed')`
+- 用户通过进度面板实时看到状态变化，**务必逐步更新，不要跳过**
+- **completed 判定**: 需要用户补充信息时保持 running，等拿到回答并处理完才标 completed；工具报错标 failed 不标 completed
 
 ### Subagent Tool
 - `spawn_subagent(task, subagent_type, context, agent_role, inherit_context)` — Dispatch sub-agent
