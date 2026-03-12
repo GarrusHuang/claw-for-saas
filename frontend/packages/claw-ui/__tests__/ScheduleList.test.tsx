@@ -125,4 +125,102 @@ describe('ScheduleList', () => {
     expect(screen.getByText('任务B')).toBeInTheDocument();
     expect(screen.getByText('任务C')).toBeInTheDocument();
   });
+
+  // ── Interactions ──
+
+  it('clicking "新建任务" calls onCreate', async () => {
+    render(
+      <ScheduleList tasks={[]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+    );
+    screen.getByText('新建任务').click();
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders switch toggle for each task', () => {
+    render(
+      <ScheduleList
+        tasks={[makeTask({ enabled: true }), makeTask({ id: 't2', name: '任务B', enabled: false })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    const switches = document.querySelectorAll('.ant-switch');
+    expect(switches.length).toBe(2);
+  });
+
+  // ── describeCron edge cases ──
+
+  it('shows raw cron for non-standard expressions', () => {
+    const { container } = render(
+      <ScheduleList
+        tasks={[makeTask({ cron: '*/5 * * * *' })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    // Non-standard cron falls through describeCron, check table cell content
+    const cells = container.querySelectorAll('td');
+    const cronCell = Array.from(cells).find((c) => c.textContent?.includes('*/5'));
+    expect(cronCell).toBeTruthy();
+  });
+
+  it('shows "刚刚" for very recent last_run_at', () => {
+    render(
+      <ScheduleList
+        tasks={[makeTask({ last_run_at: Date.now() / 1000 - 5, last_run_status: 'success' })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    expect(screen.getByText('刚刚')).toBeInTheDocument();
+  });
+
+  it('shows hours for last_run_at > 1 hour ago', () => {
+    render(
+      <ScheduleList
+        tasks={[makeTask({ last_run_at: Date.now() / 1000 - 7200, last_run_status: 'failed' })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    expect(screen.getByText('2小时前')).toBeInTheDocument();
+  });
+
+  it('shows days for last_run_at > 1 day ago', () => {
+    render(
+      <ScheduleList
+        tasks={[makeTask({ last_run_at: Date.now() / 1000 - 172800, last_run_status: 'success' })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    expect(screen.getByText('2天前')).toBeInTheDocument();
+  });
+
+  // ── Status dots ──
+
+  it('shows success status dot', () => {
+    const { container } = render(
+      <ScheduleList
+        tasks={[makeTask({ last_run_at: Date.now() / 1000 - 60, last_run_status: 'success' })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    expect(container.querySelector('.schedule-status-dot--success')).toBeInTheDocument();
+  });
+
+  it('shows failed status dot', () => {
+    const { container } = render(
+      <ScheduleList
+        tasks={[makeTask({ last_run_at: Date.now() / 1000 - 60, last_run_status: 'failed' })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    expect(container.querySelector('.schedule-status-dot--failed')).toBeInTheDocument();
+  });
+
+  it('shows none status dot when never run', () => {
+    const { container } = render(
+      <ScheduleList
+        tasks={[makeTask({ last_run_at: null })]}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+      />
+    );
+    expect(container.querySelector('.schedule-status-dot--none')).toBeInTheDocument();
+  });
 });
