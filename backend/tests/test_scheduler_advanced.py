@@ -7,7 +7,7 @@ import asyncio
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -357,11 +357,8 @@ class TestStartStop:
 class TestComputeNextRunAdvanced:
     """Advanced tests for compute_next_run() cron parsing.
 
-    Note: compute_next_run uses datetime.fromtimestamp(base_time) internally,
-    which produces local-time naive datetimes. croniter then returns UTC-based
-    float timestamps. To avoid timezone mismatches in assertions, we use
-    relative checks (next > base, gap within expected range) and croniter
-    directly to compute expected values.
+    Note: compute_next_run uses UTC-aware datetimes internally to avoid
+    timezone mismatches between croniter and timestamp conversion.
     """
 
     def test_every_5_minutes(self):
@@ -369,8 +366,8 @@ class TestComputeNextRunAdvanced:
         now = time.time()
         nxt = compute_next_run("*/5 * * * *", now)
         assert nxt > now
-        # Verify against croniter directly (same logic as compute_next_run)
-        base = datetime.fromtimestamp(now)
+        # Verify against croniter directly (UTC-aware, same as compute_next_run)
+        base = datetime.fromtimestamp(now, tz=timezone.utc)
         expected = croniter("*/5 * * * *", base).get_next(float)
         assert nxt == expected
 
@@ -444,8 +441,8 @@ class TestComputeNextRunAdvanced:
         now = time.time()
         nxt = compute_next_run("* * * * *", now)
         assert nxt > now
-        # Verify against croniter directly
-        base = datetime.fromtimestamp(now)
+        # Verify against croniter directly (UTC-aware, same as compute_next_run)
+        base = datetime.fromtimestamp(now, tz=timezone.utc)
         expected = croniter("* * * * *", base).get_next(float)
         assert nxt == expected
 
