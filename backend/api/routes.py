@@ -134,3 +134,14 @@ async def list_tools():
         logger.debug("Failed to load capability registry", exc_info=True)
 
     return {"tools": tools_list}
+
+
+@router.get("/soul")
+async def get_soul():
+    """Return soul.md content for preview."""
+    from pathlib import Path
+    soul_path = Path(__file__).parent.parent / "prompts" / "soul.md"
+    try:
+        return {"content": soul_path.read_text(encoding="utf-8")}
+    except FileNotFoundError:
+        return {"content": "(soul.md 文件未找到)"}

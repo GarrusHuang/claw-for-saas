@@ -40,5 +40,6 @@ export type { ContractAnnotation } from './results/ContractDiffEditor.tsx';
 export { default as ScheduleView } from './schedule/ScheduleView.tsx';
 
 // ── Skills 组件 ──
+export { default as SkillsView } from './skills/SkillsView.tsx';
 export { default as SkillEditorModal } from './skills/SkillEditorModal.tsx';
 export { default as ImportModal } from './skills/ImportModal.tsx';

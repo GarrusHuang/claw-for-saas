@@ -21,16 +21,26 @@ vi.mock('@claw/core', () => ({
     sendMessage: mockSendMessage,
     isRunning: false,
   })),
-  usePipelineStore: vi.fn((selector: (state: Record<string, unknown>) => unknown) => {
+  usePipelineStore: Object.assign(
+    vi.fn((selector: (state: Record<string, unknown>) => unknown) => {
+      const state = {
+        status: 'idle',
+        fieldValues: [],
+        toolExecutions: [],
+        scenario: null,
+        thinkingText: '',
+        isStreaming: false,
+        pendingInteraction: null,
+        resolveInteraction: vi.fn(),
+      };
+      return selector(state);
+    }),
+    { getState: () => ({ status: 'idle' }) },
+  ),
+  useAuthStore: vi.fn((selector: (state: Record<string, unknown>) => unknown) => {
     const state = {
-      status: 'idle',
-      fieldValues: [],
-      toolExecutions: [],
-      scenario: null,
-      thinkingText: '',
-      isStreaming: false,
-      pendingInteraction: null,
-      resolveInteraction: vi.fn(),
+      logout: vi.fn(),
+      userId: 'test-user',
     };
     return selector(state);
   }),
@@ -59,6 +69,10 @@ vi.mock('../src/schedule/ScheduleView.tsx', () => ({
   default: () => <div data-testid="schedule-view">ScheduleView</div>,
 }));
 
+vi.mock('../src/skills/SkillsView.tsx', () => ({
+  default: () => <div data-testid="skills-view">SkillsView</div>,
+}));
+
 describe('AIChatDialog', () => {
   let AIChatDialog: typeof import('../src/AIChatDialog.tsx').default;
 
@@ -82,12 +96,13 @@ describe('AIChatDialog', () => {
       expect(screen.getByTestId('progress-panel')).toBeInTheDocument();
     });
 
-    it('always shows ChatMessageList', () => {
+    it('shows WelcomeScreen when no messages', () => {
       render(<AIChatDialog />);
-      expect(screen.getByTestId('chat-message-list')).toBeInTheDocument();
+      // WelcomeScreen includes ChatInput and welcome text
+      expect(screen.getByText('Xisoft Claw', { selector: 'div' })).toBeInTheDocument();
     });
 
-    it('shows ChatInput', () => {
+    it('shows ChatInput (in WelcomeScreen)', () => {
       render(<AIChatDialog />);
       expect(screen.getByTestId('chat-input')).toBeInTheDocument();
     });
@@ -115,8 +130,7 @@ describe('AIChatDialog', () => {
       mockChatDialogState = 'fullscreen';
       render(<AIChatDialog />);
 
-      expect(screen.getByText('Claw')).toBeInTheDocument();
-      expect(screen.getByTestId('chat-message-list')).toBeInTheDocument();
+      expect(screen.getAllByText('Xisoft Claw').length).toBeGreaterThan(0);
     });
 
     it('renders when chatDialogState is sidepanel', async () => {
@@ -125,7 +139,7 @@ describe('AIChatDialog', () => {
       const Dialog = mod.default;
 
       render(<Dialog />);
-      expect(screen.getByText('Claw')).toBeInTheDocument();
+      expect(screen.getAllByText('Xisoft Claw').length).toBeGreaterThan(0);
     });
 
     it('calls onResize with correct mode', async () => {

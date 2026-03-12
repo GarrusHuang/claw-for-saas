@@ -44,6 +44,9 @@ def save_memory(
     if scope not in ("user", "tenant", "global"):
         return {"error": f"无效的 scope: {scope}, 必须是 user/tenant/global"}
 
+    # 兼容别名
+    if mode == "overwrite":
+        mode = "rewrite"
     if mode not in ("append", "rewrite"):
         return {"error": f"无效的 mode: {mode}, 必须是 append/rewrite"}
 

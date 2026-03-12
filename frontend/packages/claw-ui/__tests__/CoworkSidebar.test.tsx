@@ -9,6 +9,8 @@ vi.mock('@claw/core', () => ({
       dispatchSessionAction: vi.fn(),
       chatDialogState: 'closed',
       activeScenario: null,
+      contentView: 'chat',
+      setContentView: vi.fn(),
     };
     return selector(state);
   }),
@@ -21,19 +23,8 @@ vi.mock('@claw/core', () => ({
   }),
   aiApi: {
     listSessions: vi.fn().mockResolvedValue([]),
-    listSkills: vi.fn().mockResolvedValue({ skills: [], total: 0 }),
-    listTools: vi.fn().mockResolvedValue([]),
-    getSkillDetail: vi.fn().mockResolvedValue({}),
-    deleteSkill: vi.fn().mockResolvedValue({ ok: true }),
   },
-}));
-
-vi.mock('../src/skills/SkillEditorModal.tsx', () => ({
-  default: () => null,
-}));
-
-vi.mock('../src/skills/ImportModal.tsx', () => ({
-  default: () => null,
+  getAIConfig: vi.fn(() => ({ defaultUserId: 'U001' })),
 }));
 
 // ── Tests ──
@@ -48,7 +39,7 @@ describe('CoworkSidebar', () => {
       render(<CoworkSidebar />);
     });
 
-    expect(screen.getByText('新任务')).toBeInTheDocument();
+    expect(screen.getByText('新建任务')).toBeInTheDocument();
   });
 
   it('renders Recents section title', async () => {
