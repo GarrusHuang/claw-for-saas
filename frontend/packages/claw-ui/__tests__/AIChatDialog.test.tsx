@@ -10,6 +10,7 @@ vi.mock('@claw/core', () => ({
   useAIChatStore: vi.fn((selector: (state: Record<string, unknown>) => unknown) => {
     const state = {
       chatDialogState: mockChatDialogState,
+      contentView: 'chat',
       closeChat: mockCloseChat,
       activeScenario: null,
     };
@@ -52,6 +53,10 @@ vi.mock('../src/chat/CoworkSidebar.tsx', () => ({
 
 vi.mock('../src/chat/ProgressPanel.tsx', () => ({
   default: () => <div data-testid="progress-panel">ProgressPanel</div>,
+}));
+
+vi.mock('../src/schedule/ScheduleView.tsx', () => ({
+  default: () => <div data-testid="schedule-view">ScheduleView</div>,
 }));
 
 describe('AIChatDialog', () => {

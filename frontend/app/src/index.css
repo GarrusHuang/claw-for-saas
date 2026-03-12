@@ -375,3 +375,63 @@ body {
 .interactive-message-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .interactive-message-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .interactive-message-input-row { display: flex; gap: 8px; align-items: center; }
+
+/* ── F5: Sidebar active state ── */
+
+.sidebar-entry--active {
+  background: #e6f4ff;
+  color: #1a6fb5;
+  font-weight: 500;
+}
+
+.sidebar-entry--active:hover {
+  background: #d0ebff;
+}
+
+/* ── F5: Schedule view ── */
+
+.schedule-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.schedule-form-container {
+  max-width: 640px;
+}
+
+.schedule-form-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.15s;
+}
+
+.schedule-form-back:hover {
+  color: #1890ff;
+}
+
+.schedule-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.schedule-status-dot--success {
+  background: #52c41a;
+}
+
+.schedule-status-dot--failed {
+  background: #ff4d4f;
+}
+
+.schedule-status-dot--none {
+  background: #d9d9d9;
+}
