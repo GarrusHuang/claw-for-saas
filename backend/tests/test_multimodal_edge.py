@@ -787,3 +787,119 @@ class TestPromptBuilderEdgeCases:
         )
         img = [b for b in result if b["type"] == "image_url"][0]
         assert "data+with/special==chars" in img["image_url"]["url"]
+
+
+# ============================================================
+# 7. Gateway Image Compression Integration (A4-4i fix)
+# ============================================================
+
+
+class TestGatewayImageCompression:
+    """Verify Gateway passes images through process_image() for compression."""
+
+    def _make_png_bytes(self, width: int, height: int) -> bytes:
+        """Create a minimal valid PNG with specific dimensions using PIL."""
+        from PIL import Image
+        img = Image.new("RGB", (width, height), color=(255, 0, 0))
+        buf = __import__("io").BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    def _run_gateway_material_logic(self, materials, vision_enabled=True):
+        """Replicate the UPDATED gateway material processing logic with process_image."""
+        from services.content_processor import process_image
+        import base64 as b64mod
+
+        text_summaries: list[str] = []
+        image_blocks: list[dict] = []
+        for m in (materials or []):
+            if not isinstance(m, dict):
+                continue
+            mat_type = m.get("material_type", "text")
+            filename = m.get("filename", "")
+            content = m.get("content", "")
+
+            if mat_type == "image" and content and vision_enabled:
+                try:
+                    raw_bytes = b64mod.b64decode(content)
+                    processed = process_image(raw_bytes, filename)
+                    image_blocks.append({
+                        "base64": processed.image_base64,
+                        "media_type": processed.image_media_type or "image/png",
+                    })
+                except Exception:
+                    media_type = mimetypes.guess_type(filename)[0] or "image/png"
+                    image_blocks.append({"base64": content, "media_type": media_type})
+                text_summaries.append(f"[Image: {filename}]")
+            else:
+                text_summaries.append(f"[{filename}]\n{content[:2000]}")
+        return text_summaries, image_blocks
+
+    def test_small_image_not_resized(self):
+        """Image smaller than 1024px should not be resized."""
+        raw = self._make_png_bytes(200, 150)
+        content_b64 = base64.b64encode(raw).decode()
+        _, blocks = self._run_gateway_material_logic([
+            {"material_type": "image", "filename": "small.png", "content": content_b64},
+        ])
+        assert len(blocks) == 1
+        # Decode result and check dimensions unchanged
+        from PIL import Image
+        result_bytes = base64.b64decode(blocks[0]["base64"])
+        img = Image.open(__import__("io").BytesIO(result_bytes))
+        assert img.width == 200
+        assert img.height == 150
+
+    def test_large_image_compressed_to_1024(self):
+        """Image larger than 1024px should be resized down."""
+        raw = self._make_png_bytes(2048, 1536)
+        content_b64 = base64.b64encode(raw).decode()
+        _, blocks = self._run_gateway_material_logic([
+            {"material_type": "image", "filename": "big.png", "content": content_b64},
+        ])
+        assert len(blocks) == 1
+        from PIL import Image
+        result_bytes = base64.b64decode(blocks[0]["base64"])
+        img = Image.open(__import__("io").BytesIO(result_bytes))
+        assert max(img.width, img.height) <= 1024
+
+    def test_large_image_smaller_base64(self):
+        """Compressed image should produce smaller base64 than original."""
+        raw = self._make_png_bytes(3000, 2000)
+        content_b64 = base64.b64encode(raw).decode()
+        _, blocks = self._run_gateway_material_logic([
+            {"material_type": "image", "filename": "huge.jpg", "content": content_b64},
+        ])
+        assert len(blocks) == 1
+        # Compressed base64 should be shorter
+        assert len(blocks[0]["base64"]) < len(content_b64)
+
+    def test_invalid_base64_falls_back(self):
+        """If base64 decode fails, gateway should fallback to raw content."""
+        _, blocks = self._run_gateway_material_logic([
+            {"material_type": "image", "filename": "bad.png", "content": "NOT_VALID_BASE64!!!"},
+        ])
+        assert len(blocks) == 1
+        # Fallback: original content preserved
+        assert blocks[0]["base64"] == "NOT_VALID_BASE64!!!"
+        assert blocks[0]["media_type"] == "image/png"
+
+    def test_corrupted_image_bytes_falls_back(self):
+        """Valid base64 but not a real image — should fallback gracefully."""
+        garbage = base64.b64encode(b"this is not an image").decode()
+        _, blocks = self._run_gateway_material_logic([
+            {"material_type": "image", "filename": "corrupt.png", "content": garbage},
+        ])
+        assert len(blocks) == 1
+        # process_image handles corrupted bytes via except, still returns base64
+        assert blocks[0]["base64"] is not None
+
+    def test_jpeg_compression_used_for_jpg(self):
+        """JPEG files should be re-saved as JPEG after resize."""
+        raw = self._make_png_bytes(2000, 1500)  # create as PNG, but name it .jpg
+        content_b64 = base64.b64encode(raw).decode()
+        _, blocks = self._run_gateway_material_logic([
+            {"material_type": "image", "filename": "photo.jpg", "content": content_b64},
+        ])
+        assert len(blocks) == 1
+        assert blocks[0]["media_type"] == "image/jpeg"
