@@ -298,13 +298,14 @@ export function usePipeline() {
           const text = data.content as string;
           if (text) {
             usePipelineStore.getState().appendStreamingText(text);
+            usePipelineStore.getState().appendTextToTimeline(text, data.iteration as number);
           }
         })
         .on('thinking', (data) => {
           touchIdleTimer();
           const text = data.content as string;
           if (text) {
-            usePipelineStore.getState().appendThinkingText(text);
+            usePipelineStore.getState().appendThinkingText(text, data.iteration as number);
           }
         })
         .on('thinking_complete', () => {

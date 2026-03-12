@@ -104,34 +104,21 @@ async def health_check():
 @router.get("/tools")
 async def list_tools():
     """List all registered tools."""
-    from tools.registry_builder import build_shared_registry, build_capability_registry
+    from tools.registry_builder import build_full_registry
 
     tools_list = []
     try:
-        shared = build_shared_registry()
-        for name, tool in shared._tools.items():
+        registry = build_full_registry()
+        for name, tool in registry._tools.items():
             fn = tool.schema.get("function", {})
             tools_list.append({
                 "name": fn.get("name", name),
                 "description": fn.get("description", tool.description),
-                "category": "shared",
+                "category": getattr(tool, "category", "general"),
                 "read_only": tool.read_only,
             })
     except Exception:
-        logger.debug("Failed to load shared registry", exc_info=True)
-
-    try:
-        capability = build_capability_registry()
-        for name, tool in capability._tools.items():
-            fn = tool.schema.get("function", {})
-            tools_list.append({
-                "name": fn.get("name", name),
-                "description": fn.get("description", tool.description),
-                "category": "capability",
-                "read_only": tool.read_only,
-            })
-    except Exception:
-        logger.debug("Failed to load capability registry", exc_info=True)
+        logger.debug("Failed to load tool registry", exc_info=True)
 
     return {"tools": tools_list}
 

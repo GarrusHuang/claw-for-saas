@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>黄思维 - AI 产品经理</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* 头部 */
+        header {
+            text-align: center;
+            padding: 60px 20px;
+            color: white;
+        }
+
+        .avatar {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            background: white;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 60px;
+            color: #667eea;
+            border: 4px solid rgba(255,255,255,0.3);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .subtitle {
+            font-size: 1.3em;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+
+        .social-links {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .social-link {
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 25px;
+            transition: all 0.3s;
+        }
+
+        .social-link:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+
+        /* 主要内容 */
+        main {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            margin: 20px 0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        section {
+            margin-bottom: 50px;
+        }
+
+        h2 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 30px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        /* 关于我 */
+        .about-content {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 30px;
+            align-items: start;
+        }
+
+        .skills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .skill-tag {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+
+        /* 项目展示 */
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .project-card {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            transition: all 0.3s;
+            border-left: 4px solid #667eea;
+        }
+
+        .project-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .project-card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .project-card p {
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .project-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .project-tag {
+            background: #e9ecef;
+            color: #495057;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+        }
+
+        /* 联系方式 */
+        .contact-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .contact-item {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #764ba2;
+        }
+
+        .contact-item h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        /* 页脚 */
+        footer {
+            text-align: center;
+            padding: 30px;
+            color: white;
+            opacity: 0.8;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .about-content {
+                grid-template-columns: 1fr;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            .container {
+                padding: 15px;
+            }
+
+            main {
+                padding: 25px;
+            }
+        }
+
+        /* 动画效果 */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        .delay-1 { animation-delay: 0.1s; }
+        .delay-2 { animation-delay: 0.2s; }
+        .delay-3 { animation-delay: 0.3s; }
+        .delay-4 { animation-delay: 0.4s; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="fade-in">
+            <div class="avatar">👨‍💼</div>
+            <h1>黄思维</h1>
+            <p class="subtitle">AI 产品经理 | 技术创新者 | 产品架构师</p>
+            <div class="social-links">
+                <a href="#" class="social-link">GitHub</a>
+                <a href="#" class="social-link">LinkedIn</a>
+                <a href="#" class="social-link">知乎</a>
+                <a href="#" class="social-link">邮箱</a>
+            </div>
+        </header>
+
+        <!-- 主要内容 -->
+        <main>
+            <!-- 关于我 -->
+            <section class="fade-in delay-1">
+                <h2>👋 关于我</h2>
+                <div class="about-content">
+                    <div>
+                        <h3>核心能力</h3>
+                        <div class="skills">
+                            <span class="skill-tag">AI 产品规划</span>
+                            <span class="skill-tag">需求分析</span>
+                            <span class="skill-tag">数据驱动</span>
+                            <span class="skill-tag">用户体验</span>
+                            <span class="skill-tag">技术理解</span>
+                            <span class="skill-tag">项目管理</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p>我是一名专注于 AI 领域的产品经理，擅长将前沿技术转化为实际产品价值。拥有多年互联网产品经验，对大模型、机器学习、自然语言处理等 AI 技术有深入理解。</p>
+                        <br>
+                        <p>我的工作重点在于：洞察用户需求、设计创新产品方案、协调技术团队落地实现，并通过数据驱动持续优化产品体验。</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 项目经验 -->
+            <section class="fade-in delay-2">
+                <h2>🚀 项目经验</h2>
+                <div class="projects-grid">
+                    <div class="project-card">
+                        <h3>AI 智能客服系统</h3>
+                        <p>设计并落地企业级智能客服解决方案，集成 NLP 大模型，实现 7x24 小时自动应答，客服效率提升 300%。</p>
+                        <div class="project-tags">
+                            <span class="project-tag">NLP</span>
+                            <span class="project-tag">大模型</span>
+                            <span class="project-tag">企业应用</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <h3>智能数据分析平台</h3>
+                        <p>打造自动化数据分析工具，支持自然语言查询，让业务人员无需 SQL 即可获取数据洞察，分析效率提升 5 倍。</p>
+                        <div class="project-tags">
+                            <span class="project-tag">BI</span>
+                            <span class="project-tag">数据可视化</span>
+                            <span class="project-tag">AI 助手</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <h3>AI 内容创作助手</h3>
+                        <p>开发基于生成式 AI 的内容创作工具，支持文案、海报、视频脚本自动生成，帮助用户提升内容生产效率。</p>
+                        <div class="project-tags">
+                            <span class="project-tag">AIGC</span>
+                            <span class="project-tag">内容生成</span>
+                            <span class="project-tag">SaaS</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <h3>智能推荐引擎</h3>
+                        <p>构建个性化推荐系统，基于用户行为和偏好分析，实现精准内容分发，点击率提升 40%。</p>
+                        <div class="project-tags">
+                            <span class="project-tag">推荐系统</span>
+                            <span class="project-tag">机器学习</span>
+                            <span class="project-tag">算法优化</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 技能专长 -->
+            <section class="fade-in delay-3">
+                <h2>🎯 技能专长</h2>
+                <div class="contact-info">
+                    <div class="contact-item">
+                        <h4>产品能力</h4>
+                        <p>• 产品规划与路线图设计<br>• 用户需求分析与场景挖掘<br>• PRD 文档撰写<br>• 原型设计与交互设计</p>
+                    </div>
+                    <div class="contact-item">
+                        <h4>技术理解</h4>
+                        <p>• 大模型应用架构<br>• API 设计与集成<br>• 数据管道与 ETL<br>• 云原生部署</p>
+                    </div>
+                    <div class="contact-item">
+                        <h4>数据分析</h4>
+                        <p>• SQL 查询与分析<br>• A/B 测试设计<br>• 数据可视化<br>• 指标体系搭建</p>
+                    </div>
+                    <div class="contact-item">
+                        <h4>软技能</h4>
+                        <p>• 跨部门协作<br>• 项目管理<br>• 团队领导<br>• 演讲与沟通</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 联系方式 -->
+            <section class="fade-in delay-4">
+                <h2>📮 联系方式</h2>
+                <div class="contact-info">
+                    <div class="contact-item">
+                        <h4>邮箱</h4>
+                        <p>huangsiwei@example.com</p>
+                    </div>
+                    <div class="contact-item">
+                        <h4>微信</h4>
+                        <p>huangsiwei_ai</p>
+                    </div>
+                    <div class="contact-item">
+                        <h4>地址</h4>
+                        <p>中国 · 上海</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 页脚 -->
+        <footer>
+            <p>© 2026 黄思维 | AI 产品经理作品集</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">Powered by AI 🤖</p>
+        </footer>
+    </div>
+
+    <script>
+        // 简单的交互效果
+        document.addEventListener('DOMContentLoaded', function() {
+            // 添加点击反馈
+            const cards = document.querySelectorAll('.project-card, .contact-item');
+            cards.forEach(card => {
+                card.addEventListener('click', function() {
+                    this.style.transform = 'scale(0.98)';
+                    setTimeout(() => {
+                        this.style.transform = '';
+                    }, 150);
+                });
+            });
+
+            // 鼠标悬停效果
+            const socialLinks = document.querySelectorAll('.social-link');
+            socialLinks.forEach(link => {
+                link.addEventListener('mouseenter', function() {
+                    this.style.transform = 'translateY(-3px)';
+                });
+                link.addEventListener('mouseleave', function() {
+                    this.style.transform = 'translateY(0)';
+                });
+            });
+
+            console.log('✨ 黄思维个人作品集已加载完成！');
+        });
+    </script>
+</body>
+</html>

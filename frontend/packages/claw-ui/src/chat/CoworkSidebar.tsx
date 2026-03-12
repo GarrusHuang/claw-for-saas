@@ -1,16 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Typography, Tooltip } from 'antd';
+import { Typography } from 'antd';
 import {
   PlusOutlined,
   SearchOutlined,
   CalendarOutlined,
   BulbOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
 import {
   useAIChatStore, usePipelineStore, aiApi, getAIConfig,
   type SessionInfo,
 } from '@claw/core';
+import SearchModal from './SearchModal.tsx';
 
 const { listSessions: apiListSessions } = aiApi;
 
@@ -55,8 +55,9 @@ export default function CoworkSidebar() {
   const contentView = useAIChatStore((s) => s.contentView);
   const setContentView = useAIChatStore((s) => s.setContentView);
 
-  // ── Sessions state ──
+  // ── State ──
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // ── Session fetching ──
   const fetchSessions = useCallback(async () => {
@@ -91,6 +92,11 @@ export default function CoworkSidebar() {
     setContentView('skills');
   }, [setContentView]);
 
+  const handleSearchSelect = useCallback((sessionId: string) => {
+    setContentView('chat');
+    dispatchSessionAction({ type: 'load', sessionId });
+  }, [dispatchSessionAction, setContentView]);
+
   return (
     <div className="cowork-sidebar">
       {/* ── Function entries ── */}
@@ -99,12 +105,16 @@ export default function CoworkSidebar() {
           <PlusOutlined style={{ fontSize: 14 }} />
           <span>新建任务</span>
         </div>
-        <Tooltip title="即将推出" placement="right">
-          <div className="sidebar-entry sidebar-entry--disabled">
-            <SearchOutlined style={{ fontSize: 14 }} />
-            <span>搜索</span>
-          </div>
-        </Tooltip>
+        <div
+          className="sidebar-entry"
+          role="button"
+          tabIndex={0}
+          onClick={() => setSearchOpen(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSearchOpen(true); } }}
+        >
+          <SearchOutlined style={{ fontSize: 14 }} />
+          <span>搜索</span>
+        </div>
         <div
           className={`sidebar-entry${contentView === 'schedule' ? ' sidebar-entry--active' : ''}`}
           onClick={handleScheduledClick}
@@ -122,12 +132,6 @@ export default function CoworkSidebar() {
           <BulbOutlined style={{ fontSize: 14 }} />
           <span>技能</span>
         </div>
-        <Tooltip title="即将推出" placement="right">
-          <div className="sidebar-entry sidebar-entry--disabled">
-            <SettingOutlined style={{ fontSize: 14 }} />
-            <span>自定义</span>
-          </div>
-        </Tooltip>
       </div>
 
       {/* ── Recents ── */}
@@ -178,6 +182,12 @@ export default function CoworkSidebar() {
 
       {/* spacer */}
       <div style={{ marginTop: 'auto' }} />
+
+      <SearchModal
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelectSession={handleSearchSelect}
+      />
     </div>
   );
 }

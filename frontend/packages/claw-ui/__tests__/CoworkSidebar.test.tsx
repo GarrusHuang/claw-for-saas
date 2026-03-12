@@ -78,6 +78,5 @@ describe('CoworkSidebar', () => {
     expect(screen.getByText('技能')).toBeInTheDocument();
     expect(screen.getByText('搜索')).toBeInTheDocument();
     expect(screen.getByText('定时任务')).toBeInTheDocument();
-    expect(screen.getByText('自定义')).toBeInTheDocument();
   });
 });

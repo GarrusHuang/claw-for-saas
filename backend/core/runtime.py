@@ -218,10 +218,9 @@ class AgenticRuntime:
             # ─── 2. 解析工具调用 ───
             parsed = self.tool_parser.parse(llm_response.to_message_dict())
 
-            # 收集 thinking
-            if parsed.thinking:
+            # 收集 thinking (流式模式下已在流中处理，跳过重复)
+            if parsed.thinking and not self.config.stream:
                 self._thinking_parts.append(parsed.thinking)
-                # 发射 thinking 事件让前端显示 Agent 思考过程
                 self._emit("thinking", {"content": parsed.thinking, "iteration": iteration + 1})
 
             # ─── 3. 判断是否为 final answer ───
@@ -360,6 +359,11 @@ class AgenticRuntime:
         _text_buf = ""
         _FLUSH_THRESHOLD = 2  # 每 N 个字符刷新一次
 
+        # <think> 标签流式拦截
+        # vLLM thinking 模式: 省略 <think> 开始标签，直接流式输出思考内容，
+        # 某个 chunk 中出现 </think> 后切换为正常文本。
+        _in_think = self.llm_client.config.enable_thinking
+
         async def _flush_text(force: bool = False) -> None:
             nonlocal _text_buf
             if _text_buf and (force or len(_text_buf) >= _FLUSH_THRESHOLD):
@@ -384,6 +388,7 @@ class AgenticRuntime:
                     continue
 
                 delta = choices[0].get("delta", {})
+                # DEBUG: 记录 delta 结构以排查 think 标签来源
                 fr = choices[0].get("finish_reason")
                 if fr:
                     finish_reason = fr
@@ -392,14 +397,61 @@ class AgenticRuntime:
                 if "usage" in chunk:
                     usage_data = chunk["usage"]
 
-                # ── 文本内容 ──
+                # ── 文本内容 (含 <think> 标签拦截) ──
                 text = delta.get("content", "")
                 if text:
-                    content_parts.append(text)
-                    # 流式发射文本 (不在工具调用迭代中也发)
                     if not has_tool_calls:
-                        _text_buf += text
-                        await _flush_text()
+                        if _in_think:
+                            # 检测 </think> 结束标签
+                            if "</think>" in text:
+                                parts = text.split("</think>", 1)
+                                think_part = parts[0]
+                                if think_part:
+                                    self._thinking_parts.append(think_part)
+                                    self._emit("thinking", {"content": think_part, "iteration": iteration + 1})
+                                _in_think = False
+                                # </think> 之后的正常文本
+                                normal_text = parts[1].lstrip("\n")
+                                if normal_text:
+                                    content_parts.append(normal_text)
+                                    _text_buf += normal_text
+                                    await _flush_text()
+                            else:
+                                # 仍在 think 中
+                                clean = text.replace("<think>", "")
+                                if clean:
+                                    self._thinking_parts.append(clean)
+                                    self._emit("thinking", {"content": clean, "iteration": iteration + 1})
+                        else:
+                            # 正常文本，检测 <think> 开始标签
+                            if "<think>" in text:
+                                parts = text.split("<think>", 1)
+                                if parts[0]:
+                                    content_parts.append(parts[0])
+                                    _text_buf += parts[0]
+                                    await _flush_text(force=True)
+                                _in_think = True
+                                think_text = parts[1]
+                                if "</think>" in think_text:
+                                    tp = think_text.split("</think>", 1)
+                                    if tp[0]:
+                                        self._thinking_parts.append(tp[0])
+                                        self._emit("thinking", {"content": tp[0], "iteration": iteration + 1})
+                                    _in_think = False
+                                    normal = tp[1].lstrip("\n")
+                                    if normal:
+                                        content_parts.append(normal)
+                                        _text_buf += normal
+                                        await _flush_text()
+                                elif think_text:
+                                    self._thinking_parts.append(think_text)
+                                    self._emit("thinking", {"content": think_text, "iteration": iteration + 1})
+                            else:
+                                content_parts.append(text)
+                                _text_buf += text
+                                await _flush_text()
+                    else:
+                        content_parts.append(text)
 
                 # ── 工具调用 (流式累积) ──
                 tc_deltas = delta.get("tool_calls", [])
@@ -656,12 +708,6 @@ class AgenticRuntime:
             "args_summary": self._summarize_args(tool_call.arguments),
             "result_summary": self._summarize_result(result),
         })
-
-        # Plan step tracking
-        from core.context import current_plan_tracker
-        tracker = current_plan_tracker.get(None)
-        if tracker:
-            tracker.on_tool_executed(tool_call.name, success=result.success)
 
         logger.info(
             f"Tool executed: {tool_call.name}",

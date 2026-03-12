@@ -203,6 +203,84 @@ class SessionManager:
             sessions.append(metadata)
         return sessions
 
+    def search_sessions(
+        self, tenant_id: str, user_id: str, query: str, limit: int = 20
+    ) -> list[dict]:
+        """搜索会话 — 匹配标题和消息内容。"""
+        if not query or not query.strip():
+            return []
+
+        query_lower = query.strip().lower()
+        session_dir = self._session_dir(tenant_id, user_id)
+        if not session_dir.exists():
+            return []
+
+        results = []
+        for f in sorted(
+            session_dir.glob("*.jsonl"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        ):
+            session_id = f.stem
+            metadata: dict[str, object] = {"session_id": session_id}
+            matched_snippet = ""
+            title_match = False
+
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        # 元数据行 — 检查标题
+                        if entry.get("type") == "metadata":
+                            metadata.update(entry)
+                            title = str(entry.get("title", ""))
+                            bt = str(entry.get("business_type", ""))
+                            if query_lower in title.lower() or query_lower in bt.lower():
+                                title_match = True
+                            continue
+
+                        if entry.get("type") == "compaction_marker":
+                            continue
+
+                        # 消息行 — 搜索内容
+                        if not matched_snippet and entry.get("role") in (
+                            "user",
+                            "assistant",
+                        ):
+                            content = str(entry.get("content", ""))
+                            pos = content.lower().find(query_lower)
+                            if pos >= 0:
+                                start = max(0, pos - 30)
+                                end = min(len(content), pos + len(query_lower) + 50)
+                                snippet = content[start:end].replace("\n", " ")
+                                if start > 0:
+                                    snippet = "..." + snippet
+                                if end < len(content):
+                                    snippet = snippet + "..."
+                                matched_snippet = snippet
+
+            except Exception:
+                logger.warning(f"Error searching session {session_id}")
+                continue
+
+            if title_match or matched_snippet:
+                results.append({
+                    **metadata,
+                    "match_snippet": matched_snippet,
+                    "title_match": title_match,
+                })
+                if len(results) >= limit:
+                    break
+
+        return results
+
     def delete_session(self, tenant_id: str, user_id: str, session_id: str) -> bool:
         """删除会话。"""
         session_file = self._session_dir(tenant_id, user_id) / f"{session_id}.jsonl"
@@ -242,6 +320,39 @@ class SessionManager:
                 except json.JSONDecodeError:
                     continue
         return last_steps
+
+    def save_timeline(
+        self, tenant_id: str, user_id: str, session_id: str,
+        entries: list[dict], turn_index: int,
+    ) -> None:
+        """持久化时间线条目 (thinking + tool_executed) 到会话文件。"""
+        self.append_message(tenant_id, user_id, session_id, {
+            "type": "timeline_data",
+            "turn_index": turn_index,
+            "entries": entries,
+        })
+
+    def load_timelines(
+        self, tenant_id: str, user_id: str, session_id: str
+    ) -> list[dict]:
+        """从会话文件中读取所有时间线数据。"""
+        session_file = self._session_dir(tenant_id, user_id) / f"{session_id}.jsonl"
+        if not session_file.exists():
+            return []
+
+        timelines: list[dict] = []
+        with open(session_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("type") == "timeline_data":
+                        timelines.append(entry)
+                except json.JSONDecodeError:
+                    continue
+        return timelines
 
     def session_exists(self, tenant_id: str, user_id: str, session_id: str) -> bool:
         """检查会话是否存在。"""

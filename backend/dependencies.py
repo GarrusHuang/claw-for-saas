@@ -44,6 +44,7 @@ def get_llm_client() -> LLMGatewayClient:
         max_retries=s.llm_max_retries,
         default_temperature=s.llm_default_temperature,
         default_top_p=s.llm_default_top_p,
+        enable_thinking=s.llm_enable_thinking,
     )
     client = LLMGatewayClient(config)
     _llm_client_instance = client

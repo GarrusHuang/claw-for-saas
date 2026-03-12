@@ -64,6 +64,28 @@ export interface SessionDetail {
     [key: string]: unknown;
   }>;
   message_count: number;
+  plan_steps?: Array<{
+    index: number;
+    action: string;
+    description: string;
+    status: string;
+    [key: string]: unknown;
+  }>;
+  timelines?: Array<{
+    turn_index: number;
+    entries: Array<{
+      type: string;
+      content?: string;
+      iteration?: number;
+      tool_name?: string;
+      success?: boolean;
+      blocked?: boolean;
+      latency_ms?: number;
+      args_summary?: Record<string, string>;
+      result_summary?: string;
+      ts: number;
+    }>;
+  }>;
 }
 
 export async function listSessions(_userId?: string): Promise<SessionInfo[]> {
@@ -71,6 +93,23 @@ export async function listSessions(_userId?: string): Promise<SessionInfo[]> {
     `/api/session/list`,
   );
   return data.sessions;
+}
+
+export interface SearchResult {
+  session_id: string;
+  title?: string;
+  business_type?: string;
+  created_at?: string;
+  match_snippet?: string;
+  title_match?: boolean;
+  [key: string]: unknown;
+}
+
+export async function searchSessions(query: string): Promise<SearchResult[]> {
+  const data = await apiFetch<{ results: SearchResult[]; total: number }>(
+    `/api/session/search?q=${encodeURIComponent(query)}`,
+  );
+  return data.results;
 }
 
 export async function getSessionHistory(_userId: string, sessionId: string): Promise<SessionDetail> {

@@ -434,13 +434,93 @@ class AgentGateway:
             except Exception as e:
                 logger.warning(f"agent_stop hook error: {e}")
 
-        # ── 12. PlanTracker 收尾 ──
+        # ── 12. PlanTracker 收尾 + 持久化 ──
         tracker = current_plan_tracker.get(None)
         if tracker:
             if result.error:
                 tracker.fail_current()
             else:
                 tracker.complete_all()
+            # 持久化 plan steps 到会话文件
+            try:
+                self.session_manager.save_plan_steps(
+                    tenant_id, user_id, session_id, tracker.steps,
+                )
+            except Exception as e:
+                logger.debug(f"Failed to persist plan steps: {e}", exc_info=True)
+
+        # ── 12b. 持久化 timeline (thinking + text + tool_executed) ──
+        if event_bus:
+            try:
+                # 从 EventBus history 提取 thinking + text_delta + tool_executed 事件
+                timeline_entries = []
+                # text_delta 是流式 chunk，按 iteration 累积为单条 text 条目
+                _text_accum: dict[int, str] = {}  # iteration → accumulated text
+                for evt in event_bus.history:
+                    if evt.event_type == "thinking":
+                        # 先 flush 之前迭代的 text_delta 累积
+                        for it in sorted(_text_accum):
+                            if _text_accum[it]:
+                                timeline_entries.append({
+                                    "type": "text",
+                                    "content": _text_accum[it],
+                                    "iteration": it,
+                                    "ts": evt.timestamp,
+                                })
+                        _text_accum.clear()
+                        timeline_entries.append({
+                            "type": "thinking",
+                            "content": evt.data.get("content", ""),
+                            "iteration": evt.data.get("iteration", 0),
+                            "ts": evt.timestamp,
+                        })
+                    elif evt.event_type == "text_delta":
+                        it = evt.data.get("iteration", 0)
+                        _text_accum[it] = _text_accum.get(it, "") + evt.data.get("content", "")
+                    elif evt.event_type == "tool_executed":
+                        # flush 当前迭代的 text_delta 到 timeline (text 在 tool 之前)
+                        for it in sorted(_text_accum):
+                            if _text_accum[it]:
+                                timeline_entries.append({
+                                    "type": "text",
+                                    "content": _text_accum[it],
+                                    "iteration": it,
+                                    "ts": evt.timestamp,
+                                })
+                        _text_accum.clear()
+                        timeline_entries.append({
+                            "type": "tool",
+                            "tool_name": evt.data.get("tool", ""),
+                            "success": evt.data.get("success", True),
+                            "blocked": evt.data.get("blocked", False),
+                            "latency_ms": evt.data.get("latency_ms", 0),
+                            "args_summary": evt.data.get("args_summary", {}),
+                            "result_summary": evt.data.get("result_summary", ""),
+                            "ts": evt.timestamp,
+                        })
+                # flush 剩余 text_delta (最终迭代的文本)
+                for it in sorted(_text_accum):
+                    if _text_accum[it]:
+                        timeline_entries.append({
+                            "type": "text",
+                            "content": _text_accum[it],
+                            "iteration": it,
+                            "ts": evt.timestamp if event_bus.history else 0,
+                        })
+                if timeline_entries:
+                    # 计算 turn_index: 当前 assistant 消息在 messages 中的位置
+                    messages = self.session_manager.load_messages(
+                        tenant_id, user_id, session_id,
+                    )
+                    assistant_count = sum(
+                        1 for m in messages if m.get("role") == "assistant"
+                    )
+                    self.session_manager.save_timeline(
+                        tenant_id, user_id, session_id,
+                        timeline_entries, turn_index=assistant_count - 1,
+                    )
+            except Exception as e:
+                logger.debug(f"Failed to persist timeline: {e}", exc_info=True)
 
         # ── 13. 发射完成事件 ──
         duration_ms = (time.time() - start_time) * 1000

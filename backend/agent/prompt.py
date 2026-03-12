@@ -342,12 +342,20 @@ class PromptBuilder:
     def _build_plan_guidance_section(_ctx: PromptContext) -> str:
         return (
             "\n<plan_guidance>\n"
-            "你拥有 propose_plan 工具，用于记录执行计划并向用户展示进度。\n\n"
+            "你拥有 propose_plan 和 update_plan_step 两个进度管理工具。\n\n"
             "使用规则：\n"
             "- 一步能完成的简单任务 → 直接调工具，不需要 plan\n"
             "- 需要多个步骤的任务 → 先 propose_plan 记录步骤，然后立即执行\n"
-            "- plan 是进度展示工具，不是审批流程，不需要等用户确认\n"
-            "- 前端会实时显示计划进度，用户可以看到每一步的完成状态\n"
+            "- plan 是进度展示工具，不是审批流程，不需要等用户确认\n\n"
+            "【关键】执行计划时必须用 update_plan_step 更新每个步骤的状态：\n"
+            "1. 开始某步骤前: update_plan_step(step_index=i, status='running')\n"
+            "2. 该步骤的实际工作完成后: update_plan_step(step_index=i, status='completed')\n"
+            "3. 该步骤失败时: update_plan_step(step_index=i, status='failed')\n"
+            "用户通过前端进度面板实时看到每个步骤的状态变化，务必逐步更新。\n\n"
+            "【completed 判定标准】只有步骤的实际工作完成才能标 completed：\n"
+            "- 如果需要用户补充信息 → 保持 running，等用户回复并确认信息完整后再标 completed\n"
+            "- 如果工具返回错误 → 标 failed，不要标 completed\n"
+            "- \"已经问了用户\" 不等于 completed，\"拿到了用户的回答并处理完\" 才是 completed\n"
             "</plan_guidance>"
         )
 
