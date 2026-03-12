@@ -201,10 +201,10 @@ export interface FileInfo {
   created_at?: number;
 }
 
-export async function uploadFile(file: File, userId: string = 'U001'): Promise<FileInfo> {
+export async function uploadFile(file: File, userId?: string): Promise<FileInfo> {
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('user_id', userId);
+  formData.append('user_id', userId || getAIConfig().defaultUserId);
 
   // Auth headers (without Content-Type — browser sets multipart boundary)
   const headers: Record<string, string> = {};
@@ -225,9 +225,9 @@ export async function uploadFile(file: File, userId: string = 'U001'): Promise<F
   return res.json() as Promise<FileInfo>;
 }
 
-export async function listUserFiles(userId: string = 'U001'): Promise<FileInfo[]> {
+export async function listUserFiles(userId?: string): Promise<FileInfo[]> {
   const data = await apiFetch<{ files: FileInfo[] }>(
-    `/api/files/${encodeURIComponent(userId)}`,
+    `/api/files/${encodeURIComponent(userId || getAIConfig().defaultUserId)}`,
   );
   return data.files;
 }

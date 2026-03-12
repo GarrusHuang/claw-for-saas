@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -159,11 +160,24 @@ class SessionManager:
             *recent_messages,
         ]
 
-        with open(session_file, "w", encoding="utf-8") as f:
-            if original_metadata:
-                f.write(json.dumps(original_metadata, ensure_ascii=False) + "\n")
-            for msg in compacted_messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(session_file.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                if original_metadata:
+                    f.write(json.dumps(original_metadata, ensure_ascii=False) + "\n")
+                for msg in compacted_messages:
+                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(session_file))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         logger.info(f"Session {session_id} compacted: {len(old_messages)} messages → summary")
 

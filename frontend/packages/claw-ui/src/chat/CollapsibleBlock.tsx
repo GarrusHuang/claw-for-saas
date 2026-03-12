@@ -19,7 +19,11 @@ export default function CollapsibleBlock({
     <div className="collapsible-block">
       <div
         className="collapsible-summary"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v); } }}
       >
         <span className="collapsible-chevron">{open ? '▾' : '▸'}</span>
         {icon && <span className="collapsible-icon">{icon}</span>}

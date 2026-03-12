@@ -225,23 +225,26 @@ describe('useAuthStore', () => {
 
   describe('isAuthenticated', () => {
     it('no token — false', () => {
-      expect(useAuthStore.getState().isAuthenticated()).toBe(false);
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
     });
 
-    it('valid token — true', () => {
+    it('valid token — true after login sets it', () => {
       useAuthStore.setState({
         token: 'tok',
         expiresAt: Date.now() + 3600_000,
+        isAuthenticated: true,
       });
-      expect(useAuthStore.getState().isAuthenticated()).toBe(true);
+      expect(useAuthStore.getState().isAuthenticated).toBe(true);
     });
 
-    it('expired token — false', () => {
+    it('logged out — false', () => {
       useAuthStore.setState({
         token: 'tok',
-        expiresAt: Date.now() - 1000,
+        expiresAt: Date.now() + 3600_000,
+        isAuthenticated: true,
       });
-      expect(useAuthStore.getState().isAuthenticated()).toBe(false);
+      useAuthStore.getState().logout();
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
     });
   });
 });

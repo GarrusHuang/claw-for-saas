@@ -22,7 +22,7 @@ class ChatRequest(BaseModel):
     """Agent Gateway chat request"""
 
     session_id: str | None = Field(None, description="Resume existing session")
-    message: str = Field(..., description="User message")
+    message: str = Field(..., max_length=100_000, description="User message")
     business_type: str = Field(
         "general_chat",
         description="Business type identifier (e.g. 'invoice_review', 'general_chat')",

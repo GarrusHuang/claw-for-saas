@@ -18,6 +18,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { GeneratedDocument } from '@claw/core';
 import DocumentPreviewModal from './DocumentPreviewModal';
+import { downloadAsFile, downloadFromUrl, copyToClipboard } from '../utils/download';
 
 const { Text } = Typography;
 
@@ -25,44 +26,6 @@ interface DocumentPresenterProps {
   document: GeneratedDocument;
   maxPreviewLines?: number;
   onAdopt?: (doc: GeneratedDocument) => void;
-}
-
-function downloadAsFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function downloadFromUrl(url: string, filename: string) {
-  fetch(url)
-    .then((res) => {
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-      return res.blob();
-    })
-    .then((blob) => {
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(blobUrl);
-    })
-    .catch((err) => console.error('Download error:', err));
-}
-
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text).catch(() => {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-  });
 }
 
 export default function DocumentPresenter({

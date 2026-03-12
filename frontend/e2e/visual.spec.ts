@@ -19,12 +19,12 @@ test.describe('F3: LoginPage', () => {
 
     // 页面标题
     await expect(page.locator('.login-logo')).toHaveText('Claw');
-    await expect(page.locator('.login-subtitle')).toHaveText('AI Agent Runtime');
+    await expect(page.locator('.login-subtitle')).toHaveText('AI Agent 运行时');
 
     // 表单元素
     await expect(page.locator('#username')).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toHaveText('Sign in');
+    await expect(page.locator('button[type="submit"]')).toHaveText('登录');
 
     await page.screenshot({ path: 'e2e/screenshots/login-page.png' });
   });
@@ -108,27 +108,27 @@ test.describe('F2: Cowork Layout', () => {
   test('sidebar has navigation entries', async ({ page }) => {
     const sidebar = page.locator('.cowork-sidebar');
 
-    await expect(sidebar.locator('text=New task')).toBeVisible();
-    await expect(sidebar.locator('text=Search')).toBeVisible();
-    await expect(sidebar.locator('text=Scheduled')).toBeVisible();
-    await expect(sidebar.locator('text=Skills')).toBeVisible();
-    await expect(sidebar.locator('text=Customize')).toBeVisible();
-    await expect(sidebar.locator('text=Recents')).toBeVisible();
+    await expect(sidebar.locator('text=新任务')).toBeVisible();
+    await expect(sidebar.locator('text=搜索')).toBeVisible();
+    await expect(sidebar.locator('text=定时任务')).toBeVisible();
+    await expect(sidebar.locator('text=技能')).toBeVisible();
+    await expect(sidebar.locator('text=自定义')).toBeVisible();
+    await expect(sidebar.locator('text=最近')).toBeVisible();
   });
 
   test('progress panel has all sections', async ({ page }) => {
     const panel = page.locator('.progress-panel');
 
-    await expect(panel.locator('.progress-section-title', { hasText: 'Progress' })).toBeVisible();
-    await expect(panel.locator('.progress-section-title', { hasText: 'Files' })).toBeVisible();
-    await expect(panel.locator('.progress-section-title', { hasText: 'Instructions' })).toBeVisible();
-    await expect(panel.locator('.progress-section-title', { hasText: 'Context' })).toBeVisible();
+    await expect(panel.locator('.progress-section-title', { hasText: '进度' })).toBeVisible();
+    await expect(panel.locator('.progress-section-title', { hasText: '文件' })).toBeVisible();
+    await expect(panel.locator('.progress-section-title', { hasText: '说明' })).toBeVisible();
+    await expect(panel.locator('.progress-section-title', { hasText: '上下文' })).toBeVisible();
   });
 
   test('chat input area renders with placeholder', async ({ page }) => {
     const textarea = page.locator('.chat-input-area textarea');
     await expect(textarea).toBeVisible();
-    await expect(textarea).toHaveAttribute('placeholder', 'Reply...');
+    await expect(textarea).toHaveAttribute('placeholder', '回复...');
 
     await page.screenshot({ path: 'e2e/screenshots/chat-input.png' });
   });

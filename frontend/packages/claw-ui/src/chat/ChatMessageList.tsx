@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, memo } from 'react';
 import { Typography, Spin, Button } from 'antd';
 import {
   CheckCircleOutlined,
@@ -22,15 +22,11 @@ import InlineUploader from './InlineUploader';
 import InteractiveMessage from './InteractiveMessage';
 import CollapsibleBlock from './CollapsibleBlock';
 
+import type { ChatMessage } from '@claw/core';
+
 const { Text } = Typography;
 
-/** 聊天消息类型 */
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: number;
-}
+const REMARK_PLUGINS = [remarkGfm];
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -76,7 +72,7 @@ function PlanCard() {
       {/* ── Markdown 文档正文 ── */}
       {hasDetail ? (
         <div className="plan-document-body markdown-body">
-          <Markdown remarkPlugins={[remarkGfm]}>{plan.detail}</Markdown>
+          <Markdown remarkPlugins={REMARK_PLUGINS}>{plan.detail}</Markdown>
         </div>
       ) : steps.length > 0 ? (
         /* 回退: 无 detail 时仍显示简单步骤列表 */
@@ -133,12 +129,12 @@ function InlinePipelineProgress() {
 
   // Build one-line summary
   const parts: string[] = [];
-  if (toolExecutions.length > 0) parts.push(`Ran ${toolExecutions.length} tools`);
-  if (fieldValues.length > 0) parts.push(`filled ${fieldValues.length} fields`);
-  if (inferredType) parts.push(`type: ${inferredType.docType}`);
-  if (auditSummary) parts.push(`audit: ${auditSummary.conclusion}`);
-  if (document) parts.push(`doc: ${document.title}`);
-  const summaryText = parts.length > 0 ? parts.join(', ') : 'Processing...';
+  if (toolExecutions.length > 0) parts.push(`执行了 ${toolExecutions.length} 个工具`);
+  if (fieldValues.length > 0) parts.push(`填充了 ${fieldValues.length} 个字段`);
+  if (inferredType) parts.push(`类型: ${inferredType.docType}`);
+  if (auditSummary) parts.push(`审计: ${auditSummary.conclusion}`);
+  if (document) parts.push(`文档: ${document.title}`);
+  const summaryText = parts.length > 0 ? parts.join(', ') : '处理中...';
 
   return (
     <div>
@@ -148,7 +144,7 @@ function InlinePipelineProgress() {
       {/* Pipeline progress as collapsible */}
       <CollapsibleBlock
         icon={<ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 12 }} />}
-        summary={status === 'running' ? `Agent working — ${summaryText}` : summaryText}
+        summary={status === 'running' ? `Agent 工作中 — ${summaryText}` : summaryText}
       >
         {/* 实时处理状态 */}
         {status === 'running' && (
@@ -202,16 +198,16 @@ function ToolExecutionLog() {
   // 构建一行汇总
   const summaryParts: string[] = [];
   const toolNames = new Set(toolExecutions.map((te) => te.toolName));
-  summaryParts.push(`Ran ${toolExecutions.length} command${toolExecutions.length > 1 ? 's' : ''}`);
+  summaryParts.push(`执行了 ${toolExecutions.length} 条命令`);
 
   // 提取文件相关操作
   const fileOps = toolExecutions.filter(
     (te) => te.argsSummary && (te.argsSummary.file_path || te.argsSummary.filename || te.argsSummary.path),
   );
-  if (fileOps.length > 0) summaryParts.push(`touched ${fileOps.length} file${fileOps.length > 1 ? 's' : ''}`);
+  if (fileOps.length > 0) summaryParts.push(`操作了 ${fileOps.length} 个文件`);
 
   const blocked = toolExecutions.filter((te) => te.blocked);
-  if (blocked.length > 0) summaryParts.push(`${blocked.length} blocked`);
+  if (blocked.length > 0) summaryParts.push(`${blocked.length} 个被阻止`);
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -254,6 +250,24 @@ function ToolExecutionLog() {
   );
 }
 
+// ── 单条消息组件 (memo 避免无关消息重渲染) ──
+
+const MessageItem = memo(function MessageItem({ msg }: { msg: ChatMessage }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {msg.role === 'user' ? (
+        <div className="msg-user">
+          <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
+        </div>
+      ) : (
+        <div className="msg-ai markdown-body">
+          <Markdown remarkPlugins={REMARK_PLUGINS}>{msg.content}</Markdown>
+        </div>
+      )}
+    </div>
+  );
+});
+
 // ── 主组件 ──
 
 export default function ChatMessageList({
@@ -283,19 +297,7 @@ export default function ChatMessageList({
       }}
     >
       {messages.map((msg) => (
-        <div key={msg.id} style={{ marginBottom: 16 }}>
-          {msg.role === 'user' ? (
-            /* 用户消息 — 左对齐 + 左边框 */
-            <div className="msg-user">
-              <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
-            </div>
-          ) : (
-            /* AI 消息 — 纯文档流 */
-            <div className="msg-ai markdown-body">
-              <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
-            </div>
-          )}
-        </div>
+        <MessageItem key={msg.id} msg={msg} />
       ))}
 
       {/* 思考过程 — 始终可见但默认折叠 */}
@@ -303,7 +305,7 @@ export default function ChatMessageList({
         <div style={{ marginBottom: 16 }}>
           <CollapsibleBlock
             icon={<BulbOutlined style={{ color: '#faad14', fontSize: 12 }} />}
-            summary="Thought process"
+            summary="思考过程"
           >
             <div style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
               {thinkingText}

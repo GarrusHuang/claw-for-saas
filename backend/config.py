@@ -4,7 +4,7 @@ Uses pydantic-settings to load from environment variables and .env files.
 """
 
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
 
 
 class Settings(BaseSettings):
@@ -110,7 +110,11 @@ class Settings(BaseSettings):
     # ─── Server ───
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
-    app_debug: bool = Field(default=True)
+    app_debug: bool = Field(default=False)
+    cors_allowed_origins: str = Field(
+        default="*",
+        description="CORS allowed origins (comma-separated, '*' for all)",
+    )
 
     # ─── External API (optional, for MCP-style tool bridges) ───
     external_api_base_url: str = Field(
@@ -260,6 +264,14 @@ class Settings(BaseSettings):
         default="console",
         description="console | json",
     )
+
+    @model_validator(mode="after")
+    def _validate_auth_jwt_secret(self) -> "Settings":
+        if self.auth_enabled and self.auth_mode == "jwt" and not self.auth_jwt_secret:
+            raise ValueError(
+                "auth_jwt_secret must be set when auth_enabled=True and auth_mode='jwt'"
+            )
+        return self
 
     model_config = {
         "env_file": ".env",

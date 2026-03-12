@@ -14,8 +14,11 @@ export default function ClawFloatingButton() {
   return (
     <div
       className="claw-floating-btn"
+      role="button"
+      tabIndex={0}
       onClick={() => openChat('')}
-      title="Click to open Claw AI Assistant"
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openChat(''); } }}
+      aria-label="点击打开 Claw AI 助手"
     >
       <img src="/assets/claw-icon.svg" alt="Claw AI" />
     </div>

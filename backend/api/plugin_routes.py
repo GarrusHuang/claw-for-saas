@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from core.auth import AuthUser, get_current_user
 
 from dependencies import get_plugin_registry, get_prompt_builder, get_skill_loader, get_settings
 
@@ -21,7 +23,7 @@ _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @router.get("")
-async def list_plugins():
+async def list_plugins(user: AuthUser = Depends(get_current_user)):
     """列出已加载插件。"""
     registry = get_plugin_registry()
     plugins = registry.list_plugins()
@@ -45,7 +47,7 @@ class LoadPluginRequest(BaseModel):
 
 
 @router.post("/load")
-async def load_plugin(req: LoadPluginRequest):
+async def load_plugin(req: LoadPluginRequest, user: AuthUser = Depends(get_current_user)):
     """
     动态加载插件。
 
@@ -115,7 +117,7 @@ async def load_plugin(req: LoadPluginRequest):
 
 
 @router.post("/{name}/unload")
-async def unload_plugin(name: str):
+async def unload_plugin(name: str, user: AuthUser = Depends(get_current_user)):
     """卸载指定插件。"""
     registry = get_plugin_registry()
     success = registry.unload_plugin(name)

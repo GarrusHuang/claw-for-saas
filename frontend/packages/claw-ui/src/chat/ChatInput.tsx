@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState } from 'react';
 import { Input, Button, Tag, message } from 'antd';
+import type { InputRef } from 'antd';
 import { SendOutlined, PaperClipOutlined, CloseOutlined, PlusOutlined } from '@ant-design/icons';
 import { aiApi, type FileInfo } from '@claw/core';
 const { uploadFile } = aiApi;
@@ -25,12 +26,12 @@ interface ChatInputProps {
 export default function ChatInput({
   onSend,
   disabled = false,
-  placeholder = 'Reply...',
+  placeholder = '回复...',
 }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [uploading, setUploading] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<InputRef>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSend = useCallback(() => {
@@ -128,7 +129,7 @@ export default function ChatInput({
           style={{ color: '#999', flexShrink: 0 }}
         />
         <TextArea
-          ref={textareaRef as React.Ref<never>}
+          ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}

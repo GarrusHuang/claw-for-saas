@@ -13,6 +13,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { AgentSSEClient } from '../services/sse.ts';
+import { getAIConfig } from '../config.ts';
 import { usePipelineStore } from '../stores/pipeline.ts';
 import type { CandidateType, FormFieldDef, AuditRuleDef, KnownValue } from '../types/scenario.ts';
 
@@ -43,7 +44,29 @@ export interface InvokeParams {
 const IDLE_TIMEOUT_MS = 60_000;
 
 export function usePipeline() {
-  const store = usePipelineStore();
+  // ── 细粒度 selectors (避免整 store 订阅导致不必要的重渲染) ──
+  const status = usePipelineStore((s) => s.status);
+  const scenario = usePipelineStore((s) => s.scenario);
+  const traceId = usePipelineStore((s) => s.traceId);
+  const sessionId = usePipelineStore((s) => s.sessionId);
+  const conversationHistory = usePipelineStore((s) => s.conversationHistory);
+  const plan = usePipelineStore((s) => s.plan);
+  const steps = usePipelineStore((s) => s.steps);
+  const currentStep = usePipelineStore((s) => s.currentStep);
+  const inferredType = usePipelineStore((s) => s.inferredType);
+  const fieldValues = usePipelineStore((s) => s.fieldValues);
+  const auditSummary = usePipelineStore((s) => s.auditSummary);
+  const document = usePipelineStore((s) => s.document);
+  const startedAt = usePipelineStore((s) => s.startedAt);
+  const completedAt = usePipelineStore((s) => s.completedAt);
+  const durationMs = usePipelineStore((s) => s.durationMs);
+  const eventLog = usePipelineStore((s) => s.eventLog);
+  const error = usePipelineStore((s) => s.error);
+  const errorDetail = usePipelineStore((s) => s.errorDetail);
+  const workflowPhase = usePipelineStore((s) => s.workflowPhase);
+  const workflowProgress = usePipelineStore((s) => s.workflowProgress);
+  const parallelReview = usePipelineStore((s) => s.parallelReview);
+
   const clientRef = useRef<AgentSSEClient | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInvokingRef = useRef(false);
@@ -73,13 +96,13 @@ export function usePipeline() {
         state.document;
       if (hasResults) {
         console.warn('[usePipeline] Idle timeout but has results — treating as completed');
-        store.completePipeline('success', Date.now() - (state.startedAt || Date.now()));
+        usePipelineStore.getState().completePipeline('success', Date.now() - (state.startedAt || Date.now()));
       } else {
-        store.setError('连接超时：服务器在 60 秒内未返回任何事件');
+        usePipelineStore.getState().setError('连接超时：服务器在 60 秒内未返回任何事件');
       }
       clientRef.current?.close();
     }, IDLE_TIMEOUT_MS);
-  }, [clearIdleTimer, store]);
+  }, [clearIdleTimer]);
 
   const invoke = useCallback(
     async (params: InvokeParams) => {
@@ -97,22 +120,22 @@ export function usePipeline() {
       }
 
       // 多轮对话：使用 softReset 保留 session 信息；首次调用用 reset
-      const isFollowUp = !!params.sessionId && params.sessionId === store.sessionId;
+      const isFollowUp = !!params.sessionId && params.sessionId === usePipelineStore.getState().sessionId;
       if (isFollowUp) {
-        store.softReset();
+        usePipelineStore.getState().softReset();
       } else {
-        store.reset();
+        usePipelineStore.getState().reset();
       }
       setRetryCount(0);
 
       // 记录用户消息到对话历史
       if (params.userMessage) {
-        store.addConversationTurn('user', params.userMessage);
+        usePipelineStore.getState().addConversationTurn('user', params.userMessage);
       }
 
       const requestBody = {
-        user_id: params.userId || 'U001',
-        session_id: params.sessionId || store.sessionId || undefined,
+        user_id: params.userId || getAIConfig().defaultUserId,
+        session_id: params.sessionId || usePipelineStore.getState().sessionId || undefined,
         message: params.userMessage || `请帮我处理${params.action}`,
         business_type: params.action,
         materials: params.materials || [],
@@ -124,7 +147,7 @@ export function usePipeline() {
         connectionTimeoutMs: 30_000,
         onRetry: (attempt, maxRetries, error) => {
           setRetryCount(attempt);
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'retry',
             data: {
               attempt,
@@ -148,43 +171,43 @@ export function usePipeline() {
         .on('pipeline_started', (data) => {
           touchIdleTimer();
           if (data.session_id) {
-            store.setSessionId(data.session_id as string);
+            usePipelineStore.getState().setSessionId(data.session_id as string);
           }
           const businessType = (data.business_type as string) || (data.scenario as string) || '';
-          store.startPipeline(businessType, []);
+          usePipelineStore.getState().startPipeline(businessType, []);
         })
         .on('agent_progress', (data) => {
           touchIdleTimer();
           const status = data.status as string;
           if (status === 'started') {
-            store.setAgentIterationInfo(0, (data.max_iterations as number) || 15);
+            usePipelineStore.getState().setAgentIterationInfo(0, (data.max_iterations as number) || 15);
           } else if (status === 'calling_tools') {
-            store.setAgentIterationInfo(
+            usePipelineStore.getState().setAgentIterationInfo(
               (data.iteration as number) || 0,
-              store.agentIteration?.max || 15,
+              usePipelineStore.getState().agentIteration?.max || 15,
             );
             const tools = data.tools as string[] | undefined;
             if (tools && tools.length > 0) {
-              store.setCallingTools(tools);
+              usePipelineStore.getState().setCallingTools(tools);
             }
           } else if (status === 'completed' || status === 'max_iterations_reached') {
-            store.setAgentIterationInfo(
+            usePipelineStore.getState().setAgentIterationInfo(
               (data.iterations as number) || 0,
-              store.agentIteration?.max || 15,
+              usePipelineStore.getState().agentIteration?.max || 15,
             );
-            store.setCallingTools([]);
+            usePipelineStore.getState().setCallingTools([]);
           }
 
           // Phase 9: 工作流阶段跟踪
           if (data.phase) {
-            store.setWorkflowPhase(
+            usePipelineStore.getState().setWorkflowPhase(
               data.phase as string,
               (data.progress as number) || 0,
             );
           }
 
-          store.updateStepProgress(data);
-          store.addEvent({
+          usePipelineStore.getState().updateStepProgress(data);
+          usePipelineStore.getState().addEvent({
             type: 'agent_progress',
             data,
             timestamp: Date.now(),
@@ -192,12 +215,12 @@ export function usePipeline() {
         })
         .on('type_inferred', (data) => {
           touchIdleTimer();
-          store.setInferredType({
+          usePipelineStore.getState().setInferredType({
             docType: data.doc_type as string,
             confidence: data.confidence as number,
             reasoning: data.reasoning as string,
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'type_inferred',
             data,
             timestamp: Date.now(),
@@ -205,13 +228,13 @@ export function usePipeline() {
         })
         .on('field_update', (data) => {
           touchIdleTimer();
-          store.addFieldValue({
+          usePipelineStore.getState().addFieldValue({
             fieldId: data.field_id as string,
             value: data.value,
             source: data.source as string,
             confidence: data.confidence as number,
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'field_update',
             data,
             timestamp: Date.now(),
@@ -221,7 +244,7 @@ export function usePipeline() {
           touchIdleTimer();
           const rawResults =
             (data.results as Array<Record<string, unknown>>) || [];
-          store.setAuditSummary({
+          usePipelineStore.getState().setAuditSummary({
             results: rawResults.map((r) => ({
               ruleId: (r.ruleId as string) || (r.rule_id as string) || '',
               status: ((r.status as string) || 'pass') as
@@ -235,7 +258,7 @@ export function usePipeline() {
             warningCount: (data.warning_count as number) || 0,
             conclusion: (data.conclusion as string) || '',
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'audit_result',
             data,
             timestamp: Date.now(),
@@ -248,13 +271,13 @@ export function usePipeline() {
           if (data.docx_download_url) docMeta.docx_download_url = data.docx_download_url;
           if (data.docx_filename) docMeta.docx_filename = data.docx_filename;
           if (data.docx_file_id) docMeta.docx_file_id = data.docx_file_id;
-          store.setDocument({
+          usePipelineStore.getState().setDocument({
             documentType: data.document_type as string,
             title: data.title as string,
             content: data.content as string,
             metadata: docMeta,
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'document_ready',
             data,
             timestamp: Date.now(),
@@ -262,9 +285,9 @@ export function usePipeline() {
         })
         .on('agent_message', (data) => {
           touchIdleTimer();
-          store.setAgentMessage(data.content as string);
-          store.setIsStreaming(false);
-          store.addEvent({
+          usePipelineStore.getState().setAgentMessage(data.content as string);
+          usePipelineStore.getState().setIsStreaming(false);
+          usePipelineStore.getState().addEvent({
             type: 'agent_message',
             data,
             timestamp: Date.now(),
@@ -274,14 +297,14 @@ export function usePipeline() {
           touchIdleTimer();
           const text = data.content as string;
           if (text) {
-            store.appendStreamingText(text);
+            usePipelineStore.getState().appendStreamingText(text);
           }
         })
         .on('thinking', (data) => {
           touchIdleTimer();
           const text = data.content as string;
           if (text) {
-            store.appendThinkingText(text);
+            usePipelineStore.getState().appendThinkingText(text);
           }
         })
         .on('thinking_complete', () => {
@@ -289,7 +312,7 @@ export function usePipeline() {
         })
         .on('plan_proposed', (data) => {
           touchIdleTimer();
-          store.setAgentPlanProposed(true);
+          usePipelineStore.getState().setAgentPlanProposed(true);
           let rawSteps = data.steps;
           // LLM 可能把 steps 序列化成 JSON 字符串而非数组
           if (typeof rawSteps === 'string') {
@@ -309,14 +332,14 @@ export function usePipeline() {
                 return { step: i + 1, description: String(s) };
               })
             : [];
-          store.setPlan({
+          usePipelineStore.getState().setPlan({
             summary: (data.summary as string) || '',
             detail: (data.detail as string) || '',
             steps: safeSteps,
             estimatedActions: (data.estimated_actions as number) || 0,
           });
-          store.initPlanSteps(safeSteps);
-          store.addEvent({
+          usePipelineStore.getState().initPlanSteps(safeSteps);
+          usePipelineStore.getState().addEvent({
             type: 'plan_proposed',
             data,
             timestamp: Date.now(),
@@ -324,7 +347,7 @@ export function usePipeline() {
         })
         .on('skill_created', (data) => {
           touchIdleTimer();
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'skill_created',
             data,
             timestamp: Date.now(),
@@ -332,7 +355,7 @@ export function usePipeline() {
         })
         .on('skill_updated', (data) => {
           touchIdleTimer();
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'skill_updated',
             data,
             timestamp: Date.now(),
@@ -340,13 +363,13 @@ export function usePipeline() {
         })
         .on('pipeline_complete', (data) => {
           touchIdleTimer();
-          store.completePlanSteps();
-          store.completePipeline(
+          usePipelineStore.getState().completePlanSteps();
+          usePipelineStore.getState().completePipeline(
             data.status as string,
             (data.duration_ms as number) || 0,
           );
-          store.addConversationTurn('assistant', '处理完成');
-          store.addEvent({
+          usePipelineStore.getState().addConversationTurn('assistant', '处理完成');
+          usePipelineStore.getState().addEvent({
             type: 'pipeline_complete',
             data,
             timestamp: Date.now(),
@@ -361,7 +384,7 @@ export function usePipeline() {
         .on('tool_executed', (data) => {
           touchIdleTimer();
           const toolName = (data.tool as string) || 'unknown';
-          store.addToolExecution({
+          usePipelineStore.getState().addToolExecution({
             id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             toolName,
             success: (data.success as boolean) ?? true,
@@ -371,7 +394,7 @@ export function usePipeline() {
             resultSummary: data.result_summary as string | undefined,
             blocked: data.blocked as boolean | undefined,
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'tool_executed',
             data,
             timestamp: Date.now(),
@@ -397,57 +420,57 @@ export function usePipeline() {
                 return { step: i + 1, description: String(s) };
               })
             : [];
-          store.initPlanSteps(safeSteps);
+          usePipelineStore.getState().initPlanSteps(safeSteps);
         })
         // ── 后端驱动 plan step 推进 ──
         .on('step_started', (data) => {
           touchIdleTimer();
-          store.startPlanStep(data.step_index as number);
+          usePipelineStore.getState().startPlanStep(data.step_index as number);
         })
         .on('step_completed', (data) => {
           touchIdleTimer();
-          store.completePlanStep(data.step_index as number, data.duration_ms as number | undefined);
+          usePipelineStore.getState().completePlanStep(data.step_index as number, data.duration_ms as number | undefined);
         })
         .on('step_failed', (data) => {
           touchIdleTimer();
-          store.failPlanStep(data.step_index as number);
+          usePipelineStore.getState().failPlanStep(data.step_index as number);
         })
         .on('browser_action', (data) => {
           touchIdleTimer();
-          store.addEvent({ type: 'browser_action', data, timestamp: Date.now() });
+          usePipelineStore.getState().addEvent({ type: 'browser_action', data, timestamp: Date.now() });
         })
         .on('browser_screenshot', (data) => {
           touchIdleTimer();
-          store.addEvent({ type: 'browser_screenshot', data, timestamp: Date.now() });
+          usePipelineStore.getState().addEvent({ type: 'browser_screenshot', data, timestamp: Date.now() });
         })
 
         // ── Phase 8: 增强错误处理 ──
         .on('error', (data) => {
           touchIdleTimer();
-          store.setError((data.message as string) || 'Unknown error');
+          usePipelineStore.getState().setError((data.message as string) || 'Unknown error');
           // Phase 8: 设置结构化错误详情
-          store.setErrorDetail({
+          usePipelineStore.getState().setErrorDetail({
             message: (data.message as string) || '',
             category: (data.category as string) || 'internal',
             affectedStep: (data.affected_step as string) || '',
             suggestedAction: (data.suggested_action as string) || '',
             traceId: (data.trace_id as string) || '',
           });
-          store.addEvent({ type: 'error', data, timestamp: Date.now() });
+          usePipelineStore.getState().addEvent({ type: 'error', data, timestamp: Date.now() });
         })
 
         // ── Phase 9: 部分结果 (工作流中途失败) ──
         .on('agent_partial_result', (data) => {
           touchIdleTimer();
-          store.setError(`部分完成: ${(data.error as string) || '工作流中途异常'}`);
-          store.setErrorDetail({
+          usePipelineStore.getState().setError(`部分完成: ${(data.error as string) || '工作流中途异常'}`);
+          usePipelineStore.getState().setErrorDetail({
             message: (data.error as string) || '工作流中途异常',
             category: 'partial_failure',
             affectedStep: (data.failed_step as string) || '',
             suggestedAction: (data.suggested_action as string) || '可保留已完成步骤的结果，手动处理未完成部分',
             traceId: (data.trace_id as string) || '',
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'agent_partial_result',
             data,
             timestamp: Date.now(),
@@ -457,7 +480,7 @@ export function usePipeline() {
         // ── Phase 13: 并行审查开始 ──
         .on('parallel_review_started', (data) => {
           touchIdleTimer();
-          store.setParallelReview({
+          usePipelineStore.getState().setParallelReview({
             roles: (data.roles as string[]) || [],
             status: 'running',
             overallStatus: '',
@@ -465,7 +488,7 @@ export function usePipeline() {
             results: [],
             durationMs: 0,
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'parallel_review_started',
             data,
             timestamp: Date.now(),
@@ -475,7 +498,7 @@ export function usePipeline() {
         // ── Phase 13: 并行审查结果 ──
         .on('parallel_review_result', (data) => {
           touchIdleTimer();
-          store.setParallelReview({
+          usePipelineStore.getState().setParallelReview({
             roles: (data.roles as string[]) || [],
             status: 'completed',
             overallStatus: (data.overall_status as string) || '',
@@ -489,7 +512,7 @@ export function usePipeline() {
             })),
             durationMs: (data.duration_ms as number) || 0,
           });
-          store.addEvent({
+          usePipelineStore.getState().addEvent({
             type: 'parallel_review_result',
             data,
             timestamp: Date.now(),
@@ -499,17 +522,17 @@ export function usePipeline() {
         // ── Phase 24: Agent 交互请求 ──
         .on('request_upload', (data) => {
           touchIdleTimer();
-          store.setPendingInteraction({
+          usePipelineStore.getState().setPendingInteraction({
             type: 'upload',
             prompt: (data.prompt as string) || '请上传文件',
             accept: (data.accept as string) || '*',
           });
-          store.addEvent({ type: 'request_upload', data, timestamp: Date.now() });
+          usePipelineStore.getState().addEvent({ type: 'request_upload', data, timestamp: Date.now() });
         })
         .on('request_confirmation', (data) => {
           touchIdleTimer();
           const rawOptions = (data.options as Array<Record<string, string>>) || [];
-          store.setPendingInteraction({
+          usePipelineStore.getState().setPendingInteraction({
             type: 'confirmation',
             message: (data.message as string) || '请确认',
             options: rawOptions.map((o) => ({
@@ -517,16 +540,16 @@ export function usePipeline() {
               value: o.value || o.label || '',
             })),
           });
-          store.addEvent({ type: 'request_confirmation', data, timestamp: Date.now() });
+          usePipelineStore.getState().addEvent({ type: 'request_confirmation', data, timestamp: Date.now() });
         })
         .on('request_input', (data) => {
           touchIdleTimer();
-          store.setPendingInteraction({
+          usePipelineStore.getState().setPendingInteraction({
             type: 'input',
             prompt: (data.prompt as string) || '请输入',
             fieldType: (data.field_type as string) || 'text',
           });
-          store.addEvent({ type: 'request_input', data, timestamp: Date.now() });
+          usePipelineStore.getState().addEvent({ type: 'request_input', data, timestamp: Date.now() });
         });
 
       // Start the idle timer before connecting.
@@ -550,17 +573,17 @@ export function usePipeline() {
 
           if (hasResults) {
             console.warn('[usePipeline] Stream ended without pipeline_complete, but has results — marking as completed');
-            store.completePipeline('success', Date.now() - (state.startedAt || Date.now()));
+            usePipelineStore.getState().completePipeline('success', Date.now() - (state.startedAt || Date.now()));
           } else {
             console.warn('[usePipeline] Stream ended without pipeline_complete and no results — marking as failed');
-            store.setError('连接已断开，未收到完整结果');
+            usePipelineStore.getState().setError('连接已断开，未收到完整结果');
           }
         }
 
         isInvokingRef.current = false;
       }
     },
-    [store, resetIdleTimer, clearIdleTimer],
+    [resetIdleTimer, clearIdleTimer],
   );
 
   const cancel = useCallback(() => {
@@ -572,30 +595,26 @@ export function usePipeline() {
   return {
     invoke,
     cancel,
-    // Expose all store state for component consumption
-    status: store.status,
-    scenario: store.scenario,
-    traceId: store.traceId,
-    sessionId: store.sessionId,
-    conversationHistory: store.conversationHistory,
-    plan: store.plan,
-    steps: store.steps,
-    currentStep: store.currentStep,
-    inferredType: store.inferredType,
-    fieldValues: store.fieldValues,
-    auditSummary: store.auditSummary,
-    document: store.document,
-    startedAt: store.startedAt,
-    completedAt: store.completedAt,
-    durationMs: store.durationMs,
-    eventLog: store.eventLog,
-    error: store.error,
-    // Phase 8
-    errorDetail: store.errorDetail,
-    // Phase 9
-    workflowPhase: store.workflowPhase,
-    workflowProgress: store.workflowProgress,
-    // Phase 13
-    parallelReview: store.parallelReview,
+    status,
+    scenario,
+    traceId,
+    sessionId,
+    conversationHistory,
+    plan,
+    steps,
+    currentStep,
+    inferredType,
+    fieldValues,
+    auditSummary,
+    document,
+    startedAt,
+    completedAt,
+    durationMs,
+    eventLog,
+    error,
+    errorDetail,
+    workflowPhase,
+    workflowProgress,
+    parallelReview,
   };
 }

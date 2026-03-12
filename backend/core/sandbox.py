@@ -85,10 +85,13 @@ class SandboxManager:
     - 速率限制
     """
 
+    _RATE_CLEANUP_INTERVAL = 300  # 5 minutes
+
     def __init__(self, config: SandboxConfig | None = None, backend_root: str = "") -> None:
         self.config = config or SandboxConfig()
         self._backend_root = backend_root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self._rate_counters: dict[str, list[float]] = {}  # session_id -> [timestamp, ...]
+        self._last_rate_cleanup: float = 0.0
 
     # ── 6a. 文件操作沙箱 ──
 
@@ -420,6 +423,18 @@ class SandboxManager:
 
     # ── 速率限制 ──
 
+    def cleanup_stale_counters(self) -> int:
+        """清理过期的速率限制计数器，返回清理数量。"""
+        now = time.time()
+        window = 60.0
+        stale_keys = [
+            key for key, timestamps in self._rate_counters.items()
+            if not any(t > now - window for t in timestamps)
+        ]
+        for key in stale_keys:
+            del self._rate_counters[key]
+        return len(stale_keys)
+
     def check_rate_limit(self, session_id: str, tenant_id: str = "") -> bool:
         """
         检查单会话速率限制。
@@ -432,6 +447,11 @@ class SandboxManager:
             True 如果允许, False 如果超限。
         """
         now = time.time()
+
+        # 定期清理过期计数器
+        if now - self._last_rate_cleanup > self._RATE_CLEANUP_INTERVAL:
+            self.cleanup_stale_counters()
+            self._last_rate_cleanup = now
         window = 60.0  # 1 分钟窗口
         key = f"{tenant_id}:{session_id}" if tenant_id else session_id
 

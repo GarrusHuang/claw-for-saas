@@ -242,3 +242,84 @@ describe('SSE Auth Tests', () => {
     expect(callHeaders['Content-Type']).toBe('application/json');
   });
 });
+
+// ── B9: connected 标志位 ──
+
+describe('SSE Connected Flag (B9)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetConfig();
+    configureAI({ aiBaseUrl: 'http://test-api' });
+  });
+
+  it('connected is false before connect', () => {
+    const client = new AgentSSEClient('http://test-api/api/chat', { message: 'hi' });
+    expect(client.connected).toBe(false);
+  });
+
+  it('connected is false after stream ends', async () => {
+    mockSSEResponse();
+    const client = new AgentSSEClient('http://test-api/api/chat', { message: 'hi' });
+    await client.connect();
+    // 流结束后 connected 应为 false
+    expect(client.connected).toBe(false);
+  });
+
+  it('connected is false on HTTP error', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      headers: new Headers(),
+    });
+    const client = new AgentSSEClient('http://test-api/api/chat', { message: 'hi' });
+    client.maxRetries = 0;
+    try { await client.connect(); } catch { /* expected */ }
+    expect(client.connected).toBe(false);
+  });
+});
+
+// ── B10: 多行 SSE data 累加 ──
+
+describe('SSE Multi-line Data (B10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetConfig();
+    configureAI({ aiBaseUrl: 'http://test-api' });
+  });
+
+  it('accumulates multi-line data fields into valid JSON', async () => {
+    const encoder = new TextEncoder();
+    const dispatched: Record<string, unknown>[] = [];
+
+    // 模拟多行 data 的 SSE 流 — JSON 拆成多行 (符合 SSE 规范)
+    // 完整 JSON: {"key":"value","num":42}
+    // 拆为: data: {"key":"value", 和 data: "num":42}
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers(),
+      body: {
+        getReader: () => ({
+          read: vi.fn()
+            .mockResolvedValueOnce({
+              done: false,
+              value: encoder.encode(
+                'event: test\ndata: {"key":"value",\ndata: "num":42}\n\n'
+              ),
+            })
+            .mockResolvedValue({ done: true }),
+        }),
+      },
+    });
+
+    const client = new AgentSSEClient('http://test-api/api/chat', { message: 'hi' });
+    client.on('test', (data: Record<string, unknown>) => {
+      dispatched.push(data);
+    });
+    await client.connect();
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].key).toBe('value');
+    expect(dispatched[0].num).toBe(42);
+  });
+});

@@ -13,7 +13,7 @@ import {
   ImportOutlined,
 } from '@ant-design/icons';
 import {
-  useAIChatStore, usePipelineStore, aiApi,
+  useAIChatStore, usePipelineStore, aiApi, getAIConfig,
   type SessionInfo, type SkillMetadata, type SkillDetail,
 } from '@claw/core';
 import SkillEditorModal from '../skills/SkillEditorModal.tsx';
@@ -58,8 +58,6 @@ const SKILL_TYPE_COLOR: Record<string, string> = {
   capability: '#f50',
 };
 
-const DEFAULT_USER_ID = 'U001';
-
 export default function CoworkSidebar() {
   const currentSessionId = usePipelineStore((s) => s.sessionId);
   const dispatchSessionAction = useAIChatStore((s) => s.dispatchSessionAction);
@@ -79,7 +77,7 @@ export default function CoworkSidebar() {
   // ── Session fetching ──
   const fetchSessions = useCallback(async () => {
     try {
-      const list = await apiListSessions(DEFAULT_USER_ID);
+      const list = await apiListSessions(getAIConfig().defaultUserId);
       setSessions(list);
     } catch (err) {
       console.warn('[CoworkSidebar] Failed to fetch sessions:', err);
@@ -155,28 +153,28 @@ export default function CoworkSidebar() {
     <div className="cowork-sidebar">
       {/* ── Function entries ── */}
       <div className="cowork-sidebar-entries">
-        <div className="sidebar-entry" onClick={handleNewSession}>
+        <div className="sidebar-entry" role="button" tabIndex={0} onClick={handleNewSession} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNewSession(); } }}>
           <PlusOutlined style={{ fontSize: 13 }} />
-          <span>New task</span>
+          <span>新任务</span>
         </div>
         <div className="sidebar-entry sidebar-entry--disabled">
           <SearchOutlined style={{ fontSize: 13 }} />
-          <span>Search</span>
+          <span>搜索</span>
         </div>
         <div className="sidebar-entry sidebar-entry--disabled">
           <CalendarOutlined style={{ fontSize: 13 }} />
-          <span>Scheduled</span>
+          <span>定时任务</span>
         </div>
-        <div className="sidebar-entry" onClick={handleSkillsClick}>
+        <div className="sidebar-entry" role="button" tabIndex={0} onClick={handleSkillsClick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSkillsClick(); } }}>
           <BulbOutlined style={{ fontSize: 13 }} />
-          <span>Skills</span>
+          <span>技能</span>
           <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>
             {skills.length > 0 ? skills.length : ''}
           </span>
         </div>
         <div className="sidebar-entry sidebar-entry--disabled">
           <SettingOutlined style={{ fontSize: 13 }} />
-          <span>Customize</span>
+          <span>自定义</span>
         </div>
       </div>
 
@@ -186,14 +184,14 @@ export default function CoworkSidebar() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
             <Input
               prefix={<SearchOutlined style={{ color: '#bbb', fontSize: 10 }} />}
-              placeholder="Search skills..."
+              placeholder="搜索技能..."
               size="small"
               allowClear
               value={skillSearch}
               onChange={(e) => setSkillSearch(e.target.value)}
               style={{ flex: 1, borderRadius: 4, fontSize: 11 }}
             />
-            <Tooltip title="Create">
+            <Tooltip title="创建">
               <Button
                 type="text"
                 size="small"
@@ -201,7 +199,7 @@ export default function CoworkSidebar() {
                 onClick={() => { setEditData(null); setEditorOpen(true); }}
               />
             </Tooltip>
-            <Tooltip title="Import">
+            <Tooltip title="导入">
               <Button
                 type="text"
                 size="small"
@@ -213,14 +211,17 @@ export default function CoworkSidebar() {
           {skillsLoading ? (
             <div style={{ textAlign: 'center', padding: 12 }}><Spin size="small" /></div>
           ) : filteredSkills.length === 0 ? (
-            <Empty description="No skills" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '8px 0' }} imageStyle={{ height: 24 }} />
+            <Empty description="暂无技能" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '8px 0' }} imageStyle={{ height: 24 }} />
           ) : (
             <div style={{ maxHeight: 200, overflow: 'auto' }}>
               {filteredSkills.map((skill) => (
                 <div
                   key={skill.name}
                   className="cowork-sidebar-skill-item"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSkillClick(skill.name)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSkillClick(skill.name); } }}
                 >
                   <Text style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {skill.name}
@@ -232,11 +233,11 @@ export default function CoworkSidebar() {
                     {skill.type || '?'}
                   </Tag>
                   <Popconfirm
-                    title={`Delete "${skill.name}"?`}
+                    title={`删除 "${skill.name}"?`}
                     onConfirm={(e) => { e?.stopPropagation(); handleSkillDelete(skill.name); }}
                     onCancel={(e) => e?.stopPropagation()}
-                    okText="Delete"
-                    cancelText="Cancel"
+                    okText="删除"
+                    cancelText="取消"
                     okButtonProps={{ danger: true, size: 'small' }}
                     cancelButtonProps={{ size: 'small' }}
                   >
@@ -255,7 +256,7 @@ export default function CoworkSidebar() {
 
       {/* ── Recents ── */}
       <div className="cowork-sidebar-section-title" style={{ marginTop: 8 }}>
-        <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>Recents</Text>
+        <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>最近</Text>
         <Text type="secondary" style={{ fontSize: 10, marginLeft: 'auto' }}>
           {sessions.length}
         </Text>
@@ -272,7 +273,10 @@ export default function CoworkSidebar() {
               <div
                 key={session.session_id}
                 className={`cowork-sidebar-session-item${isActive ? ' cowork-sidebar-session-item--active' : ''}`}
+                role="button"
+                tabIndex={0}
                 onClick={() => handleSelectSession(session.session_id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectSession(session.session_id); } }}
               >
                 <Text
                   style={{
@@ -299,7 +303,7 @@ export default function CoworkSidebar() {
       {/* ── Bottom note ── */}
       <div style={{ marginTop: 'auto', padding: '12px 8px' }}>
         <Text type="secondary" style={{ fontSize: 10, lineHeight: '14px' }}>
-          These tasks run locally and aren't synced across devices.
+          这些任务在本地运行，不会跨设备同步。
         </Text>
       </div>
 

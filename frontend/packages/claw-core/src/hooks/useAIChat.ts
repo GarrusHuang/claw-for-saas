@@ -47,7 +47,6 @@ export function useAIChat() {
   const agentMessage = usePipelineStore((s) => s.agentMessage);
   const streamingText = usePipelineStore((s) => s.streamingText);
   const isStreaming = usePipelineStore((s) => s.isStreaming);
-  const pipelineStore = usePipelineStore();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -125,7 +124,7 @@ export function useAIChat() {
 
     if (sessionAction.type === 'new') {
       setMessages([]);
-      pipelineStore.reset();
+      usePipelineStore.getState().reset();
       setActiveScenario(null);
       autoStartedRef.current = null;
       prevAgentMessageRef.current = null;
@@ -143,8 +142,8 @@ export function useAIChat() {
               timestamp: Date.now() - (detail.messages.length - i) * 1000,
             }));
           setMessages(loaded);
-          pipelineStore.reset();
-          pipelineStore.setSessionId(sessionId);
+          usePipelineStore.getState().reset();
+          usePipelineStore.getState().setSessionId(sessionId);
           autoStartedRef.current = 'loaded';
           prevAgentMessageRef.current = null;
         } catch (e) {
@@ -155,7 +154,7 @@ export function useAIChat() {
     }
 
     clearSessionAction();
-  }, [sessionAction, clearSessionAction, pipelineStore, setActiveScenario, defaultUserId]);
+  }, [sessionAction, clearSessionAction, setActiveScenario, defaultUserId]);
 
   /** 发送用户消息并调用 Pipeline */
   const sendMessage = useCallback(

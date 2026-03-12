@@ -4,7 +4,7 @@ import { AIChatDialog, ClawFloatingButton } from '@claw/ui';
 import LoginPage from './LoginPage';
 
 export default function App() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const userId = useAuthStore((s) => s.userId);
   const restore = useAuthStore((s) => s.restore);
 

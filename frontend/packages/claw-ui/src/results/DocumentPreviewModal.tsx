@@ -14,6 +14,7 @@ import {
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { GeneratedDocument } from '@claw/core';
+import { downloadAsFile, downloadFromUrl, copyToClipboard } from '../utils/download';
 
 const { Text } = Typography;
 
@@ -21,45 +22,6 @@ interface DocumentPreviewModalProps {
   open: boolean;
   onClose: () => void;
   document: GeneratedDocument | null;
-}
-
-function downloadAsFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function downloadFromUrl(url: string, filename: string) {
-  fetch(url)
-    .then((res) => {
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-      return res.blob();
-    })
-    .then((blob) => {
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(blobUrl);
-    })
-    .catch((err) => console.error('Download error:', err));
-}
-
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text).catch(() => {
-    // Fallback for non-secure contexts
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-  });
 }
 
 export default function DocumentPreviewModal({
