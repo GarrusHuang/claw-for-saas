@@ -246,6 +246,66 @@ export async function listTools(): Promise<ToolInfo[]> {
   return data.tools.map((t) => ({ ...t, read_only: t.read_only ?? false }));
 }
 
+// ── Schedules ──
+
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  cron: string;
+  message: string;
+  user_id: string;
+  tenant_id: string;
+  business_type: string;
+  enabled: boolean;
+  created_at: number;
+  last_run_at: number | null;
+  last_run_status: string;       // "success" | "failed" | ""
+  next_run_at: number | null;
+}
+
+export interface ScheduleCreatePayload {
+  name: string;
+  cron: string;
+  message: string;
+  business_type?: string;
+}
+
+export interface ScheduleUpdatePayload {
+  name?: string;
+  cron?: string;
+  message?: string;
+  business_type?: string;
+  enabled?: boolean;
+}
+
+export async function listSchedules(): Promise<{ tasks: ScheduledTask[]; total: number }> {
+  return apiFetch('/api/schedules');
+}
+
+export async function createSchedule(data: ScheduleCreatePayload): Promise<ScheduledTask> {
+  return apiFetch('/api/schedules', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function getSchedule(taskId: string): Promise<ScheduledTask> {
+  return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}`);
+}
+
+export async function updateSchedule(taskId: string, data: ScheduleUpdatePayload): Promise<ScheduledTask> {
+  return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteSchedule(taskId: string): Promise<{ status: string; task_id: string }> {
+  return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+}
+
+export async function pauseSchedule(taskId: string): Promise<{ status: string; task_id: string }> {
+  return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}/pause`, { method: 'POST' });
+}
+
+export async function resumeSchedule(taskId: string): Promise<{ status: string; task_id: string }> {
+  return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+}
+
 // ── Error Utilities (re-export from sse.ts, single source of truth) ──
 
 export { isNetworkError } from './sse.ts';
