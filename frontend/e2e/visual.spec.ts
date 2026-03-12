@@ -231,3 +231,165 @@ test.describe('F5: Schedule View', () => {
     await expect(entry).toBeVisible();
   });
 });
+
+// ── F5: Schedule CRUD 全流程 (API mock) ──
+
+test.describe('F5: Schedule CRUD', () => {
+  const mockTasks = [
+    {
+      id: 'task-e2e-1',
+      name: '每日审计',
+      cron: '0 9 * * *',
+      message: '执行每日审计',
+      user_id: 'admin',
+      tenant_id: 'default',
+      business_type: 'scheduled_task',
+      enabled: true,
+      created_at: Date.now() / 1000 - 86400,
+      last_run_at: Date.now() / 1000 - 3600,
+      last_run_status: 'success',
+      next_run_at: Date.now() / 1000 + 3600,
+    },
+    {
+      id: 'task-e2e-2',
+      name: '周报生成',
+      cron: '0 9 * * 1',
+      message: '生成周报',
+      user_id: 'admin',
+      tenant_id: 'default',
+      business_type: 'scheduled_task',
+      enabled: false,
+      created_at: Date.now() / 1000 - 172800,
+      last_run_at: null,
+      last_run_status: '',
+      next_run_at: null,
+    },
+  ];
+
+  test.beforeEach(async ({ page }) => {
+    // 注入 token
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => {
+      localStorage.setItem('claw_auth_token', 'e2e-test-token');
+      localStorage.setItem('claw_auth_user', JSON.stringify({
+        userId: 'admin',
+        tenantId: 'default',
+        expiresAt: Date.now() + 86400000,
+      }));
+    });
+
+    // Mock schedule API
+    await page.route('**/api/schedules', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({ json: { tasks: mockTasks, total: mockTasks.length } });
+      } else if (route.request().method() === 'POST') {
+        route.fulfill({ json: { id: 'task-new', name: 'new', cron: '0 9 * * *' } });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.route('**/api/schedules/*/pause', (route) => {
+      route.fulfill({ json: { status: 'paused', task_id: 'task-e2e-1' } });
+    });
+
+    await page.route('**/api/schedules/*/resume', (route) => {
+      route.fulfill({ json: { status: 'resumed', task_id: 'task-e2e-2' } });
+    });
+
+    await page.route('**/api/schedules/*', (route) => {
+      if (route.request().method() === 'DELETE') {
+        route.fulfill({ json: { status: 'deleted', task_id: 'task-e2e-1' } });
+      } else if (route.request().method() === 'PUT') {
+        route.fulfill({ json: { id: 'task-e2e-1', name: 'updated' } });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+  });
+
+  test('schedule list shows tasks from API', async ({ page }) => {
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    // 验证任务列表渲染
+    await expect(page.locator('text=每日审计')).toBeVisible();
+    await expect(page.locator('text=周报生成')).toBeVisible();
+    await expect(page.locator('text=每天 09:00')).toBeVisible();
+    await expect(page.locator('text=每周一 09:00')).toBeVisible();
+
+    await page.screenshot({ path: 'e2e/screenshots/schedule-list-data.png', fullPage: true });
+  });
+
+  test('create form renders with all fields', async ({ page }) => {
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    // 点击新建
+    await page.click('button:has-text("新建任务")');
+    await page.waitForTimeout(500);
+
+    // 验证表单
+    await expect(page.locator('h2', { hasText: '创建任务' })).toBeVisible();
+    await expect(page.locator('text=标题')).toBeVisible();
+    await expect(page.locator('text=提示词')).toBeVisible();
+    await expect(page.locator('text=计划')).toBeVisible();
+    await expect(page.locator('text=业务类型')).toBeVisible();
+    await expect(page.locator('text=返回任务列表')).toBeVisible();
+
+    // CronPicker 默认显示 "每天"
+    await expect(page.locator('text=每天')).toBeVisible();
+
+    await page.screenshot({ path: 'e2e/screenshots/schedule-create-form.png', fullPage: true });
+  });
+
+  test('back button returns to list from create form', async ({ page }) => {
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    await page.click('button:has-text("新建任务")');
+    await page.waitForTimeout(500);
+    await expect(page.locator('h2', { hasText: '创建任务' })).toBeVisible();
+
+    // 点击返回
+    await page.click('text=返回任务列表');
+    await page.waitForTimeout(500);
+
+    // 回到列表
+    await expect(page.locator('text=每日审计')).toBeVisible();
+  });
+
+  test('schedule list shows status indicators', async ({ page }) => {
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    // 成功状态点
+    await expect(page.locator('.schedule-status-dot--success')).toBeVisible();
+    // 无执行记录状态点
+    await expect(page.locator('.schedule-status-dot--none')).toBeVisible();
+    // Switch 开关
+    const switches = page.locator('.ant-switch');
+    await expect(switches).toHaveCount(2);
+  });
+
+  test('empty table shows placeholder', async ({ page }) => {
+    // 覆盖为空列表
+    await page.route('**/api/schedules', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({ json: { tasks: [], total: 0 } });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.click('.cowork-sidebar >> text=定时任务');
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('text=暂无定时任务')).toBeVisible();
+  });
+});
