@@ -9,6 +9,8 @@ import { usePipelineStore } from './pipeline.ts';
 
 export type ChatDialogState = 'closed' | 'fullscreen' | 'sidepanel';
 
+export type ContentView = 'chat' | 'schedule';  // F6 时扩展 'skills'
+
 export type SessionAction =
   | { type: 'new' }
   | { type: 'load'; sessionId: string }
@@ -17,6 +19,9 @@ export type SessionAction =
 export interface AIChatState {
   chatDialogState: ChatDialogState;
   setChatDialogState: (state: ChatDialogState) => void;
+
+  contentView: ContentView;
+  setContentView: (view: ContentView) => void;
 
   activeScenario: string | null;
   setActiveScenario: (scenario: string | null) => void;
@@ -33,22 +38,24 @@ export const useAIChatStore = create<AIChatState>((set) => ({
   chatDialogState: 'closed',
   setChatDialogState: (chatDialogState) => set({ chatDialogState }),
 
+  contentView: 'chat',
+  setContentView: (contentView) => set({ contentView }),
+
   activeScenario: null,
   setActiveScenario: (activeScenario) => set({ activeScenario }),
 
   sessionAction: null,
-  dispatchSessionAction: (sessionAction) => set({ sessionAction }),
+  dispatchSessionAction: (sessionAction) => set({ sessionAction, contentView: 'chat' }),
   clearSessionAction: () => set({ sessionAction: null }),
 
   openChat: (scenario) => {
     const currentScenario = useAIChatStore.getState().activeScenario;
-    // 场景切换时重置 pipeline (清除 sessionId 和所有结果)
     if (scenario !== currentScenario) {
       usePipelineStore.getState().reset();
     }
-    set({ chatDialogState: 'fullscreen', activeScenario: scenario });
+    set({ chatDialogState: 'fullscreen', activeScenario: scenario, contentView: 'chat' });
   },
 
   closeChat: () =>
-    set({ chatDialogState: 'closed', activeScenario: null }),
+    set({ chatDialogState: 'closed', activeScenario: null, contentView: 'chat' }),
 }));
