@@ -45,6 +45,7 @@ export type {
 
 // ── Stores ──
 export { usePipelineStore } from './stores/pipeline.ts';
+export type { TimelineEntry } from './stores/pipeline.ts';
 export { useAIChatStore } from './stores/ai-chat.ts';
 export type { ChatDialogState, ContentView, SessionAction, AIChatState } from './stores/ai-chat.ts';
 export { useAuthStore } from './stores/auth.ts';
@@ -55,7 +56,7 @@ export { AgentSSEClient } from './services/sse.ts';
 export type { SSEEventType, SSEEvent, SSEClientOptions } from './services/sse.ts';
 export * as aiApi from './services/ai-api.ts';
 export type {
-  SessionInfo, SessionDetail,
+  SessionInfo, SessionDetail, SearchResult,
   SkillMetadata, SkillDetail, SkillCreatePayload,
   MemoryStats,
   FileInfo, ToolInfo,
@@ -67,4 +68,4 @@ export type {
 export { usePipeline } from './hooks/usePipeline.ts';
 export type { InvokeParams } from './hooks/usePipeline.ts';
 export { useAIChat } from './hooks/useAIChat.ts';
-export type { ChatMessage } from './hooks/useAIChat.ts';
+export type { ChatMessage, ChatMessageFile, ChatTimelineEntry } from './hooks/useAIChat.ts';
