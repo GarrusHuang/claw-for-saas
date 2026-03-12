@@ -76,6 +76,61 @@ class AgentGateway:
             max_tokens_per_turn=4096,
         )
 
+    # 会话摘要最大保留条数
+    _MAX_CONVERSATION_ENTRIES = 20
+
+    def _auto_save_memory(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        message: str,
+        answer: str,
+    ) -> None:
+        """
+        对话结束后自动保存会话摘要到记忆 (OpenClaw Session Memory Hook 模式)。
+
+        不做特定模式匹配，直接保存用户消息 + 回复摘要到 conversations.md。
+        下次会话时 build_memory_prompt() 会将其注入 <memory> 标签，
+        LLM 自然地从历史对话中获取用户偏好、上下文等信息。
+        """
+        if not self.memory_store:
+            return
+
+        try:
+            from datetime import datetime
+
+            # 保存用户消息 + 回复摘要
+            user_summary = message[:200].replace("\n", " ").strip()
+            answer_summary = (answer or "")[:200].replace("\n", " ").strip()
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            entry = f"\n### {ts}\n- 用户: {user_summary}\n- 回复: {answer_summary}\n"
+
+            self.memory_store.write_file(
+                scope="user", filename="conversations.md",
+                content=entry, mode="append",
+                tenant_id=tenant_id, user_id=user_id,
+            )
+
+            # 超过条数限制时裁剪，保留最近的
+            conv_content = self.memory_store.read_file(
+                scope="user", filename="conversations.md",
+                tenant_id=tenant_id, user_id=user_id,
+            )
+            sections = conv_content.split("\n### ")
+            if len(sections) > self._MAX_CONVERSATION_ENTRIES:
+                kept = sections[-self._MAX_CONVERSATION_ENTRIES:]
+                trimmed = "### " + "\n### ".join(kept)
+                self.memory_store.write_file(
+                    scope="user", filename="conversations.md",
+                    content=trimmed, mode="rewrite",
+                    tenant_id=tenant_id, user_id=user_id,
+                )
+                logger.info(f"Trimmed conversations.md for user {user_id}")
+
+        except Exception as e:
+            logger.warning(f"Auto-save memory failed: {e}")
+
     async def chat(
         self,
         *,
@@ -164,8 +219,10 @@ class AgentGateway:
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):
             logger.info(f"Resuming session: {session_id}")
         else:
+            # 用用户首条消息生成会话标题
+            title = (message[:60].strip() + "...") if len(message) > 60 else message.strip()
             session_id = self.session_manager.create_session(
-                tenant_id, user_id, {"business_type": business_type}
+                tenant_id, user_id, {"business_type": business_type, "title": title}
             )
             logger.info(f"New session: {session_id}")
 
@@ -324,6 +381,14 @@ class AgentGateway:
         self.session_manager.append_message(
             tenant_id, user_id, session_id,
             {"role": "assistant", "content": result.final_answer, "ts": time.time()},
+        )
+
+        # ── 9b. 自动保存记忆 (OpenClaw 模式: 不依赖 LLM 调用) ──
+        self._auto_save_memory(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            message=message,
+            answer=result.final_answer or "",
         )
 
         # 上下文压缩检查

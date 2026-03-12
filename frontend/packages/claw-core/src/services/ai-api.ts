@@ -66,16 +66,16 @@ export interface SessionDetail {
   message_count: number;
 }
 
-export async function listSessions(userId: string): Promise<SessionInfo[]> {
+export async function listSessions(_userId?: string): Promise<SessionInfo[]> {
   const data = await apiFetch<{ sessions: SessionInfo[] }>(
-    `/api/session/${encodeURIComponent(userId)}/list`,
+    `/api/session/list`,
   );
   return data.sessions;
 }
 
-export async function getSessionHistory(userId: string, sessionId: string): Promise<SessionDetail> {
+export async function getSessionHistory(_userId: string, sessionId: string): Promise<SessionDetail> {
   return apiFetch(
-    `/api/session/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`,
+    `/api/session/${encodeURIComponent(sessionId)}`,
   );
 }
 
