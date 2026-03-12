@@ -18,7 +18,6 @@ interface AIChatDialogProps {
  */
 export default function AIChatDialog({ onResize }: AIChatDialogProps) {
   const chatDialogState = useAIChatStore((s) => s.chatDialogState);
-  const closeChat = useAIChatStore((s) => s.closeChat);
 
   const {
     messages,
@@ -70,7 +69,7 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
       <ChatInput
         onSend={(text, files) => sendMessage(text, undefined, files)}
         disabled={isRunning}
-        placeholder="Reply..."
+        placeholder="回复..."
       />
     </div>
   );

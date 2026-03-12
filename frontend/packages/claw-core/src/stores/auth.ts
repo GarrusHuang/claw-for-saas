@@ -28,19 +28,20 @@ export interface AuthState {
   /** 从 localStorage 恢复 */
   restore: () => void;
   /** 是否已认证 */
-  isAuthenticated: () => boolean;
+  isAuthenticated: boolean;
 }
 
 const TOKEN_KEY = 'claw_auth_token';
 const USER_KEY = 'claw_auth_user';
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   userId: null,
   tenantId: null,
   expiresAt: null,
   loading: false,
   error: null,
+  isAuthenticated: false,
 
   login: async (username, password, tenantId = 'default') => {
     set({ loading: true, error: null });
@@ -77,6 +78,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         expiresAt,
         loading: false,
         error: null,
+        isAuthenticated: true,
       });
 
       return true;
@@ -89,7 +91,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    set({ token: null, userId: null, tenantId: null, expiresAt: null, error: null });
+    set({ token: null, userId: null, tenantId: null, expiresAt: null, error: null, isAuthenticated: false });
   },
 
   restore: () => {
@@ -103,7 +105,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (user.expiresAt && Date.now() > user.expiresAt) {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
-        set({ token: null, userId: null, tenantId: null, expiresAt: null });
+        set({ token: null, userId: null, tenantId: null, expiresAt: null, isAuthenticated: false });
         return;
       }
       set({
@@ -111,18 +113,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         userId: user.userId,
         tenantId: user.tenantId,
         expiresAt: user.expiresAt,
+        isAuthenticated: true,
       });
     } catch {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
-      set({ token: null, userId: null, tenantId: null, expiresAt: null });
+      set({ token: null, userId: null, tenantId: null, expiresAt: null, isAuthenticated: false });
     }
-  },
-
-  isAuthenticated: () => {
-    const { token, expiresAt } = get();
-    if (!token) return false;
-    if (expiresAt && Date.now() > expiresAt) return false;
-    return true;
   },
 }));

@@ -39,7 +39,7 @@ vi.mock('../src/skills/ImportModal.tsx', () => ({
 // ── Tests ──
 
 describe('CoworkSidebar', () => {
-  it('renders "New task" entry', async () => {
+  it('renders "新任务" entry', async () => {
     const { default: CoworkSidebar } = await import(
       '../src/chat/CoworkSidebar.tsx'
     );
@@ -48,7 +48,7 @@ describe('CoworkSidebar', () => {
       render(<CoworkSidebar />);
     });
 
-    expect(screen.getByText('New task')).toBeInTheDocument();
+    expect(screen.getByText('新任务')).toBeInTheDocument();
   });
 
   it('renders Recents section title', async () => {
@@ -60,7 +60,7 @@ describe('CoworkSidebar', () => {
       render(<CoworkSidebar />);
     });
 
-    expect(screen.getByText('Recents')).toBeInTheDocument();
+    expect(screen.getByText('最近')).toBeInTheDocument();
   });
 
   it('shows "暂无会话" when no sessions', async () => {
@@ -84,9 +84,9 @@ describe('CoworkSidebar', () => {
       render(<CoworkSidebar />);
     });
 
-    expect(screen.getByText('Skills')).toBeInTheDocument();
-    expect(screen.getByText('Search')).toBeInTheDocument();
-    expect(screen.getByText('Scheduled')).toBeInTheDocument();
-    expect(screen.getByText('Customize')).toBeInTheDocument();
+    expect(screen.getByText('技能')).toBeInTheDocument();
+    expect(screen.getByText('搜索')).toBeInTheDocument();
+    expect(screen.getByText('定时任务')).toBeInTheDocument();
+    expect(screen.getByText('自定义')).toBeInTheDocument();
   });
 });

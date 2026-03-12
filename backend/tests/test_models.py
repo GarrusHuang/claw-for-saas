@@ -43,6 +43,18 @@ class TestChatRequest:
         with pytest.raises(Exception):
             ChatRequest()
 
+    # ── A6: message max_length ──
+
+    def test_message_max_length_accepted(self):
+        """100K 字符以内的消息应被接受。"""
+        req = ChatRequest(message="x" * 100_000)
+        assert len(req.message) == 100_000
+
+    def test_message_exceeds_max_length(self):
+        """超过 100K 字符的消息应被拒绝。"""
+        with pytest.raises(Exception):
+            ChatRequest(message="x" * 100_001)
+
 
 class TestMaterialInfo:
     def test_defaults(self):

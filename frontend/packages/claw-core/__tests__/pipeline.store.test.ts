@@ -201,6 +201,23 @@ describe('Pipeline Store', () => {
     expect(usePipelineStore.getState().eventLog[0].type).toBe('type_inferred');
   });
 
+  // ── B6: eventLog 上限 ──
+
+  it('addEvent caps eventLog at 500 entries', () => {
+    const store = usePipelineStore.getState();
+
+    // 添加 510 条事件
+    for (let i = 0; i < 510; i++) {
+      store.addEvent({ type: `evt_${i}`, data: {}, timestamp: i });
+    }
+
+    const log = usePipelineStore.getState().eventLog;
+    expect(log.length).toBe(500);
+    // 最早的 10 条应被丢弃，保留 evt_10 ~ evt_509
+    expect(log[0].type).toBe('evt_10');
+    expect(log[499].type).toBe('evt_509');
+  });
+
   // ── updateStepProgress ──
 
   it('updateStepProgress maps status correctly', () => {

@@ -233,6 +233,50 @@ class TestRateLimit:
         assert info["remaining"] == 3
 
 
+# ── A8: 速率计数器清理 ──
+
+class TestRateCounterCleanup:
+    """Tests for cleanup_stale_counters (A8)."""
+
+    def test_cleanup_removes_stale_counters(self, sandbox):
+        """过期计数器应被清理。"""
+        import time as _time
+        # 插入一个 61 秒前的计数
+        sandbox._rate_counters["old_sess"] = [_time.time() - 61]
+        removed = sandbox.cleanup_stale_counters()
+        assert removed == 1
+        assert "old_sess" not in sandbox._rate_counters
+
+    def test_cleanup_keeps_active_counters(self, sandbox):
+        """活跃计数器不应被清理。"""
+        import time as _time
+        sandbox._rate_counters["active_sess"] = [_time.time()]
+        removed = sandbox.cleanup_stale_counters()
+        assert removed == 0
+        assert "active_sess" in sandbox._rate_counters
+
+    def test_cleanup_mixed(self, sandbox):
+        """混合场景：同时存在过期和活跃计数器。"""
+        import time as _time
+        now = _time.time()
+        sandbox._rate_counters["stale1"] = [now - 120]
+        sandbox._rate_counters["stale2"] = [now - 90]
+        sandbox._rate_counters["fresh"] = [now - 5]
+        removed = sandbox.cleanup_stale_counters()
+        assert removed == 2
+        assert "fresh" in sandbox._rate_counters
+
+    def test_periodic_cleanup_triggered(self, sandbox):
+        """check_rate_limit 应每 5 分钟自动触发清理。"""
+        import time as _time
+        sandbox._rate_counters["old"] = [_time.time() - 120]
+        # 模拟上次清理在 6 分钟前
+        sandbox._last_rate_cleanup = _time.time() - 360
+        sandbox.check_rate_limit("new_sess")
+        # 过期计数器应已被清理
+        assert "old" not in sandbox._rate_counters
+
+
 # ──────────────────────────────────────────────
 # 6b: 命令执行沙箱
 # ──────────────────────────────────────────────

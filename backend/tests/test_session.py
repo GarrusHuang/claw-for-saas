@@ -99,3 +99,64 @@ class TestSessionManager:
         msgs = self.sm.load_messages(TENANT, USER, sid)
         assert len(msgs) == 1
         assert msgs[0]["content"] == "real msg"
+
+    # ── A5: compact 原子写 ──
+
+    def test_compact_atomic_write_no_temp_files(self):
+        """compact 完成后不应残留 .tmp 文件 (A5: 原子写)。"""
+        import asyncio
+
+        sid = self.sm.create_session(TENANT, USER)
+        # 写入足够多消息以触发压缩 (需 > max_recent*2 = 12)
+        for i in range(14):
+            self.sm.append_message(TENANT, USER, sid, {
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"message {i}",
+            })
+
+        # Mock LLM client
+        class FakeLLM:
+            async def chat_completion(self, **kwargs):
+                class R:
+                    content = "压缩摘要"
+                return R()
+
+        session_dir = self.sm._session_dir(TENANT, USER)
+        asyncio.get_event_loop().run_until_complete(
+            self.sm.compact(TENANT, USER, sid, FakeLLM(), max_recent=6)
+        )
+
+        # 验证: 无 .tmp 残留
+        tmp_files = list(session_dir.glob("*.tmp"))
+        assert tmp_files == []
+        # 验证: session 文件存在且可读
+        msgs = self.sm.load_messages(TENANT, USER, sid)
+        assert len(msgs) > 0
+
+    def test_compact_preserves_recent_messages(self):
+        """compact 应保留最近 max_recent 条消息 (A5)。"""
+        import asyncio
+
+        sid = self.sm.create_session(TENANT, USER)
+        for i in range(14):
+            self.sm.append_message(TENANT, USER, sid, {
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"msg-{i}",
+            })
+
+        class FakeLLM:
+            async def chat_completion(self, **kwargs):
+                class R:
+                    content = "compressed history"
+                return R()
+
+        asyncio.get_event_loop().run_until_complete(
+            self.sm.compact(TENANT, USER, sid, FakeLLM(), max_recent=4)
+        )
+
+        msgs = self.sm.load_messages(TENANT, USER, sid)
+        contents = [m.get("content", "") for m in msgs]
+        # 应包含摘要
+        assert any("compressed history" in c for c in contents)
+        # 最后一条消息应保留
+        assert "msg-13" in contents

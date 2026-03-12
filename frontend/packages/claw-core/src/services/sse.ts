@@ -146,7 +146,6 @@ export class AgentSSEClient {
 
   private async _connectOnce(): Promise<void> {
     this.abortController = new AbortController();
-    this._connected = true;
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -179,6 +178,8 @@ export class AgentSSEClient {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
+      this._connected = true;
+
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
@@ -200,7 +201,8 @@ export class AgentSSEClient {
           if (line.startsWith('event:')) {
             currentEvent = line.slice(6).trim();
           } else if (line.startsWith('data:')) {
-            currentData = line.slice(5).trim();
+            const value = line.slice(5).trim();
+            currentData = currentData ? currentData + '\n' + value : value;
           } else if (line.trim() === '') {
             if (currentData) {
               this._dispatch(currentEvent || 'message', currentData);

@@ -35,20 +35,20 @@ describe('LoginPage', () => {
     const LoginPage = await loadLoginPage();
     render(<LoginPage />);
 
-    expect(screen.getByLabelText('Username')).toBeInTheDocument();
-    expect(screen.getByLabelText('Password')).toBeInTheDocument();
+    expect(screen.getByLabelText('用户名')).toBeInTheDocument();
+    expect(screen.getByLabelText('密码')).toBeInTheDocument();
     // Exactly 2 inputs
     const inputs = screen.getAllByRole('textbox');
     // password input has no textbox role, count separately
-    expect(screen.getByLabelText('Username')).toBeInstanceOf(HTMLInputElement);
-    expect(screen.getByLabelText('Password')).toBeInstanceOf(HTMLInputElement);
+    expect(screen.getByLabelText('用户名')).toBeInstanceOf(HTMLInputElement);
+    expect(screen.getByLabelText('密码')).toBeInstanceOf(HTMLInputElement);
   });
 
   it('submit button is disabled when username is empty', async () => {
     const LoginPage = await loadLoginPage();
     render(<LoginPage />);
 
-    const button = screen.getByRole('button', { name: /sign in/i });
+    const button = screen.getByRole('button', { name: /登录/i });
     expect(button).toBeDisabled();
   });
 
@@ -57,9 +57,9 @@ describe('LoginPage', () => {
     render(<LoginPage />);
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Username'), 'testuser');
-    await user.type(screen.getByLabelText('Password'), 'pass123');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText('用户名'), 'testuser');
+    await user.type(screen.getByLabelText('密码'), 'pass123');
+    await user.click(screen.getByRole('button', { name: /登录/i }));
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('testuser', 'pass123');
@@ -79,9 +79,9 @@ describe('LoginPage', () => {
     const LoginPage = await loadLoginPage();
     render(<LoginPage />);
 
-    const button = screen.getByRole('button', { name: /signing in/i });
+    const button = screen.getByRole('button', { name: /登录中/i });
     expect(button).toBeDisabled();
-    expect(button).toHaveTextContent('Signing in...');
+    expect(button).toHaveTextContent('登录中...');
   });
 
   it('trims whitespace from username before submit', async () => {
@@ -89,9 +89,9 @@ describe('LoginPage', () => {
     render(<LoginPage />);
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Username'), '  user  ');
-    await user.type(screen.getByLabelText('Password'), 'pw');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText('用户名'), '  user  ');
+    await user.type(screen.getByLabelText('密码'), 'pw');
+    await user.click(screen.getByRole('button', { name: /登录/i }));
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('user', 'pw');

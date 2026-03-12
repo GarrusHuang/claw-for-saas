@@ -151,7 +151,7 @@ def _estimate_single_message_tokens(msg: dict) -> int:
         tc_text = json.dumps(tool_calls, ensure_ascii=False, default=str)
         total += estimate_tokens_conservative(tc_text)
 
-    # 缓存 (LRU 式清理)
+    # 缓存 (FIFO 批量清理: 超限时删除前半部分)
     if len(_msg_token_cache) >= _CACHE_MAX_SIZE:
         # 清掉前半部分
         keys = list(_msg_token_cache.keys())

@@ -48,25 +48,25 @@ describe('ProgressPanel', () => {
   it('renders Progress section header', () => {
     mockState = createMockState({ status: 'running', startedAt: Date.now() });
     render(<ProgressPanel />);
-    expect(screen.getByText('Progress')).toBeInTheDocument();
+    expect(screen.getByText('进度')).toBeInTheDocument();
   });
 
   it('renders Files section', () => {
     mockState = createMockState({ status: 'running', startedAt: Date.now() });
     render(<ProgressPanel />);
-    expect(screen.getByText('Files')).toBeInTheDocument();
+    expect(screen.getByText('文件')).toBeInTheDocument();
   });
 
   it('renders Instructions section', () => {
     mockState = createMockState({ status: 'running', startedAt: Date.now() });
     render(<ProgressPanel />);
-    expect(screen.getByText('Instructions')).toBeInTheDocument();
+    expect(screen.getByText('说明')).toBeInTheDocument();
   });
 
   it('renders Context section', () => {
     mockState = createMockState({ status: 'running', startedAt: Date.now() });
     render(<ProgressPanel />);
-    expect(screen.getByText('Context')).toBeInTheDocument();
+    expect(screen.getByText('上下文')).toBeInTheDocument();
   });
 
   it('shows plan steps when they exist', () => {
@@ -85,10 +85,10 @@ describe('ProgressPanel', () => {
     expect(screen.getByText('填写表单')).toBeInTheDocument();
   });
 
-  it('shows "No active tasks" when no plan steps', () => {
+  it('shows "暂无活跃任务" when no plan steps', () => {
     mockState = createMockState({ status: 'running', startedAt: Date.now() });
     render(<ProgressPanel />);
-    expect(screen.getByText('No active tasks')).toBeInTheDocument();
+    expect(screen.getByText('暂无活跃任务')).toBeInTheDocument();
   });
 
   it('extracts file names from tool executions', () => {

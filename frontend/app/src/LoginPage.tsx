@@ -22,31 +22,31 @@ export default function LoginPage() {
       <div className="login-card">
         <div className="login-header">
           <span className="login-logo">Claw</span>
-          <span className="login-subtitle">AI Agent Runtime</span>
+          <span className="login-subtitle">AI Agent 运行时</span>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
           <div className="login-field">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="username">用户名</label>
             <input
               id="username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter username"
+              placeholder="请输入用户名"
               autoFocus
               autoComplete="username"
             />
           </div>
 
           <div className="login-field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">密码</label>
             <input
               id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
+              placeholder="请输入密码"
               autoComplete="current-password"
             />
           </div>
@@ -54,7 +54,7 @@ export default function LoginPage() {
           {error && <div className="login-error">{error}</div>}
 
           <button type="submit" className="login-btn" disabled={loading || success || !username.trim()}>
-            {success ? 'Success!' : loading ? 'Signing in...' : 'Sign in'}
+            {success ? '登录成功！' : loading ? '登录中...' : '登录'}
           </button>
         </form>
       </div>

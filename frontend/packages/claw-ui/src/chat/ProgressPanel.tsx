@@ -78,7 +78,7 @@ export default function ProgressPanel() {
       <div className="progress-section">
         <div className="progress-section-title">
           <ThunderboltOutlined style={{ fontSize: 11, color: '#fa8c16' }} />
-          <span>Progress</span>
+          <span>进度</span>
           {isRunning && (
             <LoadingOutlined style={{ color: '#1890ff', fontSize: 12, marginLeft: 'auto' }} />
           )}
@@ -118,7 +118,7 @@ export default function ProgressPanel() {
           </div>
         ) : (
           <div style={{ padding: '8px 0' }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>No active tasks</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>暂无活跃任务</Text>
           </div>
         )}
       </div>
@@ -127,7 +127,7 @@ export default function ProgressPanel() {
       <div className="progress-section">
         <div className="progress-section-title">
           <FileOutlined style={{ fontSize: 11, color: '#1890ff' }} />
-          <span>Files</span>
+          <span>文件</span>
           {fileNames.length > 0 && (
             <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>
               {fileNames.length}
@@ -145,7 +145,7 @@ export default function ProgressPanel() {
           </div>
         ) : (
           <div style={{ padding: '8px 0' }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>No files yet</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>暂无文件</Text>
           </div>
         )}
       </div>
@@ -154,7 +154,7 @@ export default function ProgressPanel() {
       <div className="progress-section">
         <div className="progress-section-title">
           <BookOutlined style={{ fontSize: 11, color: '#722ed1' }} />
-          <span>Instructions</span>
+          <span>说明</span>
         </div>
         <div style={{ padding: '4px 0' }}>
           <div style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -172,20 +172,20 @@ export default function ProgressPanel() {
       <div className="progress-section">
         <div className="progress-section-title">
           <DatabaseOutlined style={{ fontSize: 11, color: '#13c2c2' }} />
-          <span>Context</span>
+          <span>上下文</span>
         </div>
         <div style={{ padding: '4px 0' }}>
           <div style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
             <ToolOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
-            <span>MCP Tools ({toolCount})</span>
+            <span>MCP 工具 ({toolCount})</span>
           </div>
           <div style={{ fontSize: 11, color: '#333', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
             <DatabaseOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
-            <span>Memory — {memorySummary}</span>
+            <span>记忆 — {memorySummary}</span>
           </div>
           <div style={{ fontSize: 11, color: '#999', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 10, textAlign: 'center', fontSize: 10 }}>○</span>
-            <span>Connectors</span>
+            <span>连接器</span>
           </div>
         </div>
       </div>

@@ -125,14 +125,14 @@ class AgentGateway:
             from dependencies import get_file_service
             current_file_service.set(get_file_service())
         except Exception:
-            pass  # FileService 可选，不阻塞启动
+            logger.debug("FileService injection skipped", exc_info=True)
 
         # 注入 BrowserService 到 contextvars (供浏览器工具使用)
         try:
             from dependencies import get_browser_service
             current_browser_service.set(get_browser_service())
         except Exception:
-            pass  # BrowserService 可选，不阻塞启动
+            logger.debug("BrowserService injection skipped", exc_info=True)
 
         # 注入 known_field_ids 到 contextvars (供 known_values_guard hook 使用)
         current_known_field_ids.set(set())  # 始终初始化，避免 LookupError
@@ -147,7 +147,7 @@ class AgentGateway:
             current_sandbox.set(get_sandbox_manager())
             current_data_lock.set(get_data_lock_registry())
         except Exception:
-            pass  # Sandbox/DataLock 可选，不阻塞启动
+            logger.debug("Sandbox/DataLock injection skipped", exc_info=True)
 
         # A2: 注入 MCPProvider 到 ContextVar (供 MCP 工具使用)
         if self.mcp_provider:
@@ -158,7 +158,7 @@ class AgentGateway:
             from dependencies import get_scheduler
             current_scheduler.set(get_scheduler())
         except Exception:
-            pass  # Scheduler 可选，不阻塞启动
+            logger.debug("Scheduler injection skipped", exc_info=True)
 
         # ── 2. 解析/创建会话 ──
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):

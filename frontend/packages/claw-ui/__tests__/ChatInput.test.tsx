@@ -29,7 +29,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('Reply...');
+    const textarea = screen.getByPlaceholderText('回复...');
     expect(textarea).toBeInTheDocument();
   });
 
@@ -44,7 +44,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('Reply...');
+    const textarea = screen.getByPlaceholderText('回复...');
     fireEvent.change(textarea, { target: { value: '你好' } });
 
     const sendBtn = screen.getByRole('button', { name: /send/i });
@@ -72,7 +72,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('Reply...') as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText('回复...') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '测试消息' } });
     expect(textarea.value).toBe('测试消息');
 
@@ -85,7 +85,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText('Reply...');
+    const textarea = screen.getByPlaceholderText('回复...');
     fireEvent.change(textarea, { target: { value: '第一行' } });
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
 
@@ -103,7 +103,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} disabled />);
 
-    const textarea = screen.getByPlaceholderText('Reply...');
+    const textarea = screen.getByPlaceholderText('回复...');
     expect(textarea).toBeDisabled();
   });
 
@@ -111,7 +111,7 @@ describe('ChatInput', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} disabled />);
 
-    const textarea = screen.getByPlaceholderText('Reply...');
+    const textarea = screen.getByPlaceholderText('回复...');
     fireEvent.change(textarea, { target: { value: '测试' } });
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
 

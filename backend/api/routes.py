@@ -104,7 +104,7 @@ async def health_check():
 @router.get("/tools")
 async def list_tools():
     """List all registered tools."""
-    from tools.build_registry import build_shared_registry, build_capability_registry
+    from tools.registry_builder import build_shared_registry, build_capability_registry
 
     tools_list = []
     try:
@@ -118,7 +118,7 @@ async def list_tools():
                 "read_only": tool.read_only,
             })
     except Exception:
-        pass
+        logger.debug("Failed to load shared registry", exc_info=True)
 
     try:
         capability = build_capability_registry()
@@ -131,6 +131,6 @@ async def list_tools():
                 "read_only": tool.read_only,
             })
     except Exception:
-        pass
+        logger.debug("Failed to load capability registry", exc_info=True)
 
     return {"tools": tools_list}

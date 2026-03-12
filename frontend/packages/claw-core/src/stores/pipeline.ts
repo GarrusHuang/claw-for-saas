@@ -175,6 +175,8 @@ const initialState = {
   error: null as string | null,
 };
 
+const MAX_EVENT_LOG_SIZE = 500;
+
 export const usePipelineStore = create<PipelineState>((set) => ({
   ...initialState,
 
@@ -296,7 +298,10 @@ export const usePipelineStore = create<PipelineState>((set) => ({
   setError: (error) => set({ error, status: 'failed' }),
 
   addEvent: (event) =>
-    set((state) => ({ eventLog: [...state.eventLog, event] })),
+    set((state) => {
+      const newLog = [...state.eventLog, event];
+      return { eventLog: newLog.length > MAX_EVENT_LOG_SIZE ? newLog.slice(-MAX_EVENT_LOG_SIZE) : newLog };
+    }),
 
   setSessionId: (id) => set({ sessionId: id }),
 
