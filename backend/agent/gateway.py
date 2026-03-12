@@ -254,8 +254,20 @@ class AgentGateway:
             content = m.get("content", "")
 
             if mat_type == "image" and content and settings.llm_supports_vision:
-                media_type = mimetypes.guess_type(filename)[0] or "image/png"
-                image_blocks.append({"base64": content, "media_type": media_type})
+                # A4-4i: 大图自动压缩 (>1024px 缩放, 控制 token 消耗)
+                from services.content_processor import process_image
+                import base64 as b64mod
+                try:
+                    raw_bytes = b64mod.b64decode(content)
+                    processed = process_image(raw_bytes, filename)
+                    image_blocks.append({
+                        "base64": processed.image_base64,
+                        "media_type": processed.image_media_type or "image/png",
+                    })
+                except Exception:
+                    # fallback: 原样使用
+                    media_type = mimetypes.guess_type(filename)[0] or "image/png"
+                    image_blocks.append({"base64": content, "media_type": media_type})
                 text_summaries.append(f"[Image: {filename}]")
             else:
                 text_summaries.append(f"[{filename}]\n{content[:2000]}")
