@@ -101,9 +101,9 @@ describe('AIChatDialog', () => {
       expect(screen.getByTestId('cowork-sidebar')).toBeInTheDocument();
     });
 
-    it('always shows ProgressPanel', () => {
+    it('hides ProgressPanel when no messages (empty state)', () => {
       render(<AIChatDialog />);
-      expect(screen.getByTestId('progress-panel')).toBeInTheDocument();
+      expect(screen.queryByTestId('progress-panel')).not.toBeInTheDocument();
     });
 
     it('shows WelcomeScreen when no messages', () => {
