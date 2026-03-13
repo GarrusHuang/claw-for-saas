@@ -361,6 +361,7 @@ class TestReadUploadedFile:
 
     def test_file_not_found(self):
         mock_service = MagicMock()
+        mock_service.get_file.side_effect = FileNotFoundError("not found")
         mock_service.extract_text.side_effect = FileNotFoundError("not found")
 
         tokens = _set_ctx(file_service=mock_service, tenant_id="T1", user_id="U1")

@@ -44,6 +44,12 @@ vi.mock('@claw/core', () => ({
     };
     return selector(state);
   }),
+  aiApi: {
+    listKnowledgeFiles: vi.fn(),
+    uploadKnowledgeFile: vi.fn(),
+    deleteKnowledgeFile: vi.fn(),
+    uploadFile: vi.fn(),
+  },
 }));
 
 // Mock child components to isolate AIChatDialog tests
@@ -71,6 +77,10 @@ vi.mock('../src/schedule/ScheduleView.tsx', () => ({
 
 vi.mock('../src/skills/SkillsView.tsx', () => ({
   default: () => <div data-testid="skills-view">SkillsView</div>,
+}));
+
+vi.mock('../src/knowledge/KnowledgeView.tsx', () => ({
+  default: () => <div data-testid="knowledge-view">KnowledgeView</div>,
 }));
 
 describe('AIChatDialog', () => {

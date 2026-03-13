@@ -92,22 +92,26 @@ describe('ChatInput', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it('shows "AI 正在处理中" when disabled', () => {
+  it('shows stop button when disabled with onStop', () => {
     const onSend = vi.fn();
-    render(<ChatInput onSend={onSend} disabled />);
+    const onStop = vi.fn();
+    render(<ChatInput onSend={onSend} onStop={onStop} disabled />);
 
-    expect(screen.getByText('AI 正在处理中，请稍候...')).toBeInTheDocument();
+    // The stop button should be a danger button (red)
+    const buttons = screen.getAllByRole('button');
+    const stopButton = buttons.find(b => b.classList.contains('ant-btn-dangerous'));
+    expect(stopButton).toBeTruthy();
   });
 
-  it('disables textarea when disabled prop is true', () => {
+  it('textarea remains enabled when disabled prop is true (message queue support)', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} disabled />);
 
     const textarea = screen.getByPlaceholderText('回复...');
-    expect(textarea).toBeDisabled();
+    expect(textarea).not.toBeDisabled();
   });
 
-  it('does not send when disabled even with text', () => {
+  it('still calls onSend when disabled (parent handles queueing)', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} disabled />);
 
@@ -115,6 +119,6 @@ describe('ChatInput', () => {
     fireEvent.change(textarea, { target: { value: '测试' } });
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
 
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith('测试', undefined);
   });
 });

@@ -268,7 +268,7 @@ class SkillLoader:
         scenario: Optional[str] = None,
         agent_name: Optional[str] = None,
         business_type: Optional[str] = None,
-    ) -> str:
+    ) -> tuple[str, list[str]]:
         """
         根据 pipeline 上下文匹配并加载 Skill 正文。
 
@@ -360,7 +360,7 @@ class SkillLoader:
                 "Loaded %d skills (%d chars) for pipeline (scenario=%s, agent=%s, biz=%s): %s",
                 len(loaded_names), total_chars, scenario, agent_name, business_type, loaded_names,
             )
-        return combined
+        return combined, loaded_names
 
     def read_reference(self, skill_name: str, ref_path: str) -> str:
         """L3 按需加载：读取 Skill 参考资料文件。"""
@@ -459,7 +459,7 @@ class SkillLoader:
             with open(skill_file, "w", encoding="utf-8") as f:
                 f.write(content)
 
-            self._register_single(skill_dir)
+            self._register_single(skill_dir, priority=PRIORITY_USER)
             logger.info("Created skill: %s", name)
             return {"ok": True, "name": name}
         except Exception as e:
@@ -495,8 +495,14 @@ class SkillLoader:
         if name not in self._registry:
             return {"ok": False, "error": f"Skill '{name}' not found"}
 
-        import shutil
         meta = self._registry[name]
+        priority = meta.get("_priority", 0)
+
+        # Only user-created skills (priority=4) can be deleted
+        if priority != PRIORITY_USER:
+            return {"ok": False, "error": "系统技能不允许删除"}
+
+        import shutil
         skill_dir = meta["_dir"]
 
         try:

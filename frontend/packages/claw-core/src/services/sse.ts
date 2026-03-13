@@ -21,6 +21,7 @@ export type SSEEventType =
   | 'plan_proposed'
   | 'skill_created'
   | 'skill_updated'
+  | 'skills_loaded'
   | 'tool_executed'
   | 'browser_action'
   | 'browser_screenshot'
@@ -30,6 +31,7 @@ export type SSEEventType =
   | 'request_upload'             // Phase 24: Agent 请求上传文件
   | 'request_confirmation'       // Phase 24: Agent 请求用户确认
   | 'request_input'              // Phase 24: Agent 请求用户输入
+  | 'file_artifact'              // Phase 6: Agent 生成的文件
   | 'pipeline_complete'
   | 'error'
   | 'heartbeat'

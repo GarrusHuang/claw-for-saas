@@ -123,6 +123,12 @@ export async function getSessionHistory(_userId: string, sessionId: string): Pro
   );
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  await apiFetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+}
+
 // ── Memory ──
 
 export interface MemoryStats {
@@ -245,7 +251,7 @@ export interface FileInfo {
   created_at?: number;
 }
 
-export async function uploadFile(file: File, userId?: string): Promise<FileInfo> {
+export async function uploadFile(file: File, userId?: string, sessionId?: string): Promise<FileInfo> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('user_id', userId || getAIConfig().defaultUserId);
@@ -260,7 +266,10 @@ export async function uploadFile(file: File, userId?: string): Promise<FileInfo>
     headers['Authorization'] = `Bearer ${config.authToken}`;
   }
 
-  const res = await fetch(`${getBaseUrl()}/api/files/upload`, {
+  let url = `${getBaseUrl()}/api/files/upload`;
+  if (sessionId) url += `?session_id=${encodeURIComponent(sessionId)}`;
+
+  const res = await fetch(url, {
     method: 'POST',
     headers,
     body: formData,
@@ -269,10 +278,10 @@ export async function uploadFile(file: File, userId?: string): Promise<FileInfo>
   return res.json() as Promise<FileInfo>;
 }
 
-export async function listUserFiles(userId?: string): Promise<FileInfo[]> {
-  const data = await apiFetch<{ files: FileInfo[] }>(
-    `/api/files/${encodeURIComponent(userId || getAIConfig().defaultUserId)}`,
-  );
+export async function listUserFiles(userId?: string, sessionId?: string): Promise<FileInfo[]> {
+  let url = `/api/files/${encodeURIComponent(userId || getAIConfig().defaultUserId)}`;
+  if (sessionId) url += `?session_id=${encodeURIComponent(sessionId)}`;
+  const data = await apiFetch<{ files: FileInfo[] }>(url);
   return data.files;
 }
 
@@ -348,6 +357,68 @@ export async function pauseSchedule(taskId: string): Promise<{ status: string; t
 
 export async function resumeSchedule(taskId: string): Promise<{ status: string; task_id: string }> {
   return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+}
+
+// ── Knowledge Base ──
+
+export interface KBFileInfo {
+  file_id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  owner_id: string;
+  tenant_id: string;
+  scope: string;       // "global" | "user"
+  created_at: number;
+  description: string;
+  sha256: string;
+}
+
+export async function listKnowledgeFiles(): Promise<{ files: KBFileInfo[]; total: number }> {
+  return apiFetch('/api/knowledge/');
+}
+
+export async function uploadKnowledgeFile(file: File, scope: string = 'user', description: string = ''): Promise<KBFileInfo> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('scope', scope);
+  formData.append('description', description);
+
+  const headers: Record<string, string> = {};
+  const config = getAIConfig();
+  if (config.getAuthToken) {
+    const token = await config.getAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } else if (config.authToken) {
+    headers['Authorization'] = `Bearer ${config.authToken}`;
+  }
+
+  const res = await fetch(`${getBaseUrl()}/api/knowledge/upload`, {
+    method: 'POST', headers, body: formData,
+  });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  return res.json() as Promise<KBFileInfo>;
+}
+
+export async function deleteKnowledgeFile(fileId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/knowledge/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+}
+
+export async function getKBFileText(fileId: string): Promise<{ file_id: string; text: string }> {
+  return apiFetch(`/api/knowledge/${encodeURIComponent(fileId)}/text`);
+}
+
+// ── Inject (real-time message injection while pipeline is running) ──
+
+export async function injectMessage(
+  sessionId: string,
+  message: string,
+  files?: { fileId: string; filename: string }[],
+): Promise<void> {
+  await apiFetch(`/api/chat/${encodeURIComponent(sessionId)}/inject`, {
+    method: 'POST',
+    body: JSON.stringify({ message, files }),
+  });
 }
 
 // ── Error Utilities (re-export from sse.ts, single source of truth) ──

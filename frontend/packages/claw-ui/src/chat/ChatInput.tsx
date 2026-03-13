@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState } from 'react';
 import { Input, Button, Tag, message } from 'antd';
 import type { InputRef } from 'antd';
-import { SendOutlined, PaperClipOutlined, CloseOutlined, PlusOutlined } from '@ant-design/icons';
+import { SendOutlined, PaperClipOutlined, CloseOutlined, PlusOutlined, BorderOutlined } from '@ant-design/icons';
 import { aiApi, type FileInfo } from '@claw/core';
 const { uploadFile } = aiApi;
 
@@ -16,8 +16,10 @@ export interface AttachedFile {
 
 interface ChatInputProps {
   onSend: (message: string, files?: AttachedFile[]) => void;
+  onStop?: () => void;
   disabled?: boolean;
   placeholder?: string;
+  sessionId?: string;
 }
 
 /**
@@ -27,8 +29,10 @@ interface ChatInputProps {
  */
 export default function ChatInput({
   onSend,
+  onStop,
   disabled = false,
   placeholder = '回复...',
+  sessionId,
 }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -38,12 +42,12 @@ export default function ChatInput({
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed) return;
     onSend(trimmed, attachedFiles.length > 0 ? attachedFiles : undefined);
     setValue('');
     setAttachedFiles([]);
     setTimeout(() => textareaRef.current?.focus(), 50);
-  }, [value, disabled, onSend, attachedFiles]);
+  }, [value, onSend, attachedFiles]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -62,11 +66,7 @@ export default function ChatInput({
     setUploading(true);
     try {
       for (const file of Array.from(files)) {
-        if (file.size > 10 * 1024 * 1024) {
-          message.error(`文件 ${file.name} 太大 (超过 10MB)`);
-          continue;
-        }
-        const result: FileInfo = await uploadFile(file);
+        const result: FileInfo = await uploadFile(file, undefined, sessionId);
         setAttachedFiles(prev => [...prev, {
           fileId: result.file_id,
           filename: result.filename,
@@ -98,7 +98,7 @@ export default function ChatInput({
         multiple
         style={{ display: 'none' }}
         onChange={handleFileSelect}
-        accept=".txt,.csv,.json,.xml,.yaml,.yml,.md,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.zip,.tar,.gz"
+        accept=".txt,.csv,.json,.xml,.yaml,.yml,.md,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.zip,.tar,.gz,.svg,.html,.jsx,.tsx,.py,.js,.ts,.css,.scss"
       />
 
       {/* 文件 chips */}
@@ -138,7 +138,6 @@ export default function ChatInput({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          disabled={disabled}
           autoSize={{ minRows: 1, maxRows: 4 }}
           style={{
             border: 'none',
@@ -149,21 +148,28 @@ export default function ChatInput({
             flex: 1,
           }}
         />
-        <Button
-          type="primary"
-          shape="circle"
-          icon={<SendOutlined />}
-          onClick={handleSend}
-          disabled={disabled || !value.trim()}
-          size="small"
-          style={{ flexShrink: 0 }}
-        />
+        {disabled && onStop && !value.trim() ? (
+          <Button
+            type="primary"
+            shape="circle"
+            icon={<BorderOutlined />}
+            onClick={onStop}
+            size="small"
+            danger
+            style={{ flexShrink: 0 }}
+          />
+        ) : (
+          <Button
+            type="primary"
+            shape="circle"
+            icon={<SendOutlined />}
+            onClick={handleSend}
+            disabled={!value.trim()}
+            size="small"
+            style={{ flexShrink: 0 }}
+          />
+        )}
       </div>
-      {disabled && (
-        <div style={{ fontSize: 11, color: '#999', textAlign: 'center', paddingBottom: 4 }}>
-          AI 正在处理中，请稍候...
-        </div>
-      )}
     </div>
   );
 }

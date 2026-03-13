@@ -90,6 +90,7 @@ export interface ToolExecution {
   argsSummary?: Record<string, string>;
   resultSummary?: string;
   blocked?: boolean;
+  pending?: boolean;
 }
 
 export interface AgentIterationInfo {

@@ -153,11 +153,18 @@ class AgenticRuntime:
             "stages": {1: 0, 2: 0, 3: 0},
             "overflow_retries": 0,
         }
+        # ── 中止标志: 客户端断开时停止循环 ──
+        self._abort_requested = False
         # ── 重复检测: 防止 Agent 陷入工具调用死循环 ──
         self._tool_call_history: list[str] = []  # 每轮工具调用签名
         self._repetition_warned: bool = False
         # ── 工具结果缓存: 同一 run 内相同调用直接返回缓存 ──
         self._tool_result_cache: dict[str, ToolResult] = {}
+
+    def request_abort(self) -> None:
+        """Request the runtime to abort the ReAct loop at the next iteration."""
+        self._abort_requested = True
+        logger.info("Abort requested for runtime", extra={"trace_id": self.trace_id})
 
     async def run(
         self,
@@ -181,6 +188,32 @@ class AgenticRuntime:
         self._emit("agent_progress", {"status": "started", "max_iterations": self.config.max_iterations})
 
         for iteration in range(self.config.max_iterations):
+            # ─── Abort check ───
+            if self._abort_requested:
+                logger.info("Abort requested, stopping ReAct loop", extra={"trace_id": self.trace_id})
+                break
+
+            # Also check EventBus abort flag
+            if self.event_bus and getattr(self.event_bus, 'abort_requested', False):
+                logger.info("EventBus abort requested, stopping ReAct loop", extra={"trace_id": self.trace_id})
+                self._abort_requested = True
+                break
+
+            # ─── Check for injected messages ───
+            if self.event_bus:
+                injected = self.event_bus.drain_injected_messages()
+                if injected:
+                    for msg in injected:
+                        messages.append({"role": "user", "content": msg["message"]})
+                        logger.info(
+                            f"Injected user message into ReAct loop at iteration {iteration + 1}",
+                            extra={"trace_id": self.trace_id},
+                        )
+                        self._emit("agent_progress", {
+                            "status": "message_injected",
+                            "iteration": iteration + 1,
+                        })
+
             logger.info(
                 f"ReAct iteration {iteration + 1}/{self.config.max_iterations}",
                 extra={"trace_id": self.trace_id},

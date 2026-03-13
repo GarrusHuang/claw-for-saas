@@ -9,7 +9,7 @@ import { usePipelineStore } from './pipeline.ts';
 
 export type ChatDialogState = 'closed' | 'fullscreen' | 'sidepanel';
 
-export type ContentView = 'chat' | 'schedule' | 'skills';
+export type ContentView = 'chat' | 'schedule' | 'skills' | 'knowledge';
 
 export type SessionAction =
   | { type: 'new' }

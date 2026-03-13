@@ -14,6 +14,7 @@ import {
   FileImageOutlined,
   FileZipOutlined,
   EyeOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -28,8 +29,10 @@ import DocumentPresenter from '../results/DocumentPresenter';
 import InlineUploader from './InlineUploader';
 import InteractiveMessage from './InteractiveMessage';
 import CollapsibleBlock from './CollapsibleBlock';
+import FileArtifactCard from '../preview/FileArtifactCard';
+import UniversalFilePreviewModal from '../preview/FilePreviewModal';
 
-import type { ChatMessage, ChatMessageFile, ChatTimelineEntry } from '@claw/core';
+import type { ChatMessage, ChatMessageFile, ChatTimelineEntry, FileArtifact } from '@claw/core';
 
 const { Text } = Typography;
 
@@ -121,6 +124,32 @@ function PlanCard() {
   );
 }
 
+// ── SkillsBadge 组件 — 显示加载的技能 ──
+
+function SkillsBadge() {
+  const loadedSkills = usePipelineStore((s) => s.loadedSkills);
+  if (!loadedSkills || loadedSkills.length === 0) return null;
+
+  return (
+    <CollapsibleBlock
+      icon={<BulbOutlined style={{ color: '#722ed1', fontSize: 12 }} />}
+      summary={`使用了 ${loadedSkills.length} 个技能`}
+    >
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {loadedSkills.map((name) => (
+          <span key={name} style={{
+            display: 'inline-block', padding: '2px 8px',
+            background: '#f0f5ff', border: '1px solid #adc6ff',
+            borderRadius: 4, fontSize: 11, color: '#2f54eb',
+          }}>
+            {name}
+          </span>
+        ))}
+      </div>
+    </CollapsibleBlock>
+  );
+}
+
 // ── Pipeline 进度组件 — 折叠摘要 ──
 
 function InlinePipelineProgress() {
@@ -147,6 +176,9 @@ function InlinePipelineProgress() {
     <div>
       {/* PlanCard — Agent 提出的方案 */}
       <PlanCard />
+
+      {/* SkillsBadge — 加载的技能 */}
+      <SkillsBadge />
 
       {/* Pipeline progress as collapsible */}
       <CollapsibleBlock
@@ -202,7 +234,9 @@ function ToolExecutionItem({ te }: { te: ToolExecution }) {
   return (
     <div style={{ padding: '3px 0', fontSize: 11, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
       <span style={{ flexShrink: 0, marginTop: 1 }}>
-        {te.blocked ? (
+        {te.pending ? (
+          <LoadingOutlined style={{ color: '#722ed1', fontSize: 11 }} />
+        ) : te.blocked ? (
           <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
         ) : te.success ? (
           <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
@@ -212,7 +246,11 @@ function ToolExecutionItem({ te }: { te: ToolExecution }) {
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <span style={{ fontWeight: 500, color: '#333' }}>{te.toolName}</span>
-        <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latencyMs)}ms)</span>
+        {te.pending ? (
+          <span style={{ color: '#722ed1', marginLeft: 4 }}>执行中...</span>
+        ) : (
+          <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latencyMs)}ms)</span>
+        )}
         {te.argsSummary && Object.keys(te.argsSummary).length > 0 && (
           <div style={{ color: '#888', fontSize: 10 }}>
             {'→ '}
@@ -374,22 +412,27 @@ function AgentTimeline() {
               </div>
             )}
             {/* tools → 折叠块 */}
-            {hasTools && (
+            {hasTools && (() => {
+              const hasPending = g.tools.some((t) => t.pending);
+              return (
               <div style={{ marginBottom: 12 }}>
                 <CollapsibleBlock
                   icon={
-                    isActive && isLastGroup
-                      ? <ToolOutlined style={{ color: '#722ed1', fontSize: 12 }} />
-                      : <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+                    hasPending
+                      ? <LoadingOutlined style={{ color: '#722ed1', fontSize: 12 }} />
+                      : isActive && isLastGroup
+                        ? <ToolOutlined style={{ color: '#722ed1', fontSize: 12 }} />
+                        : <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
                   }
-                  summary={buildToolLabel(g.tools.map((t) => t.toolName), isActive && isLastGroup)}
+                  summary={buildToolLabel(g.tools.map((t) => t.toolName), hasPending || (isActive && isLastGroup))}
                 >
                   {g.tools.map((te) => (
                     <ToolExecutionItem key={te.id} te={te} />
                   ))}
                 </CollapsibleBlock>
               </div>
-            )}
+              );
+            })()}
           </React.Fragment>
         );
       })}
@@ -637,116 +680,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
-/** 通用文件预览 Modal — 图片/PDF/文本 */
-function FilePreviewModal({ file, onClose }: { file: ChatMessageFile; onClose: () => void }) {
-  const { blobUrl } = useAuthBlobUrl(file.fileId);
-  const [textContent, setTextContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const isImg = isImageFile(file);
-  const isPdf = isPdfFile(file);
-  const isTxt = isTextFile(file);
-
-  // 文本文件: 先尝试 /text 端点，失败则直接下载原文
-  useEffect(() => {
-    if (!isTxt || isImg) return;
-    setLoading(true);
-    setError(null);
-    (async () => {
-      try {
-        const headers = await getAuthHeaders();
-        // 优先 /text 端点
-        let text = '';
-        try {
-          const textRes = await fetch(getFileTextUrl(file.fileId), { headers });
-          if (textRes.ok) {
-            const data = await textRes.json();
-            text = data.text || '';
-          }
-        } catch { /* /text endpoint failed, try raw download */ }
-        // 为空则直接读取原始文件
-        if (!text) {
-          const rawRes = await fetch(getFileDownloadUrl(file.fileId), { headers });
-          if (rawRes.ok) text = await rawRes.text();
-        }
-        setTextContent(text || '(文件内容为空)');
-      } catch {
-        setError('无法加载文件内容');
-      }
-      setLoading(false);
-    })();
-  }, [file.fileId, isTxt, isImg]);
-
-  return (
-    <Modal
-      open
-      footer={null}
-      onCancel={onClose}
-      width={isPdf ? '80vw' : isTxt ? 720 : 'auto'}
-      style={{ maxWidth: '90vw' }}
-      styles={{ body: { padding: isPdf ? 0 : undefined } }}
-      centered
-      title={file.filename}
-    >
-      {isImg && blobUrl && (
-        <img src={blobUrl} alt={file.filename} style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain', display: 'block', margin: '0 auto' }} />
-      )}
-      {isPdf && blobUrl && (
-        <iframe
-          src={blobUrl}
-          style={{ width: '100%', height: '80vh', border: 'none' }}
-          title={file.filename}
-        />
-      )}
-      {isTxt && !isImg && (
-        loading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-        ) : error ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#ff4d4f' }}>
-            <CloseCircleOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block' }} />
-            {error}
-          </div>
-        ) : (
-          <pre style={{
-            maxHeight: '70vh', overflow: 'auto', padding: 16,
-            background: '#fafafa', borderRadius: 6, fontSize: 13,
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            lineHeight: 1.6,
-          }}>
-            {textContent ?? ''}
-          </pre>
-        )
-      )}
-      {!isImg && !isPdf && !isTxt && (
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
-          <FileOutlined style={{ fontSize: 48, marginBottom: 12, display: 'block' }} />
-          <div>该文件类型不支持预览</div>
-          <Button
-            type="link"
-            style={{ marginTop: 8 }}
-            onClick={async () => {
-              const headers = await getAuthHeaders();
-              const res = await fetch(getFileDownloadUrl(file.fileId), { headers });
-              if (res.ok) {
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = file.filename;
-                a.click();
-                URL.revokeObjectURL(url);
-              }
-            }}
-          >下载文件</Button>
-        </div>
-      )}
-      {!blobUrl && (isImg || isPdf) && (
-        <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-      )}
-    </Modal>
-  );
-}
+/* Local FilePreviewModal removed — using UniversalFilePreviewModal from ../preview/FilePreviewModal */
 
 /** 文件类型对应的背景色 */
 function getFileColor(file: ChatMessageFile): { bg: string; border: string; iconColor: string } {
@@ -768,66 +702,63 @@ function FileAttachments({ files }: { files: ChatMessageFile[] }) {
     <div style={{ marginTop: 10 }}>
       {/* 图片预览网格 */}
       {images.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: others.length > 0 ? 10 : 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: others.length > 0 ? 10 : 0, justifyContent: 'flex-end' }}>
           {images.map((file) => (
             <ImageThumb key={file.fileId} file={file} onClick={() => setPreviewFile(file)} />
           ))}
         </div>
       )}
 
-      {/* 非图片文件卡片 */}
+      {/* 非图片文件 — 紧凑 Tag 风格 */}
       {others.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {others.map((file) => {
-            const colors = getFileColor(file);
-            return (
-              <div
-                key={file.fileId}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 14px', minWidth: 180, maxWidth: 280,
-                  background: colors.bg, borderRadius: 10,
-                  border: `1px solid ${colors.border}`, fontSize: 12,
-                  cursor: 'pointer', transition: 'box-shadow 0.2s, transform 0.15s',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                }}
-                onClick={() => setPreviewFile(file)}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.boxShadow = '0 3px 10px rgba(0,0,0,0.12)';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
-                  e.currentTarget.style.transform = 'none';
-                }}
-              >
-                <div style={{ fontSize: 22, lineHeight: 1, flexShrink: 0 }}>
-                  {getFileIcon(file)}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontWeight: 500, color: '#262626',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    fontSize: 13, lineHeight: '18px',
-                  }}>
-                    {file.filename}
-                  </div>
-                  {file.sizeBytes != null && (
-                    <div style={{ color: '#8c8c8c', fontSize: 11, marginTop: 1 }}>
-                      {formatFileSize(file.sizeBytes)}
-                    </div>
-                  )}
-                </div>
-                <EyeOutlined style={{ color: colors.iconColor, fontSize: 14, flexShrink: 0, opacity: 0.7 }} />
-              </div>
-            );
-          })}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+          {others.map((file) => (
+            <div
+              key={file.fileId}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '4px 10px', background: '#f5f5f5',
+                borderRadius: 6, border: '1px solid #e8e8e8',
+                fontSize: 12, cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+              onClick={() => setPreviewFile(file)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#91d5ff';
+                e.currentTarget.style.background = '#e6f7ff';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e8e8e8';
+                e.currentTarget.style.background = '#f5f5f5';
+              }}
+            >
+              {getFileIcon(file)}
+              <span style={{
+                maxWidth: 150, overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                color: '#595959',
+              }}>
+                {file.filename}
+              </span>
+              {file.sizeBytes != null && (
+                <span style={{ color: '#bfbfbf', fontSize: 11 }}>
+                  {formatFileSize(file.sizeBytes)}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
       {/* 文件预览 Modal */}
       {previewFile && (
-        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+        <UniversalFilePreviewModal
+          open={true}
+          fileId={previewFile.fileId}
+          filename={previewFile.filename}
+          onClose={() => setPreviewFile(null)}
+          hideDownload={true}
+        />
       )}
     </div>
   );
@@ -871,6 +802,7 @@ export default function ChatMessageList({
   const liveTimelineEntries = usePipelineStore((s) => s.timelineEntries) as TimelineEntry[];
   const pendingInteraction = usePipelineStore((s) => s.pendingInteraction) as PendingInteraction | null;
   const resolveInteraction = usePipelineStore((s) => s.resolveInteraction);
+  const fileArtifacts = usePipelineStore((s) => s.fileArtifacts) as FileArtifact[];
 
   // 自动滚动到底部
   useEffect(() => {
@@ -915,6 +847,15 @@ export default function ChatMessageList({
 
       {/* 无 assistant 响应时 (pipeline 进行中)，实时时间线显示在消息末尾 */}
       {lastUserIdx === messages.length - 1 && <AgentTimeline />}
+
+      {/* Phase 6: Agent 生成的文件 */}
+      {fileArtifacts.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          {fileArtifacts.map((artifact, i) => (
+            <FileArtifactCard key={`${artifact.path}-${i}`} artifact={artifact} />
+          ))}
+        </div>
+      )}
 
       {/* Pipeline 实时进度 — 折叠摘要 */}
       {showPipelineProgress && pipelineStatus !== 'idle' && pipelineScenario !== 'general_chat' && (

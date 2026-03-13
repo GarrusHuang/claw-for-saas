@@ -176,6 +176,12 @@ export function usePipeline() {
           const businessType = (data.business_type as string) || (data.scenario as string) || '';
           usePipelineStore.getState().startPipeline(businessType, []);
         })
+        .on('skills_loaded', (data) => {
+          touchIdleTimer();
+          const skills = (data.skills as string[]) || [];
+          usePipelineStore.getState().setLoadedSkills(skills);
+          usePipelineStore.getState().addEvent({ type: 'skills_loaded', data, timestamp: Date.now() });
+        })
         .on('agent_progress', (data) => {
           touchIdleTimer();
           const status = data.status as string;
@@ -445,6 +451,23 @@ export function usePipeline() {
           usePipelineStore.getState().addEvent({ type: 'browser_screenshot', data, timestamp: Date.now() });
         })
 
+        // ── Phase 6: Agent 生成的文件 ──
+        .on('file_artifact', (data) => {
+          touchIdleTimer();
+          usePipelineStore.getState().addFileArtifact({
+            path: (data.path as string) || '',
+            filename: (data.filename as string) || '',
+            sizeBytes: (data.size_bytes as number) || 0,
+            contentType: (data.content_type as string) || 'application/octet-stream',
+            sessionId: (data.session_id as string) || '',
+          });
+          usePipelineStore.getState().addEvent({
+            type: 'file_artifact',
+            data,
+            timestamp: Date.now(),
+          });
+        })
+
         // ── Phase 8: 增强错误处理 ──
         .on('error', (data) => {
           touchIdleTimer();
@@ -591,6 +614,11 @@ export function usePipeline() {
     clearIdleTimer();
     clientRef.current?.close();
     setRetryCount(0);
+    // Mark as cancelled
+    const state = usePipelineStore.getState();
+    if (state.status === 'running') {
+      usePipelineStore.getState().completePipeline('cancelled', Date.now() - (state.startedAt || Date.now()));
+    }
   }, [clearIdleTimer]);
 
   return {

@@ -57,6 +57,7 @@ class PromptContext:
     """构建 system prompt 时传递的全部上下文。"""
     skill_knowledge: str = ""
     memory_context: str = ""
+    knowledge_index_text: str = ""  # _index.md 内容
     user_id: str = "anonymous"
     session_id: str = ""
     mode: str = "full"
@@ -127,6 +128,7 @@ class PromptBuilder:
         *,
         skill_knowledge: str = "",
         memory_context: str = "",
+        knowledge_index_text: str = "",
         user_id: str = "anonymous",
         session_id: str = "",
         mode: str = "full",
@@ -138,6 +140,7 @@ class PromptBuilder:
         Args:
             skill_knowledge: L4 Skills 知识内容
             memory_context: L5 用户偏好 + 经验
+            knowledge_index_text: 知识库 _index.md 内容
             user_id: L6 用户 ID
             session_id: L6 会话 ID
             mode: "full" | "minimal" | "none" — 控制生成哪些层
@@ -146,6 +149,7 @@ class PromptBuilder:
         ctx = PromptContext(
             skill_knowledge=skill_knowledge,
             memory_context=memory_context,
+            knowledge_index_text=knowledge_index_text or "",
             user_id=user_id,
             session_id=session_id,
             mode=mode,
@@ -253,6 +257,12 @@ class PromptBuilder:
                 builder_fn=self._build_memory,
             ),
             PromptSection(
+                layer=PromptLayer.MEMORY,
+                priority=10,
+                name="knowledge",
+                builder_fn=self._build_knowledge,
+            ),
+            PromptSection(
                 layer=PromptLayer.RUNTIME,
                 priority=0,
                 name="runtime",
@@ -334,6 +344,12 @@ class PromptBuilder:
             # 包含 <global>/<tenant>/<user> 子标签
             return f"\n<memory>\n{ctx.memory_context}\n</memory>"
         return ""
+
+    @staticmethod
+    def _build_knowledge(ctx: PromptContext) -> str:
+        if not ctx.knowledge_index_text:
+            return ""
+        return f"\n<knowledge>\n{ctx.knowledge_index_text}\n</knowledge>"
 
     def _build_runtime(self, ctx: PromptContext) -> str:
         return self._format_runtime_context(ctx.user_id, ctx.session_id)

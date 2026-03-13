@@ -290,7 +290,7 @@ class TestSkillLoaderMultiSourcePriority:
         loader = SkillLoader(skills_dir=str(builtin_dir))
         loader.load_tenant_skills(str(tenant_dir))
 
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         assert "Tenant version" in result
         assert "Builtin version" not in result
 
@@ -316,7 +316,7 @@ class TestSkillLoaderMultiSourcePriority:
         loader = SkillLoader(skills_dir=str(builtin_dir), max_prompt_chars=6000)
         loader.load_tenant_skills(str(tenant_dir))
 
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         # Higher priority (tenant) should be kept
         assert "T" * 100 in result
         # Total output should respect budget
@@ -330,7 +330,7 @@ class TestSkillLoaderMultiSourcePriority:
         (d / "SKILL.md").write_text(_make_skill_md("huge-skill", body=huge_body))
 
         loader = SkillLoader(skills_dir=str(tmp_path), max_single_chars=3000)
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         assert len(result) < 20000
         assert "截断" in result
 
@@ -347,7 +347,7 @@ class TestSkillLoaderMultiSourcePriority:
         loader = SkillLoader(skills_dir=str(builtin_dir))
 
         # Load body to populate cache
-        result1 = loader.load_for_pipeline(agent_name="universal")
+        result1, _ = loader.load_for_pipeline(agent_name="universal")
         assert "Builtin body" in result1
 
         # Tenant override
@@ -363,7 +363,7 @@ class TestSkillLoaderMultiSourcePriority:
         # but _body_cache still has old entry. _load_body checks cache first.
         # The tenant override replaces _registry entry but does NOT clear _body_cache.
         # So we need to manually check what happens.
-        result2 = loader.load_for_pipeline(agent_name="universal")
+        result2, _ = loader.load_for_pipeline(agent_name="universal")
         # The cache still has builtin body (since _scan_directory doesn't clear cache).
         # This is the actual behavior - cache is keyed by name and not cleared on override.
         # The body from cache is the builtin version until cache is explicitly cleared.

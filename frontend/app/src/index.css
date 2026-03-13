@@ -438,10 +438,21 @@ body {
   cursor: pointer;
   transition: background 0.15s;
   margin: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .cowork-sidebar-session-item:hover {
   background: #f5f5f5;
+}
+
+.cowork-sidebar-session-item:hover .session-delete-btn {
+  opacity: 1 !important;
+}
+
+.cowork-sidebar-session-item .session-delete-btn:hover {
+  color: #ff4d4f !important;
 }
 
 .cowork-sidebar-session-item--active {

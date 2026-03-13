@@ -29,8 +29,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# 最大文件大小: 10MB
-MAX_FILE_SIZE = 10 * 1024 * 1024
+def _get_max_file_size() -> int:
+    """Get max file size from settings, fallback to 100MB."""
+    try:
+        from config import settings
+        return settings.max_file_upload_mb * 1024 * 1024
+    except Exception:
+        return 100 * 1024 * 1024
+
+MAX_FILE_SIZE = _get_max_file_size()
 
 # 允许的文件扩展名 (白名单)
 ALLOWED_EXTENSIONS = {
@@ -38,6 +45,7 @@ ALLOWED_EXTENSIONS = {
     ".pdf", ".doc", ".docx", ".xls", ".xlsx",
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
     ".zip", ".tar", ".gz",
+    ".svg", ".html", ".jsx", ".tsx", ".py", ".js", ".ts", ".css", ".scss",
 }
 
 # 图片扩展名
@@ -55,6 +63,7 @@ class FileMetadata:
     sha256: str
     created_at: float
     extracted_text: str = ""
+    session_id: str = ""
 
 
 class FileService:
@@ -96,7 +105,8 @@ class FileService:
         return user_dir
 
     def save_file(
-        self, tenant_id: str, user_id: str, filename: str, content: bytes
+        self, tenant_id: str, user_id: str, filename: str, content: bytes,
+        session_id: str = "",
     ) -> FileMetadata:
         """
         保存文件到用户空间。
@@ -154,6 +164,7 @@ class FileService:
             size_bytes=len(content),
             sha256=sha256,
             created_at=time.time(),
+            session_id=session_id,
         )
 
         # 10. 保存元数据
@@ -203,6 +214,11 @@ class FileService:
             except Exception as e:
                 logger.warning(f"Failed to load metadata: {meta_file}: {e}")
         return results
+
+    def list_files_by_session(self, tenant_id: str, user_id: str, session_id: str) -> list[FileMetadata]:
+        """列出指定会话关联的文件。"""
+        all_files = self.list_files(tenant_id, user_id)
+        return [f for f in all_files if f.session_id == session_id]
 
     def delete_file(self, tenant_id: str, user_id: str, file_id: str) -> bool:
         """
@@ -328,6 +344,43 @@ class FileService:
                 f"大小: {len(content)} bytes\n"
                 f"(无法解析图片信息)"
             )
+
+    def cleanup_expired(self, retention_days: int = 7) -> int:
+        """清理过期的用户上传文件 (仅会话文件，不影响知识库和 workspace)。
+
+        Args:
+            retention_days: 保留天数，超过的文件将被删除
+
+        Returns:
+            删除的文件数量
+        """
+        if retention_days <= 0:
+            return 0
+
+        cutoff = time.time() - retention_days * 86400
+        deleted = 0
+
+        for meta_file in self.base_dir.rglob("*.meta.json"):
+            try:
+                data = json.loads(meta_file.read_text(encoding="utf-8"))
+                created_at = data.get("created_at", 0)
+                if created_at > 0 and created_at < cutoff:
+                    # 删除原始文件
+                    filename = data.get("filename", "")
+                    file_id = data.get("file_id", "")
+                    ext = Path(filename).suffix.lower() if filename else ""
+                    file_path = meta_file.parent / f"{file_id}{ext}"
+                    if file_path.exists():
+                        file_path.unlink()
+                    meta_file.unlink()
+                    deleted += 1
+                    logger.info(f"Expired file cleaned: {file_id} ({filename})")
+            except Exception as e:
+                logger.warning(f"Failed to check/clean {meta_file}: {e}")
+
+        if deleted:
+            logger.info(f"File cleanup: {deleted} expired files removed (>{retention_days} days)")
+        return deleted
 
     def _extract_text_file(self, content: bytes) -> str:
         """读取文本文件。"""
