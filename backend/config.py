@@ -16,8 +16,8 @@ class Settings(BaseSettings):
         description="LLM API base URL (OpenAI-compatible)",
     )
     llm_model: str = Field(
-        default="qwen2.5",
-        description="Model name",
+        default="",
+        description="Model name (required — set via LLM_MODEL env var)",
     )
     llm_api_key: str = Field(
         default="not-needed",
