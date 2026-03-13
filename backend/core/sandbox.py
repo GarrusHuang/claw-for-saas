@@ -316,10 +316,10 @@ class SandboxManager:
             stderr_truncated = False
 
             if len(stdout.encode("utf-8")) > max_output:
-                stdout = stdout[:max_output]
+                stdout = stdout.encode("utf-8")[:max_output].decode("utf-8", errors="ignore")
                 stdout_truncated = True
             if len(stderr.encode("utf-8")) > max_output:
-                stderr = stderr[:max_output]
+                stderr = stderr.encode("utf-8")[:max_output].decode("utf-8", errors="ignore")
                 stderr_truncated = True
 
             return {
@@ -386,10 +386,10 @@ class SandboxManager:
             stderr_truncated = False
 
             if len(stdout.encode("utf-8")) > max_output:
-                stdout = stdout[:max_output]
+                stdout = stdout.encode("utf-8")[:max_output].decode("utf-8", errors="ignore")
                 stdout_truncated = True
             if len(stderr.encode("utf-8")) > max_output:
-                stderr = stderr[:max_output]
+                stderr = stderr.encode("utf-8")[:max_output].decode("utf-8", errors="ignore")
                 stderr_truncated = True
 
             return {

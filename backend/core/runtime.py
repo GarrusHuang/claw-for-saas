@@ -70,6 +70,7 @@ class RuntimeConfig:
     context_budget_ratio: float = 0.8  # 预算占窗口比例
     compress_threshold_ratio: float = 0.85  # 压缩触发阈值
     context_budget_min: int = 16000    # 最低预算硬下限
+    stream: bool = True                # 是否流式输出
 
     def get_effective_budget(self) -> int:
         """计算实际上下文预算 (4c: 动态预算)。"""
@@ -672,7 +673,7 @@ class AgenticRuntime:
         """
         执行工具调用。只读工具并行，写入工具串行。
         """
-        results: list[ToolResult] = []
+        result_map: dict[str, ToolResult] = {}
 
         if self.config.parallel_tool_calls:
             # 分离只读和写入工具
@@ -688,19 +689,20 @@ class AgenticRuntime:
                 for tc, result in zip(read_only_calls, parallel_results):
                     if isinstance(result, Exception):
                         result = ToolResult(success=False, error=str(result))
-                    results.append(result)
+                    result_map[tc.id] = result
 
             # 串行执行写入工具
             for tc in write_calls:
                 result = await self._execute_single_tool(tc, iteration)
-                results.append(result)
+                result_map[tc.id] = result
         else:
             # 全部串行
             for tc in tool_calls:
                 result = await self._execute_single_tool(tc, iteration)
-                results.append(result)
+                result_map[tc.id] = result
 
-        return results
+        # 按原始 tool_calls 顺序返回结果
+        return [result_map[tc.id] for tc in tool_calls]
 
     def _tool_cache_key(self, tool_call: ParsedToolCall) -> str:
         """生成工具调用的缓存 key。"""
@@ -804,7 +806,7 @@ class AgenticRuntime:
                 from core.context import current_plan_tracker
                 tracker = current_plan_tracker.get(None)
                 if tracker:
-                    tracker.on_tool_executed(tool_call.name, success=False)
+                    tracker.fail_current()
                 logger.info(f"Tool blocked by hook: {tool_call.name} — {pre_result.message}")
                 return result
 

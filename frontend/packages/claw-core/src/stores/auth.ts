@@ -101,6 +101,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     try {
       const user = JSON.parse(userStr);
+      if (!user.userId || !user.tenantId) {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(USER_KEY);
+        return;
+      }
       // Check expiry
       if (user.expiresAt && Date.now() > user.expiresAt) {
         localStorage.removeItem(TOKEN_KEY);

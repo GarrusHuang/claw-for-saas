@@ -566,11 +566,13 @@ class TestUpdateTaskProtectedFields:
         """
         scheduler, tid = self._add_task_to_scheduler(tmp_path)
         task = scheduler.get_task("T1", "U1", tid)
-        # Simulate what update_task does internally: skip protected keys
-        for key in ("id", "user_id", "tenant_id", "created_at"):
-            assert key in ("id", "user_id", "tenant_id", "created_at")
-        # The task retains its original user_id
+        # user_id is a positional parameter in update_task, so it cannot be
+        # overridden via kwargs. Verify it's also in the protected set that
+        # prevents setattr from changing it.
         assert task.user_id == "U1"
+        # Verify the protected set in update_task guards against user_id
+        result = scheduler.update_task("T1", "U1", tid, name="safe_update")
+        assert result.user_id == "U1"  # unchanged
 
     def test_tenant_id_in_protected_list(self, tmp_path):
         """tenant_id is in the protected fields list and cannot be overwritten.
@@ -582,6 +584,8 @@ class TestUpdateTaskProtectedFields:
         scheduler, tid = self._add_task_to_scheduler(tmp_path)
         task = scheduler.get_task("T1", "U1", tid)
         assert task.tenant_id == "T1"
+        result = scheduler.update_task("T1", "U1", tid, name="safe_update")
+        assert result.tenant_id == "T1"  # unchanged
 
     def test_cannot_update_created_at(self, tmp_path):
         """created_at should not change via update_task."""
@@ -687,4 +691,4 @@ class TestUpdateTaskProtectedFields:
         # 'nonexistent_field' is not a ScheduledTask attribute
         result = scheduler.update_task("T1", "U1", tid, nonexistent_field="val")
         assert result is not None
-        assert not hasattr(result, "nonexistent_field") or True  # no crash
+        assert not hasattr(result, "nonexistent_field")

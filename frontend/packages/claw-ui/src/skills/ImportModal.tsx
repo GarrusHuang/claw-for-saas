@@ -43,7 +43,7 @@ export default function ImportModal({ open, onClose, onSuccess }: ImportModalPro
     <Modal
       title="导入 Skill"
       open={open}
-      onCancel={onClose}
+      onCancel={() => { setUrl(''); setContent(''); onClose(); }}
       onOk={handleImport}
       okText="导入"
       confirmLoading={importing}

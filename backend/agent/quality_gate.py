@@ -223,8 +223,11 @@ def quality_gate_hook(event: HookEvent) -> HookResult:
     - 不通过 + 已超限 → allow (降级放行，避免无限循环)
     """
     # 安全清理: 防止模块级 dict 无限增长
-    if len(_correction_counts) > 100:
-        _correction_counts.clear()
+    if len(_correction_counts) > 50:
+        # LRU-style: keep most recent 50 entries
+        keys = list(_correction_counts.keys())
+        for k in keys[:-50]:
+            _correction_counts.pop(k, None)
 
     session_key = f"{event.user_id}:{event.session_id}"
 

@@ -42,6 +42,11 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => '');
     throw new Error(`API ${res.status}: ${text || res.statusText}`);
   }
+  if (res.status === 204) return {} as T;
+  const ct = res.headers.get('content-type') || '';
+  if (ct && !ct.includes('application/json')) {
+    throw new Error(`API returned non-JSON content-type: ${ct}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -88,7 +93,7 @@ export interface SessionDetail {
   }>;
 }
 
-export async function listSessions(_userId?: string): Promise<SessionInfo[]> {
+export async function listSessions(): Promise<SessionInfo[]> {
   const data = await apiFetch<{ sessions: SessionInfo[] }>(
     `/api/session/list`,
   );

@@ -442,7 +442,7 @@ async def test_subagent_timeout(llm_client):
             timeout_s=1,  # 1 second, will likely timeout
         )
         # Should return timeout message, not crash
-        assert "超时" in answer or "timeout" in answer.lower() or len(answer) > 0
+        assert "超时" in answer or "timeout" in answer.lower()
     finally:
         await llm_client.close()
 

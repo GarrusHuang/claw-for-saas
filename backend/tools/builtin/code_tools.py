@@ -287,7 +287,7 @@ def run_command(
             text=True,
             timeout=timeout,
             cwd=work_dir,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            env={k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "LANG", "PYTHONIOENCODING", "TERM")},
         )
 
         duration_ms = round((time.monotonic() - start) * 1000, 1)

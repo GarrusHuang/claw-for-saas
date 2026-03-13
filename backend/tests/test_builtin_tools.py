@@ -559,7 +559,7 @@ class TestReadReference:
         assert r["skill_name"] == "expense"
         assert r["reference_name"] == "standard_table"
         assert r["loaded"] is False
-        assert "Placeholder" in r["content"]
+        assert "not found" in r["content"]
 
     @pytest.mark.asyncio
     async def test_another_reference(self):

@@ -778,22 +778,20 @@ class TestWebhookRouteInputValidation:
         app.dependency_overrides.clear()
         _clear_all_lru_caches()
 
-    def test_empty_string_url_accepted(self, client):
-        """Empty URL is accepted by Pydantic (no URL validation in the model)."""
+    def test_empty_string_url_rejected(self, client):
+        """Empty URL is rejected (scheme validation)."""
         resp = client.post("/api/webhooks", json={"url": ""})
-        # The model only requires url to be a str, no validation
-        assert resp.status_code == 200
-        assert resp.json()["config"]["url"] == ""
+        assert resp.status_code == 400
 
-    def test_invalid_url_format_accepted(self, client):
-        """Invalid URL format is accepted (no URL validation in the model)."""
+    def test_invalid_url_format_rejected(self, client):
+        """Invalid URL format is rejected (scheme validation)."""
         resp = client.post("/api/webhooks", json={"url": "not-a-url"})
-        assert resp.status_code == 200
+        assert resp.status_code == 400
 
-    def test_internal_ip_url_accepted(self, client):
-        """Internal IP URL is accepted (no SSRF protection at API level)."""
+    def test_internal_ip_url_rejected(self, client):
+        """Internal IP URL is rejected (SSRF protection)."""
         resp = client.post("/api/webhooks", json={"url": "http://192.168.1.1/hook"})
-        assert resp.status_code == 200
+        assert resp.status_code == 400
 
     def test_events_with_none_values(self, client):
         """Events list with None values -- Pydantic may coerce or reject."""
