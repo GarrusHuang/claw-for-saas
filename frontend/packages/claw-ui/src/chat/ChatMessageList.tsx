@@ -835,26 +835,23 @@ function FileAttachments({ files }: { files: ChatMessageFile[] }) {
 // ── 单条消息组件 (memo 避免无关消息重渲染) ──
 
 const MessageItem = memo(function MessageItem({ msg }: { msg: ChatMessage }) {
+  if (msg.role === 'user') {
+    return (
+      <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+        <div className="msg-user">{msg.content}</div>
+        {msg.files && msg.files.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <FileAttachments files={msg.files} />
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: 16 }}>
-      {msg.role === 'user' ? (
-        <div className="msg-user-row">
-          <div>
-            <div className="msg-user">
-              <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
-            </div>
-            {msg.files && msg.files.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-                <FileAttachments files={msg.files} />
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="msg-ai markdown-body">
-          <Markdown remarkPlugins={REMARK_PLUGINS}>{msg.content}</Markdown>
-        </div>
-      )}
+      <div className="msg-ai markdown-body">
+        <Markdown remarkPlugins={REMARK_PLUGINS}>{msg.content}</Markdown>
+      </div>
     </div>
   );
 });
