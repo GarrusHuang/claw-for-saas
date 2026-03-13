@@ -34,14 +34,31 @@ export interface AuthState {
 const TOKEN_KEY = 'claw_auth_token';
 const USER_KEY = 'claw_auth_user';
 
+/** 同步从 localStorage 恢复初始状态，避免首帧闪登录页 */
+function getInitialAuthState() {
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const userStr = localStorage.getItem(USER_KEY);
+    if (!token || !userStr) return null;
+    const user = JSON.parse(userStr);
+    if (!user.userId || !user.tenantId) return null;
+    if (user.expiresAt && Date.now() > user.expiresAt) return null;
+    return { token, userId: user.userId as string, tenantId: user.tenantId as string, expiresAt: user.expiresAt as number };
+  } catch {
+    return null;
+  }
+}
+
+const _initial = getInitialAuthState();
+
 export const useAuthStore = create<AuthState>((set) => ({
-  token: null,
-  userId: null,
-  tenantId: null,
-  expiresAt: null,
+  token: _initial?.token ?? null,
+  userId: _initial?.userId ?? null,
+  tenantId: _initial?.tenantId ?? null,
+  expiresAt: _initial?.expiresAt ?? null,
   loading: false,
   error: null,
-  isAuthenticated: false,
+  isAuthenticated: !!_initial,
 
   login: async (username, password, tenantId = 'default') => {
     set({ loading: true, error: null });
