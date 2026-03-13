@@ -14,7 +14,7 @@ def test_default_llm_base_url():
 
 def test_default_llm_model():
     s = Settings(_env_file=None)
-    assert s.llm_model == "qwen2.5"
+    assert s.llm_model == ""
 
 
 def test_default_auth_enabled():

@@ -57,7 +57,7 @@ pip install -r requirements.txt
 # 配置 .env
 cat > .env << 'EOF'
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=qwen2.5
+LLM_MODEL=your_model_name
 LLM_API_KEY=not-needed
 EOF
 
@@ -173,7 +173,7 @@ cd frontend && npm test
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `LLM_BASE_URL` | `http://localhost:11434/v1` | LLM API 地址 |
-| `LLM_MODEL` | `qwen2.5` | 模型名称 |
+| `LLM_MODEL` | `your_model_name` | 模型名称 |
 | `LLM_API_KEY` | `not-needed` | API Key |
 | `AGENT_MAX_ITERATIONS` | `25` | ReAct 最大迭代 |
 | `AGENT_MODEL_CONTEXT_WINDOW` | `32000` | 模型上下文窗口 |

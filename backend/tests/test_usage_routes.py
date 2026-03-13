@@ -38,7 +38,7 @@ def client(tmp_path):
         business_type="general_chat",
         prompt_tokens=100, completion_tokens=50, total_tokens=150,
         tool_call_count=3, iterations=2, duration_ms=1500.0,
-        status="success", model="qwen2.5",
+        status="success", model="test-model",
         tool_names=["arithmetic", "read_reference"],
     )
     usage_svc.record_pipeline(
@@ -46,7 +46,7 @@ def client(tmp_path):
         business_type="general_chat",
         prompt_tokens=80, completion_tokens=40, total_tokens=120,
         tool_call_count=1, iterations=1, duration_ms=800.0,
-        status="failed", model="qwen2.5",
+        status="failed", model="test-model",
         tool_names=["read_reference"],
     )
 

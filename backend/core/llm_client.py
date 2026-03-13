@@ -6,7 +6,7 @@ LLMGatewayClient: 异步 OpenAI 兼容 LLM 客户端。
 - 指数退避重试（429/500/502/503/超时）
 - Token 用量追踪
 - 流式输出支持
-- Qwen3 特定参数优化
+- 兼容多种模型 (thinking 模式等)
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class LLMClientConfig:
     """LLM 客户端配置"""
     base_url: str = "http://localhost:11434/v1"
-    model: str = "qwen2.5"
+    model: str = ""
     api_key: str = "not-needed"
     timeout_s: float = 120.0
     max_retries: int = 3
@@ -75,7 +75,7 @@ class LLMGatewayClient:
     - Retry with exponential backoff
     - Token usage tracking per call and cumulative
     - Streaming support (SSE pass-through)
-    - Qwen3-specific parameter defaults
+    - Thinking mode support (configurable)
     """
 
     def __init__(self, config: LLMClientConfig | None = None) -> None:

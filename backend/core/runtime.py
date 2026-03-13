@@ -89,7 +89,7 @@ class RuntimeResult:
     iterations: int = 0
     max_iterations_reached: bool = False
     error: str | None = None
-    thinking: str = ""  # Qwen3 thinking 内容汇总
+    thinking: str = ""  # thinking 内容汇总
     compact_stats: dict | None = None  # 压缩累计统计 (4j)
 
     @property
@@ -152,6 +152,11 @@ class AgenticRuntime:
             "stages": {1: 0, 2: 0, 3: 0},
             "overflow_retries": 0,
         }
+        # ── 重复检测: 防止 Agent 陷入工具调用死循环 ──
+        self._tool_call_history: list[str] = []  # 每轮工具调用签名
+        self._repetition_warned: bool = False
+        # ── 工具结果缓存: 同一 run 内相同调用直接返回缓存 ──
+        self._tool_result_cache: dict[str, ToolResult] = {}
 
     async def run(
         self,
@@ -206,6 +211,17 @@ class AgenticRuntime:
             self._accumulated_usage.prompt_tokens += llm_response.usage.prompt_tokens
             self._accumulated_usage.completion_tokens += llm_response.usage.completion_tokens
             self._accumulated_usage.total_tokens += llm_response.usage.total_tokens
+
+            # ── 日志: 每轮 LLM 返回摘要 ──
+            think_total = sum(len(p) for p in self._thinking_parts)
+            content_len = len(llm_response.content or "")
+            has_tc = bool(llm_response.tool_calls)
+            logger.info(
+                f"LLM response iter={iteration+1}: content={content_len}chars, "
+                f"thinking={think_total}chars, tool_calls={has_tc}, "
+                f"tokens={llm_response.usage.total_tokens}",
+                extra={"trace_id": self.trace_id},
+            )
 
             # 记录 LLM 步骤
             self._steps.append(RuntimeStep(
@@ -282,6 +298,26 @@ class AgenticRuntime:
 
             # ─── 4. 执行工具调用 ───
             if parsed.tool_calls:
+                # ── 4a. 重复检测: 检查是否陷入工具调用死循环 ──
+                repetition = self._detect_repetition(parsed.tool_calls)
+                if repetition == "force_stop":
+                    logger.warning(
+                        f"Repetition detected after warning at iteration {iteration + 1}, force stopping",
+                        extra={"trace_id": self.trace_id},
+                    )
+                    self._emit("agent_progress", {
+                        "status": "repetition_stopped",
+                        "iterations": iteration + 1,
+                    })
+                    last_content = parsed.content or ""
+                    if not last_content:
+                        last_content = self._steps[-1].content if self._steps else ""
+                    return self._build_result(
+                        final_answer=last_content,
+                        iterations=iteration + 1,
+                        error="agent_repetition_detected",
+                    )
+
                 self._emit("agent_progress", {
                     "status": "calling_tools",
                     "iteration": iteration + 1,
@@ -304,6 +340,23 @@ class AgenticRuntime:
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": obs.to_json(max_chars=budget),
+                    })
+
+                # ── 4b. 重复警告: 注入提示让 Agent 停止重复 ──
+                if repetition == "warn":
+                    self._repetition_warned = True
+                    logger.warning(
+                        f"Tool call repetition detected at iteration {iteration + 1}, injecting warning",
+                        extra={"trace_id": self.trace_id},
+                    )
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[系统提示] 检测到你在重复调用相同的工具并获得相同的结果。"
+                            "请不要再重复读取相同的文件或调用相同的工具。"
+                            "请基于你已经获取到的信息，直接给出最终回复。"
+                            "如果信息不完整，请说明缺少什么信息，而不是重复读取。"
+                        ),
                     })
 
                 continue
@@ -352,6 +405,13 @@ class AgenticRuntime:
         finish_reason = None
         usage_data: dict = {}
 
+        # ── 流式文本/思考重复检测 ──
+        _repetition_check_interval = 300  # 每累积 N 字检测一次
+        _last_check_len = 0
+        _last_think_check_len = 0
+        _think_parts_local: list[str] = []  # 本次调用的 thinking 累积
+        _stream_aborted = False
+
         # 是否为 final answer 迭代（无工具调用）— 控制流式粒度
         has_tool_calls = False
 
@@ -363,6 +423,27 @@ class AgenticRuntime:
         # vLLM thinking 模式: 省略 <think> 开始标签，直接流式输出思考内容，
         # 某个 chunk 中出现 </think> 后切换为正常文本。
         _in_think = self.llm_client.config.enable_thinking
+
+        def _record_thinking(part: str) -> bool:
+            """累积 thinking 内容并检测重复。返回 True 表示需要中断流。"""
+            nonlocal _last_think_check_len, _stream_aborted
+            _think_parts_local.append(part)
+            self._thinking_parts.append(part)
+            self._emit("thinking", {"content": part, "iteration": iteration + 1})
+
+            total_think_len = sum(len(p) for p in _think_parts_local)
+            if total_think_len - _last_think_check_len >= _repetition_check_interval:
+                _last_think_check_len = total_think_len
+                if total_think_len > 600:
+                    full_think = "".join(_think_parts_local)
+                    if self._detect_text_repetition(full_think):
+                        logger.warning(
+                            f"Thinking stream repetition detected at {total_think_len} chars, aborting",
+                            extra={"trace_id": self.trace_id},
+                        )
+                        _stream_aborted = True
+                        return True
+            return False
 
         async def _flush_text(force: bool = False) -> None:
             nonlocal _text_buf
@@ -407,8 +488,8 @@ class AgenticRuntime:
                                 parts = text.split("</think>", 1)
                                 think_part = parts[0]
                                 if think_part:
-                                    self._thinking_parts.append(think_part)
-                                    self._emit("thinking", {"content": think_part, "iteration": iteration + 1})
+                                    if _record_thinking(think_part):
+                                        break
                                 _in_think = False
                                 # </think> 之后的正常文本
                                 normal_text = parts[1].lstrip("\n")
@@ -420,8 +501,8 @@ class AgenticRuntime:
                                 # 仍在 think 中
                                 clean = text.replace("<think>", "")
                                 if clean:
-                                    self._thinking_parts.append(clean)
-                                    self._emit("thinking", {"content": clean, "iteration": iteration + 1})
+                                    if _record_thinking(clean):
+                                        break
                         else:
                             # 正常文本，检测 <think> 开始标签
                             if "<think>" in text:
@@ -435,8 +516,8 @@ class AgenticRuntime:
                                 if "</think>" in think_text:
                                     tp = think_text.split("</think>", 1)
                                     if tp[0]:
-                                        self._thinking_parts.append(tp[0])
-                                        self._emit("thinking", {"content": tp[0], "iteration": iteration + 1})
+                                        if _record_thinking(tp[0]):
+                                            break
                                     _in_think = False
                                     normal = tp[1].lstrip("\n")
                                     if normal:
@@ -444,14 +525,29 @@ class AgenticRuntime:
                                         _text_buf += normal
                                         await _flush_text()
                                 elif think_text:
-                                    self._thinking_parts.append(think_text)
-                                    self._emit("thinking", {"content": think_text, "iteration": iteration + 1})
+                                    if _record_thinking(think_text):
+                                        break
                             else:
                                 content_parts.append(text)
                                 _text_buf += text
                                 await _flush_text()
                     else:
                         content_parts.append(text)
+
+                    # ── 流式文本重复检测 ──
+                    total_len = sum(len(p) for p in content_parts)
+                    if total_len - _last_check_len >= _repetition_check_interval:
+                        _last_check_len = total_len
+                        if total_len > 800:
+                            full_text = "".join(content_parts)
+                            if self._detect_text_repetition(full_text):
+                                logger.warning(
+                                    f"Streaming text repetition detected at {total_len} chars, aborting stream",
+                                    extra={"trace_id": self.trace_id},
+                                )
+                                _stream_aborted = True
+                                await _flush_text(force=True)
+                                break
 
                 # ── 工具调用 (流式累积) ──
                 tc_deltas = delta.get("tool_calls", [])
@@ -526,6 +622,19 @@ class AgenticRuntime:
         # ── 组装完整响应 ──
         full_content = "".join(content_parts)
 
+        # 如果流被中断（文本/思考重复检测），截断到第一次重复之前的内容
+        if _stream_aborted:
+            if full_content:
+                full_content = self._truncate_at_repetition(full_content)
+                full_content += "\n\n[由于输出内容出现重复，已自动截断]"
+            elif _think_parts_local:
+                # thinking 流重复但没有正文内容 → 生成一个简短的结束回复
+                full_content = "[思考过程出现重复，已自动中断。请基于已有信息回答。]"
+                logger.warning(
+                    "Thinking repetition forced early stop — injecting fallback answer",
+                    extra={"trace_id": self.trace_id},
+                )
+
         # 组装 tool_calls
         assembled_tool_calls = None
         if tool_calls_buf:
@@ -593,13 +702,62 @@ class AgenticRuntime:
 
         return results
 
+    def _tool_cache_key(self, tool_call: ParsedToolCall) -> str:
+        """生成工具调用的缓存 key。"""
+        import json as _json
+        args_str = _json.dumps(tool_call.arguments, sort_keys=True, ensure_ascii=False)
+        return f"{tool_call.name}::{args_str}"
+
     async def _execute_single_tool(
         self,
         tool_call: ParsedToolCall,
         iteration: int,
     ) -> ToolResult:
-        """执行单个工具调用（带超时 + Hook 集成）。"""
+        """执行单个工具调用（带超时 + Hook 集成 + 只读缓存）。"""
         from core.context import current_user_id, current_session_id
+
+        # ── 只读工具结果缓存: 相同调用不重复执行 ──
+        is_read_only = self.tool_registry.is_read_only(tool_call.name)
+        if is_read_only:
+            cache_key = self._tool_cache_key(tool_call)
+            cached = self._tool_result_cache.get(cache_key)
+            if cached is not None:
+                logger.info(
+                    f"Tool cache hit: {tool_call.name} (returning cached result)",
+                    extra={"trace_id": self.trace_id},
+                )
+                # 构造带提示的缓存结果
+                hint = (
+                    "[注意] 你已经调用过此工具且参数完全相同，结果不会改变。"
+                    "请直接基于已有信息作答，不要重复调用。"
+                )
+                cache_result = ToolResult(
+                    success=cached.success,
+                    data={
+                        "_cache_hit": True,
+                        "_hint": hint,
+                        **(cached.data if isinstance(cached.data, dict) else {"result": cached.data}),
+                    } if cached.data else {"_cache_hit": True, "_hint": hint},
+                    error=cached.error,
+                )
+                self._steps.append(RuntimeStep(
+                    step_type=StepType.TOOL_CALL,
+                    content="(cached)",
+                    tool_name=tool_call.name,
+                    tool_args=tool_call.arguments,
+                    tool_result="(cached)",
+                    latency_ms=0,
+                    iteration=iteration,
+                ))
+                self._emit("tool_executed", {
+                    "tool": tool_call.name,
+                    "success": cached.success,
+                    "cached": True,
+                    "latency_ms": 0,
+                    "args_summary": self._summarize_args(tool_call.arguments),
+                    "result_summary": "(cached) " + (str(cached.data)[:200] if cached.data else ""),
+                })
+                return cache_result
 
         start = time.monotonic()
 
@@ -672,6 +830,11 @@ class AgenticRuntime:
             result = ToolResult(success=False, error=str(e))
 
         latency_ms = (time.monotonic() - start) * 1000
+
+        # ── 缓存只读工具的成功结果 ──
+        if is_read_only and result.success:
+            cache_key = self._tool_cache_key(tool_call)
+            self._tool_result_cache[cache_key] = result
 
         # ── POST hook: 工具调用后审计 ──
         if self.hooks:
@@ -796,9 +959,11 @@ class AgenticRuntime:
 
     def _stage1_truncate_tool_results(self, messages: list[dict]) -> list[dict]:
         """
-        阶段 1: 截断旧的工具结果。
+        阶段 1: 语义压缩旧的工具结果。
 
-        保留最近 4 条 tool 消息不动，更早的 tool 消息截断到 200 字符。
+        保留最近 4 条 tool 消息不动，更早的 tool 消息替换为语义摘要。
+        摘要保留: 工具名、参数、执行状态、关键结论。
+        明确标注"此工具已执行过，重复调用返回相同结果"，防止模型重复调用。
         """
         result = []
         # 找出所有 tool 消息的索引
@@ -806,15 +971,80 @@ class AgenticRuntime:
         # 保护最近 4 条 tool 消息
         protected = set(tool_indices[-4:]) if len(tool_indices) > 4 else set(tool_indices)
 
+        # 构建 tool_call_id → (tool_name, args) 的映射
+        tool_call_map: dict[str, tuple[str, dict]] = {}
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls", []):
+                    fn = tc.get("function", {})
+                    tc_id = tc.get("id", "")
+                    name = fn.get("name", "unknown")
+                    try:
+                        import json as _json
+                        args = _json.loads(fn.get("arguments", "{}"))
+                    except Exception:
+                        args = {}
+                    tool_call_map[tc_id] = (name, args)
+
         for i, msg in enumerate(messages):
             if msg.get("role") == "tool" and i not in protected:
                 content = str(msg.get("content", ""))
-                if len(content) > 200:
-                    from .tool_registry import smart_truncate
-                    truncated = smart_truncate(content, 200)
-                    msg = {**msg, "content": truncated}
+                if len(content) > 300:
+                    tc_id = msg.get("tool_call_id", "")
+                    tool_name, tool_args = tool_call_map.get(tc_id, ("unknown", {}))
+                    summary = self._summarize_tool_result_for_compaction(
+                        tool_name, tool_args, content,
+                    )
+                    msg = {**msg, "content": summary}
             result.append(msg)
         return result
+
+    def _summarize_tool_result_for_compaction(
+        self, tool_name: str, tool_args: dict, content: str,
+    ) -> str:
+        """
+        为上下文压缩生成工具结果的语义摘要。
+
+        保留关键信息 (文件名、类型、状态)，丢弃原始内容，
+        并明确告知模型此工具已执行过、重复调用结果不变。
+        """
+        import json as _json
+        original_len = len(content)
+
+        # 尝试解析 JSON 内容提取关键字段
+        meta_parts: list[str] = []
+        try:
+            data = _json.loads(content)
+            if isinstance(data, dict):
+                for key in ("filename", "file_id", "content_type", "size_bytes",
+                            "title", "url", "status", "error"):
+                    if key in data:
+                        meta_parts.append(f"{key}={data[key]}")
+                # 对于文件内容，取前 150 字作为预览
+                text_val = data.get("text") or data.get("content") or ""
+                if isinstance(text_val, str) and len(text_val) > 20:
+                    meta_parts.append(f"内容预览={text_val[:150]}...")
+            elif isinstance(data, list):
+                meta_parts.append(f"返回列表({len(data)}项)")
+                if data and isinstance(data[0], dict):
+                    meta_parts.append(f"首项字段={list(data[0].keys())[:5]}")
+        except Exception:
+            # 非 JSON，取前 150 字
+            meta_parts.append(f"内容预览={content[:150]}...")
+
+        args_str = ", ".join(f"{k}={v}" for k, v in tool_args.items()) if tool_args else ""
+        meta_str = "; ".join(meta_parts) if meta_parts else "无额外信息"
+
+        # 判断执行状态：检查内容是否包含错误标识
+        has_error = any(k in content[:200].lower() for k in ('"error"', '"success": false', '"success":false'))
+        status = "失败" if has_error else "成功"
+
+        return (
+            f"[已压缩的工具结果] {tool_name}({args_str})\n"
+            f"执行状态: {status} | 原始长度: {original_len}字\n"
+            f"摘要: {meta_str}\n"
+            f"⚠ 此工具已执行过。重复调用相同参数将返回完全相同的结果，请勿重复调用。"
+        )
 
     async def _stage2_summarize_middle(
         self,
@@ -1268,6 +1498,107 @@ class AgenticRuntime:
         else:
             text = str(result.data) if result.data is not None else ""
         return text[:300] + "..." if len(text) > 300 else text
+
+    @staticmethod
+    def _tool_call_signature(tool_calls: list[ParsedToolCall]) -> str:
+        """生成一组工具调用的指纹，用于检测重复模式。"""
+        import json as _json
+        parts = []
+        for tc in sorted(tool_calls, key=lambda t: t.name):
+            args_str = _json.dumps(tc.arguments, sort_keys=True, ensure_ascii=False)
+            parts.append(f"{tc.name}({args_str})")
+        return "|".join(parts)
+
+    def _detect_repetition(self, tool_calls: list[ParsedToolCall]) -> str | None:
+        """
+        检测 Agent 是否陷入工具调用死循环。
+
+        返回:
+            None — 无重复
+            "warn" — 连续 3 次相同调用，需注入警告
+            "force_stop" — 警告后仍重复，强制终止
+        """
+        sig = self._tool_call_signature(tool_calls)
+        self._tool_call_history.append(sig)
+
+        # 至少需要 3 轮才能判定重复
+        if len(self._tool_call_history) < 3:
+            return None
+
+        last_3 = self._tool_call_history[-3:]
+        if last_3[0] == last_3[1] == last_3[2]:
+            if self._repetition_warned:
+                return "force_stop"
+            return "warn"
+
+        return None
+
+    @staticmethod
+    def _truncate_at_repetition(text: str) -> str:
+        """截断文本到第一次出现重复的位置，保留有意义的前半部分。"""
+        if len(text) < 400:
+            return text
+
+        # 尝试用 60 字的探针找到第二次出现的位置
+        normalized = "".join(text.split())
+        best_cut = len(text)
+
+        for probe_len in (60, 40):
+            tail_probe = normalized[-probe_len:]
+            # 在前半部分找第一次出现的位置
+            first_pos = normalized.find(tail_probe)
+            if first_pos >= 0 and first_pos < len(normalized) - probe_len - 20:
+                # 找到重复，第二次出现的位置就是截断点
+                second_pos = normalized.find(tail_probe, first_pos + probe_len)
+                if second_pos >= 0 and second_pos < best_cut:
+                    best_cut = second_pos
+                    break
+
+        if best_cut < len(text):
+            # 在原始文本中找对应位置（考虑空白差异，取约同比例位置）
+            ratio = best_cut / len(normalized)
+            cut_in_original = int(len(text) * ratio)
+            # 往前找自然断点
+            for j in range(cut_in_original, max(cut_in_original - 200, 0), -1):
+                if text[j] in "\n。.！!？?":
+                    return text[:j + 1].rstrip()
+            return text[:cut_in_original].rstrip()
+
+        return text
+
+    @staticmethod
+    def _detect_text_repetition(text: str) -> bool:
+        """
+        检测流式文本是否陷入重复生成。
+
+        策略: 取最近一段文本，检查它是否在更早的文本中出现过。
+        如果最近的输出和之前的某段内容高度重合，说明模型在重复自己。
+        """
+        if len(text) < 400:
+            return False
+
+        # 取最后 100 字（去空白），在前面的文本中查找
+        tail = "".join(text[-150:].split())
+        if len(tail) < 40:
+            return False
+
+        # 用 60 字的滑动窗口搜索
+        probe = tail[-60:]
+        head = "".join(text[:-150].split())
+
+        # 计算 probe 在 head 中出现的次数
+        count = 0
+        start = 0
+        while True:
+            pos = head.find(probe, start)
+            if pos == -1:
+                break
+            count += 1
+            start = pos + 30  # 避免重叠计数
+            if count >= 2:
+                return True
+
+        return False
 
     def _emit(self, event_type: str, data: dict) -> None:
         """通过 EventBus 发射事件。"""

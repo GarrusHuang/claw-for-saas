@@ -35,7 +35,7 @@ def svc_with_data(tmp_path):
         business_type="general_chat",
         prompt_tokens=100, completion_tokens=50, total_tokens=150,
         tool_call_count=3, iterations=2, duration_ms=1500.0,
-        status="success", model="qwen2.5",
+        status="success", model="test-model",
         tool_names=["read_reference", "arithmetic"],
     )
     svc.record_pipeline(
@@ -43,7 +43,7 @@ def svc_with_data(tmp_path):
         business_type="reimbursement_create",
         prompt_tokens=200, completion_tokens=100, total_tokens=300,
         tool_call_count=5, iterations=3, duration_ms=2500.0,
-        status="success", model="qwen2.5",
+        status="success", model="test-model",
         tool_names=["arithmetic", "propose_plan"],
     )
     svc.record_pipeline(
@@ -51,7 +51,7 @@ def svc_with_data(tmp_path):
         business_type="general_chat",
         prompt_tokens=80, completion_tokens=40, total_tokens=120,
         tool_call_count=1, iterations=1, duration_ms=800.0,
-        status="failed", model="qwen2.5",
+        status="failed", model="test-model",
         tool_names=["read_reference"],
     )
     return svc
@@ -66,7 +66,7 @@ class TestRecordPipeline:
             tenant_id="T1", user_id="U1", session_id="S1",
             prompt_tokens=100, completion_tokens=50, total_tokens=150,
             tool_call_count=2, iterations=1, duration_ms=500.0,
-            status="success", model="qwen2.5",
+            status="success", model="test-model",
         )
         assert event_id is not None
         assert event_id > 0

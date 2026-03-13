@@ -5,7 +5,7 @@ ToolCallParser: 双模式工具调用解析。
 - Mode 1 (Primary): 原生 OpenAI tool_calls（vLLM --tool-call-parser hermes）
 - Mode 2 (Fallback): Hermes XML <tool_call>JSON</tool_call> 格式
 
-Qwen3 模型通过 vLLM 服务时支持两种格式，Parser 透明处理两种情况。
+兼容多种 LLM 通过 vLLM 服务时的两种格式，Parser 透明处理。
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class ParsedResponse:
     content: str = ""
     tool_calls: list[ParsedToolCall] = field(default_factory=list)
     raw_content: str = ""  # 原始 LLM 输出（含 tool_call 标签）
-    thinking: str = ""  # Qwen3 thinking 内容（如果有）
+    thinking: str = ""  # thinking 内容（如果有）
 
 
 class ToolCallParser:
@@ -55,7 +55,7 @@ class ToolCallParser:
         r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
         re.DOTALL,
     )
-    # Qwen3 thinking 标签
+    # thinking 标签 (<think>...</think>)
     _THINKING_PATTERN = re.compile(
         r"<think>(.*?)</think>",
         re.DOTALL,
@@ -76,7 +76,7 @@ class ToolCallParser:
         content = self._get_content(response)
         tool_calls_native = self._get_native_tool_calls(response)
 
-        # 提取 thinking（Qwen3 thinking 模式）
+        # 提取 thinking（thinking 模式）
         thinking = ""
         if content:
             think_match = self._THINKING_PATTERN.search(content)
@@ -165,7 +165,7 @@ class ToolCallParser:
         """
         安全解析工具调用参数 JSON。
 
-        部分 LLM (如 vLLM Qwen3) 偶尔输出畸形 JSON:
+        部分 LLM (如 vLLM) 偶尔输出畸形 JSON:
         - 缺少开头 `{`: '"user_id": "U001"}'
         - 缺少结尾 `}`: '{"user_id": "U001"'
         - 缺少两端 `{}`: '"user_id": "U001"'
