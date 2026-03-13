@@ -7,11 +7,12 @@
     "user_id": "U001",
     "tenant_id": "default",
     "business_type": "scheduled_task",
+    "timezone": "",
     "enabled": true,
     "created_at": 1773294798.3473263,
-    "last_run_at": 1773306210.0712,
+    "last_run_at": 1773392538.2268414,
     "last_run_status": "success",
-    "next_run_at": 1773392400.0
+    "next_run_at": 1773478800.0
   },
   {
     "id": "92f8418a",
@@ -21,10 +22,26 @@
     "user_id": "U001",
     "tenant_id": "default",
     "business_type": "scheduled_task",
-    "enabled": true,
+    "timezone": "",
+    "enabled": false,
     "created_at": 1773294893.0464103,
     "last_run_at": 1773323720.1028666,
     "last_run_status": "success",
     "next_run_at": 1773410100.0
+  },
+  {
+    "id": "9bea5f34",
+    "name": "测试定时任务提醒",
+    "cron": "*/1 * * * *",
+    "message": "黄哥，提醒您测试定时任务功能已完成！🎉 现在可以开始测试了～",
+    "user_id": "U001",
+    "tenant_id": "default",
+    "business_type": "scheduled_task",
+    "timezone": "",
+    "enabled": false,
+    "created_at": 1773394121.3755548,
+    "last_run_at": 1773403799.0587919,
+    "last_run_status": "success",
+    "next_run_at": 1773403800.0
   }
 ]
