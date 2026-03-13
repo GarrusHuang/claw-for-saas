@@ -21,16 +21,8 @@ import {
   DatabaseOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons';
-import { usePipelineStore, aiApi, getAIConfig } from '@claw/core';
+import { usePipelineStore, aiApi } from '@claw/core';
 import type { PlanStepTracking, ToolExecution, KBFileInfo, FileInfo } from '@claw/core';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-
-/** 同步获取 Auth headers (getAuthToken 已收窄为同步) */
-function getAuthHeaders(): Record<string, string> {
-  const token = getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? '';
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 const { Text } = Typography;
 
