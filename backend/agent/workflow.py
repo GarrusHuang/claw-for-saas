@@ -37,7 +37,6 @@ _TOOL_PHASE_MAP: dict[str, WorkflowPhase] = {
     "submit_all_audit_results": WorkflowPhase.AUDITING,
     "generate_document": WorkflowPhase.GENERATING,
     "spawn_subagent": WorkflowPhase.REVIEWING,
-    "parallel_review": WorkflowPhase.REVIEWING,
 }
 
 # 阶段排序 (用于进度估算)

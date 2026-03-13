@@ -77,11 +77,11 @@ def _is_unsafe_url(url: str) -> bool:
         return True  # 解析失败视为不安全
 
     # 本地地址
-    unsafe_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+    unsafe_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"}
     if host in unsafe_hosts:
         return True
 
-    # 内网段
+    # IPv4 内网段
     if host.startswith("10."):
         return True
     if host.startswith("192.168."):
@@ -97,12 +97,22 @@ def _is_unsafe_url(url: str) -> bool:
             except ValueError:
                 pass
 
-    # 链接本地
+    # 链接本地 (IPv4)
     if host.startswith("169.254."):
         return True
 
+    # IPv6 私有/本地段
+    # 去掉 [] 包裹 (URL 中 IPv6 用 [::1] 格式)
+    bare = host.strip("[]")
+    if bare.startswith("fc") or bare.startswith("fd"):
+        # fc00::/7 — Unique Local Address (ULA)
+        return True
+    if bare.startswith("fe80"):
+        # fe80::/10 — Link-Local
+        return True
+
     # 元数据服务 (AWS/GCP/Azure)
-    if host == "metadata.google.internal":
+    if host in ("metadata.google.internal", "169.254.169.254"):
         return True
 
     return False

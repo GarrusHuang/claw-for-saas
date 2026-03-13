@@ -98,3 +98,59 @@ def test_app_debug_defaults_false():
     """app_debug 默认应为 False (而非 True)。"""
     s = Settings(_env_file=None)
     assert s.app_debug is False
+
+
+# ── T-02: 边界值测试 ──
+
+def test_negative_max_iterations(monkeypatch):
+    """负数 max_iterations 应被接受（Pydantic 不限制）。"""
+    monkeypatch.setenv("AGENT_MAX_ITERATIONS", "-1")
+    s = Settings(_env_file=None)
+    assert s.agent_max_iterations == -1
+
+
+def test_zero_timeout(monkeypatch):
+    """超时为 0 应被接受。"""
+    monkeypatch.setenv("LLM_TIMEOUT_S", "0")
+    s = Settings(_env_file=None)
+    assert s.llm_timeout_s == 0.0
+
+
+def test_empty_llm_base_url(monkeypatch):
+    """空 LLM_BASE_URL 应被接受。"""
+    monkeypatch.setenv("LLM_BASE_URL", "")
+    s = Settings(_env_file=None)
+    assert s.llm_base_url == ""
+
+
+def test_large_context_window(monkeypatch):
+    """超大 context window 值应被接受。"""
+    monkeypatch.setenv("AGENT_MODEL_CONTEXT_WINDOW", "1000000")
+    s = Settings(_env_file=None)
+    assert s.agent_model_context_window == 1_000_000
+
+
+def test_zero_max_iterations(monkeypatch):
+    """0 迭代次数应被接受。"""
+    monkeypatch.setenv("AGENT_MAX_ITERATIONS", "0")
+    s = Settings(_env_file=None)
+    assert s.agent_max_iterations == 0
+
+
+def test_budget_ratio_boundaries(monkeypatch):
+    """预算比例边界值 (0.0 和 1.0)。"""
+    monkeypatch.setenv("AGENT_CONTEXT_BUDGET_RATIO", "0.0")
+    s = Settings(_env_file=None)
+    assert s.agent_context_budget_ratio == 0.0
+
+    monkeypatch.setenv("AGENT_CONTEXT_BUDGET_RATIO", "1.0")
+    s2 = Settings(_env_file=None)
+    assert s2.agent_context_budget_ratio == 1.0
+
+
+def test_invalid_type_raises(monkeypatch):
+    """非数字值应抛出验证错误。"""
+    import pytest
+    monkeypatch.setenv("AGENT_MAX_ITERATIONS", "not_a_number")
+    with pytest.raises(Exception):
+        Settings(_env_file=None)

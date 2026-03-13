@@ -142,8 +142,11 @@ class SubagentRunner:
                 logger.debug(f"Tool '{tool_name}' not found in registry, skipping")
 
         if len(filtered) == 0:
-            logger.warning("Tool whitelist matched nothing, falling back to all tools")
-            return all_tools
+            logger.error(
+                f"Tool whitelist matched nothing (requested: {tools}), "
+                "returning empty registry — subagent will have no tools"
+            )
+            return filtered  # 不回退，返回空 registry 以尊重权限意图
 
         return filtered
 

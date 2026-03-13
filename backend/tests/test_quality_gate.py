@@ -218,8 +218,9 @@ class TestQualityGateHook:
 
     def test_max_corrections_allows(self):
         """After MAX_SELF_CORRECTIONS, should allow despite issues."""
+        import time
         key = "U1:S1"
-        _correction_counts[key] = MAX_SELF_CORRECTIONS
+        _correction_counts[key] = (MAX_SELF_CORRECTIONS, time.time())
         event = _make_event(
             context={
                 "business_type": "create_invoice",
@@ -230,14 +231,16 @@ class TestQualityGateHook:
         assert result.action == "allow"
 
     def test_reset_correction_count(self):
-        _correction_counts["U1:S1"] = 2
+        import time
+        _correction_counts["U1:S1"] = (2, time.time())
         reset_correction_count("U1:S1")
         assert "U1:S1" not in _correction_counts
 
     def test_cleanup_on_overflow(self):
         """When dict grows > 50, LRU cleanup keeps most recent 50."""
+        import time
         for i in range(60):
-            _correction_counts[f"user:{i}"] = 1
+            _correction_counts[f"user:{i}"] = (1, time.time())
         event = _make_event(context={"business_type": "query"})
         quality_gate_hook(event)
         assert len(_correction_counts) <= 51  # 50 kept + 1 new entry

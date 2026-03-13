@@ -61,7 +61,7 @@ async def login(req: LoginRequest):
         expires_in=settings.auth_session_expire_s,
     )
 
-    logger.info(f"Login success: tenant={user.tenant_id} user={user.user_id}")
+    logger.info(f"Login success: tenant={user.tenant_id}")
     return {
         "token": token,
         "token_type": "bearer",

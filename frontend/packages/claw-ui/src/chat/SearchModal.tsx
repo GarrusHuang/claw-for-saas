@@ -40,7 +40,7 @@ export default function SearchModal({ open, onClose, onSelectSession }: SearchMo
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<{ focus: () => void } | null>(null);
 
-  // 自动聚焦
+  // 自动聚焦 + 关闭时清理
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -49,6 +49,9 @@ export default function SearchModal({ open, onClose, onSelectSession }: SearchMo
       setResults([]);
       setSearched(false);
     }
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [open]);
 
   const doSearch = useCallback(async (q: string) => {
