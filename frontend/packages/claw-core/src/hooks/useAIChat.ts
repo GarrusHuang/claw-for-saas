@@ -211,11 +211,22 @@ export function useAIChat() {
               }
               assistantIdx++;
             } else {
+              // 恢复用户消息附带的文件
+              const rawFiles = (m as Record<string, unknown>).files;
+              const files: ChatMessageFile[] | undefined = Array.isArray(rawFiles)
+                ? rawFiles.map((f: Record<string, unknown>) => ({
+                    fileId: (f.fileId ?? f.file_id ?? '') as string,
+                    filename: (f.filename ?? '') as string,
+                    contentType: (f.contentType ?? f.content_type) as string | undefined,
+                    sizeBytes: (f.sizeBytes ?? f.size_bytes) as number | undefined,
+                  })).filter((f) => f.fileId)
+                : undefined;
               loaded.push({
                 id: `hist-${sessionId}-${loaded.length}`,
                 role: 'user',
                 content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
                 timestamp: Date.now() - (filtered.length - i) * 1000,
+                ...(files && files.length > 0 ? { files } : {}),
               });
             }
           }

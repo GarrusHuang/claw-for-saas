@@ -374,9 +374,25 @@ class AgentGateway:
             }
 
         # ── 9. 持久化会话 ──
+        user_msg: dict = {"role": "user", "content": message, "ts": start_time}
+        # 提取文件引用 (前端上传的 file 类型 material)
+        if materials:
+            file_refs = []
+            for m in (materials or []):
+                if not isinstance(m, dict):
+                    continue
+                if m.get("material_type") == "file":
+                    mid = m.get("material_id", "")
+                    fid = mid.removeprefix("file-") if mid.startswith("file-") else mid
+                    if fid:
+                        file_refs.append({
+                            "fileId": fid,
+                            "filename": m.get("filename", ""),
+                        })
+            if file_refs:
+                user_msg["files"] = file_refs
         self.session_manager.append_message(
-            tenant_id, user_id, session_id,
-            {"role": "user", "content": message, "ts": start_time},
+            tenant_id, user_id, session_id, user_msg,
         )
         self.session_manager.append_message(
             tenant_id, user_id, session_id,
