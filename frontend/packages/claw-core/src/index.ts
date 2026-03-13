@@ -70,3 +70,5 @@ export { usePipeline } from './hooks/usePipeline.ts';
 export type { InvokeParams } from './hooks/usePipeline.ts';
 export { useAIChat } from './hooks/useAIChat.ts';
 export type { ChatMessage, ChatMessageFile, ChatTimelineEntry } from './hooks/useAIChat.ts';
+export { useNotifications } from './hooks/useNotifications.ts';
+export type { NotificationHandler } from './hooks/useNotifications.ts';

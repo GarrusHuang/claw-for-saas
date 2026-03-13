@@ -197,8 +197,15 @@ def get_scheduler():
         store=get_schedule_store(),
         gateway_factory=build_gateway,
         webhook_dispatcher=get_webhook_dispatcher(),
+        notification_manager=get_notification_manager(),
         check_interval_s=s.scheduler_check_interval_s,
     )
+
+
+@lru_cache()
+def get_notification_manager():
+    from core.notification import NotificationManager
+    return NotificationManager()
 
 
 @lru_cache()

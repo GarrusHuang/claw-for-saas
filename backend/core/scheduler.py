@@ -17,6 +17,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
@@ -35,6 +36,7 @@ class ScheduledTask:
     user_id: str
     tenant_id: str
     business_type: str = "scheduled_task"
+    timezone: str = ""              # IANA tz name (e.g. "Asia/Shanghai"), 空则用系统配置
     enabled: bool = True
     created_at: float = field(default_factory=time.time)
     last_run_at: float | None = None
@@ -54,6 +56,7 @@ class ScheduledTask:
             user_id=data["user_id"],
             tenant_id=data["tenant_id"],
             business_type=data.get("business_type", "scheduled_task"),
+            timezone=data.get("timezone", ""),
             enabled=data.get("enabled", True),
             created_at=data.get("created_at", time.time()),
             last_run_at=data.get("last_run_at"),
@@ -62,9 +65,19 @@ class ScheduledTask:
         )
 
 
-def compute_next_run(cron_expr: str, base_time: float | None = None) -> float:
-    """计算 cron 表达式的下次执行时间 (UTC)。"""
-    base = datetime.fromtimestamp(base_time or time.time(), tz=timezone.utc)
+def compute_next_run(cron_expr: str, base_time: float | None = None, tz_name: str | None = None) -> float:
+    """计算 cron 表达式的下次执行时间，使用指定时区解释 cron。
+
+    Args:
+        cron_expr: 5-field cron expression
+        base_time: 基准时间 (Unix epoch seconds), 默认 now
+        tz_name: IANA 时区名 (如 "Asia/Shanghai"), 默认从配置读取
+    """
+    if tz_name is None:
+        from config import Settings
+        tz_name = Settings().scheduler_timezone
+    tz = ZoneInfo(tz_name)
+    base = datetime.fromtimestamp(base_time or time.time(), tz=tz)
     cron = croniter(cron_expr, base)
     return cron.get_next(float)
 
@@ -161,11 +174,13 @@ class Scheduler:
         store: ScheduleStore,
         gateway_factory: GatewayFactory,
         webhook_dispatcher: Any | None = None,
+        notification_manager: Any | None = None,
         check_interval_s: int = 60,
     ) -> None:
         self.store = store
         self.gateway_factory = gateway_factory
         self.webhook_dispatcher = webhook_dispatcher
+        self.notification_manager = notification_manager
         self.check_interval_s = check_interval_s
         self._tasks: dict[str, ScheduledTask] = {}  # task_id → task
         self._bg_task: asyncio.Task | None = None
@@ -178,7 +193,7 @@ class Scheduler:
             if task.enabled:
                 # 计算 next_run_at
                 if task.next_run_at is None:
-                    task.next_run_at = compute_next_run(task.cron)
+                    task.next_run_at = compute_next_run(task.cron, tz_name=task.timezone or None)
                     self.store.update(task)
                 self._tasks[task.id] = task
         logger.info(f"Scheduler started with {len(self._tasks)} active tasks")
@@ -214,7 +229,7 @@ class Scheduler:
             if task.next_run_at and task.next_run_at <= now:
                 logger.info(f"Triggering scheduled task: {task.name} ({task.id})")
                 # 立即更新 next_run_at 防止下次 tick 重复触发
-                task.next_run_at = compute_next_run(task.cron)
+                task.next_run_at = compute_next_run(task.cron, tz_name=task.timezone or None)
                 self.store.update(task)
                 t = asyncio.create_task(self._execute_task(task))
                 t.add_done_callback(self._task_done_callback)
@@ -240,7 +255,7 @@ class Scheduler:
 
             task.last_run_at = time.time()
             task.last_run_status = "success" if not result.get("error") else "failed"
-            task.next_run_at = compute_next_run(task.cron)
+            task.next_run_at = compute_next_run(task.cron, tz_name=task.timezone or None)
             self.store.update(task)
 
             # Webhook 通知
@@ -259,11 +274,20 @@ class Scheduler:
 
             logger.info(f"Scheduled task completed: {task.name} → {task.last_run_status}")
 
+            # WebSocket 通知用户
+            if self.notification_manager:
+                await self.notification_manager.notify_user(task.user_id, "session_created", {
+                    "session_id": result.get("session_id", ""),
+                    "task_name": task.name,
+                    "status": task.last_run_status,
+                    "source": "scheduled_task",
+                })
+
         except Exception as e:
             logger.error(f"Scheduled task failed: {task.name} — {e}")
             task.last_run_at = time.time()
             task.last_run_status = "failed"
-            task.next_run_at = compute_next_run(task.cron)
+            task.next_run_at = compute_next_run(task.cron, tz_name=task.timezone or None)
             self.store.update(task)
 
             if self.webhook_dispatcher:
@@ -280,7 +304,7 @@ class Scheduler:
 
     def add_task(self, task: ScheduledTask) -> ScheduledTask:
         """添加定时任务。"""
-        task.next_run_at = compute_next_run(task.cron)
+        task.next_run_at = compute_next_run(task.cron, tz_name=task.timezone or None)
         self.store.add(task)
         if task.enabled:
             self._tasks[task.id] = task
@@ -316,7 +340,7 @@ class Scheduler:
         if not task:
             return False
         task.enabled = True
-        task.next_run_at = compute_next_run(task.cron)
+        task.next_run_at = compute_next_run(task.cron, tz_name=task.timezone or None)
         self.store.update(task)
         self._tasks[task.id] = task
         return True
@@ -332,7 +356,7 @@ class Scheduler:
             if hasattr(task, key) and key not in ("id", "user_id", "tenant_id", "created_at"):
                 setattr(task, key, val)
         if "cron" in kwargs:
-            task.next_run_at = compute_next_run(task.cron)
+            task.next_run_at = compute_next_run(task.cron, tz_name=task.timezone or None)
         self.store.update(task)
         # 更新内存
         if task.enabled:

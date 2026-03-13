@@ -221,6 +221,10 @@ class Settings(BaseSettings):
         default="data/schedules",
         description="Scheduler task persistence directory",
     )
+    scheduler_timezone: str = Field(
+        default="Asia/Shanghai",
+        description="Timezone for cron schedule interpretation (IANA tz name)",
+    )
 
     # ─── Webhook (A9) ───
     webhook_data_dir: str = Field(

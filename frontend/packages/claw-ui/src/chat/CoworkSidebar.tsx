@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Typography } from 'antd';
+import { Typography, notification } from 'antd';
 import {
   PlusOutlined,
   SearchOutlined,
@@ -7,9 +7,11 @@ import {
   BulbOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import {
   useAIChatStore, usePipelineStore, aiApi, getAIConfig,
+  useNotifications,
   type SessionInfo,
 } from '@claw/core';
 import SearchModal from './SearchModal.tsx';
@@ -33,7 +35,10 @@ function formatSessionLabel(session: SessionInfo): string {
 function formatSessionDate(session: SessionInfo): string {
   if (!session.created_at) return '';
   try {
-    const d = new Date(session.created_at);
+    const ts = typeof session.created_at === 'number'
+      ? (session.created_at < 1e12 ? session.created_at * 1000 : session.created_at)
+      : Number(session.created_at);
+    const d = new Date(ts);
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     const hour = String(d.getHours()).padStart(2, '0');
@@ -53,6 +58,7 @@ export default function CoworkSidebar() {
   // ── State ──
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
 
   // ── Session fetching ──
   const fetchSessions = useCallback(async () => {
@@ -68,6 +74,25 @@ export default function CoworkSidebar() {
     fetchSessions();
   }, [currentSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── WebSocket 通知: 后台产生新 session 时实时刷新列表 + 弹出提示 ──
+  useNotifications(useCallback((event) => {
+    if (event.type === 'session_created') {
+      const sessionId = event.data?.session_id as string;
+      if (sessionId) {
+        setUnreadIds((prev) => new Set(prev).add(sessionId));
+      }
+      fetchSessions();
+      const taskName = (event.data?.task_name as string) || '定时任务';
+      const status = event.data?.status as string;
+      notification.info({
+        message: '定时任务完成',
+        description: `「${taskName}」已${status === 'success' ? '执行完成' : '执行失败'}`,
+        placement: 'topRight',
+        duration: 5,
+      });
+    }
+  }, [fetchSessions]));
+
   // ── Handlers ──
   const handleNewSession = useCallback(() => {
     setContentView('chat');
@@ -77,6 +102,12 @@ export default function CoworkSidebar() {
   const handleSelectSession = useCallback((sessionId: string) => {
     setContentView('chat');
     dispatchSessionAction({ type: 'load', sessionId });
+    setUnreadIds((prev) => {
+      if (!prev.has(sessionId)) return prev;
+      const next = new Set(prev);
+      next.delete(sessionId);
+      return next;
+    });
   }, [dispatchSessionAction, setContentView]);
 
   const handleScheduledClick = useCallback(() => {
@@ -160,29 +191,42 @@ export default function CoworkSidebar() {
         ) : (
           sessions.map((session) => {
             const isActive = session.session_id === currentSessionId;
+            const isUnread = unreadIds.has(session.session_id);
+            const isBot = session.business_type === 'scheduled_task';
             return (
               <div
                 key={session.session_id}
-                className={`cowork-sidebar-session-item${isActive ? ' cowork-sidebar-session-item--active' : ''}`}
+                className={`cowork-sidebar-session-item${isActive ? ' cowork-sidebar-session-item--active' : ''}${isUnread ? ' cowork-sidebar-session-item--unread' : ''}`}
                 role="button"
                 tabIndex={0}
                 onClick={() => handleSelectSession(session.session_id)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectSession(session.session_id); } }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontWeight: isActive ? 600 : 400,
-                      color: isActive ? '#1a6fb5' : '#333',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      display: 'block',
-                    }}
-                  >
-                    {formatSessionLabel(session)}
-                  </Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {isBot && (
+                      <RobotOutlined style={{ fontSize: 12, color: '#8b5cf6', flexShrink: 0 }} />
+                    )}
+                    {isUnread && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: '#f59e0b', flexShrink: 0,
+                      }} />
+                    )}
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        fontWeight: isActive || isUnread ? 600 : 400,
+                        color: isActive ? '#1a6fb5' : '#333',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        flex: 1,
+                      }}
+                    >
+                      {formatSessionLabel(session)}
+                    </Text>
+                  </div>
                   <Text type="secondary" style={{ fontSize: 11, lineHeight: '14px' }}>
                     {formatSessionDate(session)}
                   </Text>
