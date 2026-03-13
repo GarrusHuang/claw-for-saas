@@ -278,8 +278,8 @@ export async function uploadFile(file: File, userId?: string, sessionId?: string
   return res.json() as Promise<FileInfo>;
 }
 
-export async function listUserFiles(userId?: string, sessionId?: string): Promise<FileInfo[]> {
-  let url = `/api/files/${encodeURIComponent(userId || getAIConfig().defaultUserId)}`;
+export async function listUserFiles(_userId?: string, sessionId?: string): Promise<FileInfo[]> {
+  let url = `/api/files/`;
   if (sessionId) url += `?session_id=${encodeURIComponent(sessionId)}`;
   const data = await apiFetch<{ files: FileInfo[] }>(url);
   return data.files;

@@ -1,8 +1,11 @@
 import { useRef, useCallback, useState } from 'react';
-import { Input, Button, Tag, message } from 'antd';
+import { Input, Button, message } from 'antd';
 import type { InputRef } from 'antd';
-import { SendOutlined, PaperClipOutlined, CloseOutlined, PlusOutlined, BorderOutlined } from '@ant-design/icons';
+import { SendOutlined, PlusOutlined, BorderOutlined } from '@ant-design/icons';
 import { aiApi, type FileInfo } from '@claw/core';
+import FilePreviewModal from '../preview/FilePreviewModal';
+import FileCard from './FileCard';
+import type { FileCardFile } from './FileCard';
 const { uploadFile } = aiApi;
 
 const { TextArea } = Input;
@@ -37,6 +40,7 @@ export default function ChatInput({
   const [value, setValue] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [previewFile, setPreviewFile] = useState<AttachedFile | null>(null);
   const textareaRef = useRef<InputRef>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -101,20 +105,17 @@ export default function ChatInput({
         accept=".txt,.csv,.json,.xml,.yaml,.yml,.md,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.zip,.tar,.gz,.svg,.html,.jsx,.tsx,.py,.js,.ts,.css,.scss"
       />
 
-      {/* 文件 chips */}
+      {/* 文件卡片 */}
       {attachedFiles.length > 0 && (
-        <div className="chat-attached-files">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px 0' }}>
           {attachedFiles.map(f => (
-            <Tag
+            <FileCard
               key={f.fileId}
-              closable
-              onClose={() => removeFile(f.fileId)}
-              closeIcon={<CloseOutlined style={{ fontSize: 10 }} />}
-              style={{ marginBottom: 4 }}
-            >
-              <PaperClipOutlined style={{ marginRight: 4 }} />
-              {f.filename}
-            </Tag>
+              file={f}
+              compact
+              onPreview={(file) => setPreviewFile(file as AttachedFile)}
+              onRemove={removeFile}
+            />
           ))}
         </div>
       )}
@@ -170,6 +171,16 @@ export default function ChatInput({
           />
         )}
       </div>
+
+      {/* 文件预览 Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          open={!!previewFile}
+          fileId={previewFile.fileId}
+          filename={previewFile.filename}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </div>
   );
 }
