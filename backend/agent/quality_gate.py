@@ -49,7 +49,10 @@ class QualityGate:
         self.checks = checks or [
             check_form_completeness,
             check_audit_consistency,
-            check_calculation_verified,
+            # check_calculation_verified 已移除:
+            # 该规则过于激进 — LLM 从文档中读取数值并做简单比较是合理的，
+            # 强制要求 calculator 工具验证会导致 QG 重试循环，
+            # 进而造成前端流式文本重复显示。
         ]
 
     def evaluate(self, event: HookEvent) -> QualityCheckResult:

@@ -187,8 +187,6 @@ class AgenticRuntime:
 
         self._emit("agent_progress", {"status": "started", "max_iterations": self.config.max_iterations})
 
-        _quality_gate_fallback = ""  # Quality Gate 拒绝前的回复内容 (fallback)
-
         for iteration in range(self.config.max_iterations):
             # ─── Abort check ───
             if self._abort_requested:
@@ -301,9 +299,6 @@ class AgenticRuntime:
                     )
                     stop_result = await self.hooks.fire(stop_event)
                     if stop_result.action == "block":
-                        # 保存被拒绝的回复作为 fallback (Quality Gate 重试后 LLM 可能返回空内容)
-                        if parsed.content:
-                            _quality_gate_fallback = parsed.content
                         logger.info(
                             f"Quality gate blocked at iteration {iteration + 1}, self-correcting",
                             extra={"trace_id": self.trace_id},
@@ -319,26 +314,18 @@ class AgenticRuntime:
                         })
                         continue  # 继续 ReAct 循环
 
-                # 最终回复：优先使用当前内容，为空时 fallback 到 Quality Gate 前的内容
-                final_content = parsed.content or _quality_gate_fallback
                 self._steps.append(RuntimeStep(
                     step_type=StepType.FINAL_ANSWER,
-                    content=final_content,
+                    content=parsed.content or "",
                     iteration=iteration,
                 ))
-                # Quality Gate 通过后，一次性发射最终文本 (不在流式阶段发射，避免中间迭代重复)
-                if final_content:
-                    self._emit("text_delta", {
-                        "content": final_content,
-                        "iteration": iteration + 1,
-                    })
                 self._emit("agent_progress", {
                     "status": "completed",
                     "iterations": iteration + 1,
                     "tool_calls": self._count_tool_calls(),
                 })
                 return self._build_result(
-                    final_answer=final_content,
+                    final_answer=parsed.content or "",
                     iterations=iteration + 1,
                 )
 
@@ -492,8 +479,13 @@ class AgenticRuntime:
             return False
 
         async def _flush_text(force: bool = False) -> None:
-            """清空文本缓冲 (不再流式发射 text_delta，由 run() 在确认 final answer 后统一发射)"""
+            """将缓冲文本通过 text_delta 事件实时流式发射给前端。"""
             nonlocal _text_buf
+            if not _text_buf:
+                return
+            if not force and len(_text_buf) < _FLUSH_THRESHOLD:
+                return
+            self._emit("text_delta", {"content": _text_buf, "iteration": iteration + 1})
             _text_buf = ""
 
         try:
