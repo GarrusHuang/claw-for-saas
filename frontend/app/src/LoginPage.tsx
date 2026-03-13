@@ -53,7 +53,7 @@ export default function LoginPage() {
 
           {error && <div className="login-error">{error}</div>}
 
-          <button type="submit" className="login-btn" disabled={loading || success || !username.trim()}>
+          <button type="submit" className="login-btn" disabled={loading || success || !username.trim() || !password}>
             {success ? '登录成功！' : loading ? '登录中...' : '登录'}
           </button>
         </form>

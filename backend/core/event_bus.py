@@ -135,7 +135,7 @@ class EventBus:
                     trace_id=self.trace_id,
                 ))
             except asyncio.QueueFull:
-                pass
+                logger.warning("EventBus queue full on close, dropping close marker")
 
     @property
     def is_closed(self) -> bool:

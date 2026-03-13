@@ -212,8 +212,9 @@ export function useAIChat() {
                   msg.timeline = tl;
                 }
                 loaded.push(msg);
+                // assistantIdx 仅在最终 assistant 消息时递增，与 timeline turn_index 对齐
+                assistantIdx++;
               }
-              assistantIdx++;
             } else {
               // 恢复用户消息附带的文件
               const rawFiles = (m as Record<string, unknown>).files;

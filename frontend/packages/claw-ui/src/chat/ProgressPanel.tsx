@@ -17,6 +17,12 @@ import {
   EyeOutlined,
 } from '@ant-design/icons';
 import { usePipelineStore, aiApi, getAIConfig } from '@claw/core';
+
+/** 同步获取 Auth headers (getAuthToken 已收窄为同步) */
+function getAuthHeaders(): Record<string, string> {
+  const token = getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? '';
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 import type { PlanStepTracking, ToolExecution } from '@claw/core';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -175,7 +181,7 @@ export default function ProgressPanel() {
     setPreviewFetcher(() => async () => {
       try {
         const resp = await fetch('/api/soul', {
-          headers: { 'Authorization': `Bearer ${getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? ''}` },
+          headers: getAuthHeaders(),
         });
         if (resp.ok) {
           const data = await resp.json();
@@ -193,7 +199,7 @@ export default function ProgressPanel() {
       // Try read via source file API
       try {
         const resp = await fetch(`/api/files/preview/${encodeURIComponent(filename)}`, {
-          headers: { 'Authorization': `Bearer ${getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? ''}` },
+          headers: getAuthHeaders(),
         });
         if (resp.ok) {
           const data = await resp.json();

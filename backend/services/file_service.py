@@ -43,6 +43,39 @@ ALLOWED_EXTENSIONS = {
 # 图片扩展名
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 
+# Magic bytes → 扩展名映射 (用于验证文件内容与扩展名匹配)
+_MAGIC_BYTES: list[tuple[bytes, set[str]]] = [
+    (b"\x89PNG\r\n\x1a\n", {".png"}),
+    (b"\xff\xd8\xff", {".jpg", ".jpeg"}),
+    (b"GIF87a", {".gif"}),
+    (b"GIF89a", {".gif"}),
+    (b"%PDF", {".pdf"}),
+    (b"PK\x03\x04", {".docx", ".xlsx", ".zip"}),  # ZIP-based formats
+]
+
+
+def _validate_magic_bytes(content: bytes, ext: str) -> None:
+    """
+    验证文件内容的 magic bytes 与声明的扩展名是否匹配。
+
+    仅对有已知 magic bytes 的二进制格式做校验。
+    文本类文件 (.txt, .csv, .json, .xml, .md, .yaml) 跳过检查。
+    """
+    # 文本类扩展名不检查 magic bytes
+    text_exts = {".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md"}
+    if ext in text_exts:
+        return
+
+    # 检查是否有匹配的 magic bytes
+    for magic, allowed_exts in _MAGIC_BYTES:
+        if content[:len(magic)] == magic:
+            if ext not in allowed_exts:
+                raise ValueError(
+                    f"File content doesn't match extension {ext}: "
+                    f"detected format for {allowed_exts}"
+                )
+            return  # magic bytes 匹配且扩展名正确
+
 
 @dataclass
 class FileMetadata:
@@ -126,6 +159,9 @@ class FileService:
         # 3. 扩展名检查
         if not ext or ext not in ALLOWED_EXTENSIONS:
             raise ValueError(f"Unsupported file extension: {ext or '(none)'}")
+
+        # 3b. Magic bytes 验证 — 防止伪造扩展名
+        _validate_magic_bytes(content, ext)
 
         # 4. 创建用户目录
         user_dir = self._user_dir(tenant_id, user_id)

@@ -382,10 +382,25 @@ class TestReadUploadedFile:
         try:
             # Use a small context window to force pagination
             with patch("config.settings", SimpleNamespace(agent_model_context_window=32000)):
+                # First page
                 r = read_uploaded_file("f1", offset=0, limit=100)
                 assert "pagination" in r
                 assert r["pagination"]["has_more"] is True
+                next_off = r["pagination"]["next_offset"]
+                assert 0 < next_off <= 100  # 可能因换行对齐而略小于 limit
                 assert len(r["text"]) <= 100
+                assert len(r["text"]) > 0  # 确保实际返回了内容
+
+                # Second page with offset
+                r2 = read_uploaded_file("f1", offset=next_off, limit=100)
+                assert "pagination" in r2
+                assert r2["pagination"]["has_more"] is True
+                assert r2["pagination"]["next_offset"] > next_off
+                assert len(r2["text"]) <= 100
+
+                # Last page: request beyond total length
+                r3 = read_uploaded_file("f1", offset=len(long_text) + 100, limit=100)
+                assert r3["pagination"]["has_more"] is False
         finally:
             _reset_ctx(tokens)
 
