@@ -838,9 +838,17 @@ const MessageItem = memo(function MessageItem({ msg }: { msg: ChatMessage }) {
   return (
     <div style={{ marginBottom: 16 }}>
       {msg.role === 'user' ? (
-        <div className="msg-user">
-          <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
-          {msg.files && msg.files.length > 0 && <FileAttachments files={msg.files} />}
+        <div className="msg-user-row">
+          <div>
+            <div className="msg-user">
+              <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
+            </div>
+            {msg.files && msg.files.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                <FileAttachments files={msg.files} />
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="msg-ai markdown-body">
