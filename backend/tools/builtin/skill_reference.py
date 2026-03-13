@@ -24,12 +24,22 @@ skill_reference_registry = ToolRegistry()
 )
 async def read_reference(skill_name: str, reference_name: str) -> dict:
     """Read reference material from a Skill's references directory."""
-    # Phase 2: 集成 SkillLoader 后替换为真实实现
-    # 现在返回 placeholder
+    try:
+        from skills.loader import SkillLoader
+        loader = SkillLoader()
+        content = loader.read_reference(skill_name, reference_name)
+        if content and not content.startswith("[ERROR]"):
+            return {
+                "skill_name": skill_name,
+                "reference_name": reference_name,
+                "content": content,
+                "loaded": True,
+            }
+    except Exception:
+        pass
     return {
         "skill_name": skill_name,
         "reference_name": reference_name,
-        "content": f"[Placeholder] Reference '{reference_name}' from skill '{skill_name}' not yet loaded. "
-                   f"This will be implemented when SkillLoader is integrated in Phase 2.",
+        "content": f"Reference '{reference_name}' not found in skill '{skill_name}'.",
         "loaded": False,
     }

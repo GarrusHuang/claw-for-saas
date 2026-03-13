@@ -62,7 +62,7 @@ current_browser_service: contextvars.ContextVar[BrowserService | None] = context
 
 # Protected field IDs — agent cannot override these values
 current_protected_field_ids: contextvars.ContextVar[set] = contextvars.ContextVar(
-    "current_protected_field_ids"
+    "current_protected_field_ids", default=set()
 )
 
 # Request trace ID

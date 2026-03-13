@@ -16,11 +16,12 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from agent.gateway import SessionBusyError
 from api.sse import event_bus_to_sse
 from core.event_bus import EventBus
 from core.context import current_trace_id
 from core.errors import AgentError, classify_error
-from core.auth import AuthUser, get_current_user
+from core.auth import AuthUser, get_current_user, get_current_user_optional
 from models.request import ChatRequest
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,14 @@ async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user))
                 materials=[m.model_dump() for m in request.materials],
                 event_bus=bus,
             )
+        except SessionBusyError:
+            bus.emit("error", {
+                "code": "SESSION_BUSY",
+                "message": "该会话正在处理中，请稍后再试",
+                "recoverable": True,
+                "category": "rate_limit",
+                "trace_id": trace_id,
+            })
         except AgentError as e:
             logger.exception(f"Gateway chat error (category={e.category}): {e}")
             bus.emit("error", e.to_error_event(trace_id=trace_id))
@@ -102,7 +111,7 @@ async def health_check():
 
 
 @router.get("/tools")
-async def list_tools():
+async def list_tools(user: AuthUser | None = Depends(get_current_user_optional)):
     """List all registered tools."""
     from tools.registry_builder import build_full_registry
 
@@ -124,7 +133,7 @@ async def list_tools():
 
 
 @router.get("/soul")
-async def get_soul():
+async def get_soul(user: AuthUser | None = Depends(get_current_user_optional)):
     """Return soul.md content for preview."""
     from pathlib import Path
     soul_path = Path(__file__).parent.parent / "prompts" / "soul.md"

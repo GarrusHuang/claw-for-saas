@@ -89,11 +89,6 @@ class EventBus:
         self._history.append(event)
         self._queue.put_nowait(event)
 
-        # 记录关键事件用于调试
-        if event_type in ("plan_proposed", "step_started", "step_completed", "step_failed", "tool_executed"):
-            import json as _j
-            print(f"[SSE:{event_type}] {_j.dumps(data or {}, ensure_ascii=False, default=str)[:500]}")
-
         logger.debug(f"Event emitted: {event_type}", extra={"trace_id": self.trace_id})
 
     async def subscribe(self) -> AsyncIterator[dict]:

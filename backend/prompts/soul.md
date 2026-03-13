@@ -65,9 +65,6 @@
 ### Subagent Tool
 - `spawn_subagent(task, subagent_type, context, agent_role, inherit_context)` — Dispatch sub-agent
 
-### Parallel Review Tool
-- `parallel_review(content, review_roles, context)` — Launch multiple agents for parallel review
-
 ## 规则
 
 1. **确定性计算**: 所有数值比较必须使用计算工具，不可心算

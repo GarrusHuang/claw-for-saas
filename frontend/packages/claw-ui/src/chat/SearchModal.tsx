@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Modal, Input, Typography, Empty } from 'antd';
 import { SearchOutlined, LoadingOutlined } from '@ant-design/icons';
 import { aiApi, type SearchResult } from '@claw/core';
+import { SESSION_LABEL_MAP } from './constants';
 
 const { Text } = Typography;
 
@@ -10,14 +11,6 @@ interface SearchModalProps {
   onClose: () => void;
   onSelectSession: (sessionId: string) => void;
 }
-
-const SESSION_LABEL_MAP: Record<string, string> = {
-  reimbursement_create: '报销创建',
-  reimbursement_review: '报销审核',
-  contract_draft: '合同起草',
-  contract_review: '合同审核',
-  general_chat: '自由对话',
-};
 
 function formatResultLabel(result: SearchResult): string {
   if (result.title) return result.title as string;

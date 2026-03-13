@@ -120,7 +120,7 @@ describe('Auth Header Injection (ai-api.ts)', () => {
     configureAI({ getAuthToken: () => 'test-token' });
     mockJsonResponse({ sessions: [] });
 
-    await listSessions('user1');
+    await listSessions();
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const callHeaders = mockFetch.mock.calls[0][1].headers;
@@ -131,7 +131,7 @@ describe('Auth Header Injection (ai-api.ts)', () => {
     configureAI({ authToken: 'static-tok' });
     mockJsonResponse({ sessions: [] });
 
-    await listSessions('user1');
+    await listSessions();
 
     const callHeaders = mockFetch.mock.calls[0][1].headers;
     expect(callHeaders['Authorization']).toBe('Bearer static-tok');
@@ -140,7 +140,7 @@ describe('Auth Header Injection (ai-api.ts)', () => {
   it('getAuthHeaders omits Authorization when no token', async () => {
     mockJsonResponse({ sessions: [] });
 
-    await listSessions('user1');
+    await listSessions();
 
     const callHeaders = mockFetch.mock.calls[0][1].headers;
     expect(callHeaders['Authorization']).toBeUndefined();
@@ -152,10 +152,10 @@ describe('Auth Header Injection (ai-api.ts)', () => {
     configureAI({ getAuthToken: tokenFn });
 
     mockJsonResponse({ sessions: [] });
-    await listSessions('user1');
+    await listSessions();
 
     mockJsonResponse({ sessions: [] });
-    await listSessions('user2');
+    await listSessions();
 
     expect(tokenFn).toHaveBeenCalledTimes(2);
   });
@@ -186,7 +186,7 @@ describe('Auth Header Injection (ai-api.ts)', () => {
     configureAI({ authToken: 'my-token' });
     mockJsonResponse({ sessions: [] });
 
-    await listSessions('user1');
+    await listSessions();
 
     // The normal case works — auth header is present
     const callHeaders = mockFetch.mock.calls[0][1].headers;

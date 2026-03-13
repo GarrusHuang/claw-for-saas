@@ -18,9 +18,10 @@ A4 增强:
 
 from __future__ import annotations
 
+import threading
+
 import hashlib
 import json
-import re
 import time
 from functools import lru_cache
 
@@ -91,6 +92,7 @@ _msg_token_cache: dict[str, int] = {}
 _CACHE_MAX_SIZE = 2000
 _cache_created_at: float = 0.0
 _CACHE_TTL_S = 3600  # 1 hour
+_msg_cache_lock = threading.Lock()
 
 
 def _msg_cache_key(msg: dict) -> str:
@@ -152,13 +154,14 @@ def _estimate_single_message_tokens(msg: dict) -> int:
         total += estimate_tokens_conservative(tc_text)
 
     # 缓存 (FIFO 批量清理: 超限时删除前半部分)
-    if len(_msg_token_cache) >= _CACHE_MAX_SIZE:
-        # 清掉前半部分
-        keys = list(_msg_token_cache.keys())
-        for k in keys[:_CACHE_MAX_SIZE // 2]:
-            del _msg_token_cache[k]
+    with _msg_cache_lock:
+        if len(_msg_token_cache) >= _CACHE_MAX_SIZE:
+            # 清掉前半部分
+            keys = list(_msg_token_cache.keys())
+            for k in keys[:_CACHE_MAX_SIZE // 2]:
+                del _msg_token_cache[k]
 
-    _msg_token_cache[key] = total
+        _msg_token_cache[key] = total
     return total
 
 

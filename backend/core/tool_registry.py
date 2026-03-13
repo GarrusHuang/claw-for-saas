@@ -23,6 +23,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional, Union, get_args, get_origin, get_type_hints
 
@@ -258,7 +259,7 @@ class ToolRegistry:
             for line in source.split("\n"):
                 stripped = line.strip()
                 # 匹配 "param_name: Type,  # description" 格式
-                if f"{param_name}" in stripped and "#" in stripped:
+                if re.search(rf'\b{re.escape(param_name)}\b', stripped) and "#" in stripped:
                     comment = stripped.split("#", 1)[1].strip()
                     return comment
         except (OSError, TypeError):

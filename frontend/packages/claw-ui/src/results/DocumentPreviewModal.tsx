@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { getAIConfig } from '@claw/core';
 import type { GeneratedDocument } from '@claw/core';
 import { downloadAsFile, downloadFromUrl, copyToClipboard } from '../utils/download';
 
@@ -38,7 +39,8 @@ export default function DocumentPreviewModal({
 
   const handleDownload = () => {
     if (hasDocx) {
-      downloadFromUrl(doc.metadata.docx_download_url as string, filename);
+      const token = getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? '';
+      downloadFromUrl(doc.metadata.docx_download_url as string, filename, token ? { 'Authorization': `Bearer ${token}` } : undefined);
     } else {
       downloadAsFile(doc.content, filename);
     }

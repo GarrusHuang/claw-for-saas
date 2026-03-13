@@ -12,8 +12,8 @@ export function downloadAsFile(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadFromUrl(url: string, filename: string) {
-  fetch(url)
+export function downloadFromUrl(url: string, filename: string, headers?: Record<string, string>) {
+  fetch(url, headers ? { headers } : undefined)
     .then((res) => {
       if (!res.ok) throw new Error(`Download failed: ${res.status}`);
       return res.blob();

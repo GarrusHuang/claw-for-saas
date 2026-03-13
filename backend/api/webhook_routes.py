@@ -32,6 +32,13 @@ async def get_webhook(user: AuthUser = Depends(get_current_user)):
 @router.post("")
 async def register_webhook(req: WebhookRegisterRequest, user: AuthUser = Depends(get_current_user)):
     """注册或更新 Webhook。"""
+    from urllib.parse import urlparse
+    parsed = urlparse(req.url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Webhook URL must use http or https scheme")
+    from agent.security_hooks import _is_unsafe_url
+    if _is_unsafe_url(req.url):
+        raise HTTPException(status_code=400, detail="Webhook URL must not target private/local networks")
     from core.webhook import WebhookConfig
     config = WebhookConfig(
         url=req.url,
