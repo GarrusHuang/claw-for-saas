@@ -14,6 +14,7 @@ import CoworkSidebar from './chat/CoworkSidebar';
 import ProgressPanel from './chat/ProgressPanel';
 import ScheduleView from './schedule/ScheduleView';
 import SkillsView from './skills/SkillsView';
+import KnowledgeView from './knowledge/KnowledgeView';
 
 export type DialogMode = 'expanded' | 'collapsed';
 
@@ -33,10 +34,12 @@ const QUICK_ACTIONS = [
 function WelcomeScreen({
   onAction,
   onSend,
+  onStop,
   isRunning,
 }: {
   onAction: (prompt: string) => void;
   onSend: (text: string, files?: { fileId: string; filename: string }[]) => void;
+  onStop?: () => void;
   isRunning: boolean;
 }) {
   return (
@@ -71,6 +74,7 @@ function WelcomeScreen({
       <div style={{ width: '100%', maxWidth: 640, marginBottom: 20 }}>
         <ChatInput
           onSend={(text, files) => onSend(text, files)}
+          onStop={onStop}
           disabled={isRunning}
           placeholder="输入你的问题..."
         />
@@ -135,6 +139,7 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
     messages,
     sendMessage,
     isRunning,
+    pipeline,
   } = useAIChat();
 
   // ── Notify host of mode changes via onResize ──
@@ -154,8 +159,17 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
     logout();
   }, [logout]);
 
+  const handleStop = useCallback(() => {
+    pipeline.cancel();
+    const state = usePipelineStore.getState();
+    if (state.status === 'running') {
+      usePipelineStore.getState().completePipeline('cancelled', Date.now() - (state.startedAt || Date.now()));
+    }
+  }, [pipeline]);
+
   const hasMessages = messages.length > 0;
   const pipelineStatus = usePipelineStore((s) => s.status);
+  const pipelineSessionId = usePipelineStore((s) => s.sessionId);
   const pipelineActive = pipelineStatus !== 'idle';
 
   if (chatDialogState === 'closed') return null;
@@ -197,6 +211,7 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
                 <WelcomeScreen
                   onAction={(prompt) => sendMessage(prompt)}
                   onSend={(text, files) => sendMessage(text, undefined, files)}
+                  onStop={isRunning ? handleStop : undefined}
                   isRunning={isRunning}
                 />
               ) : (
@@ -211,8 +226,10 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
                   </div>
                   <ChatInput
                     onSend={(text, files) => sendMessage(text, undefined, files)}
+                    onStop={isRunning ? handleStop : undefined}
                     disabled={isRunning}
                     placeholder="回复..."
+                    sessionId={pipelineSessionId || undefined}
                   />
                 </>
               )}
@@ -234,6 +251,14 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
           <div className="chat-center-column">
             <div className="chat-dialog-body">
               <SkillsView />
+            </div>
+          </div>
+        )}
+
+        {contentView === 'knowledge' && (
+          <div className="chat-center-column">
+            <div className="chat-dialog-body">
+              <KnowledgeView />
             </div>
           </div>
         )}

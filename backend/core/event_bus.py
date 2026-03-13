@@ -67,7 +67,9 @@ class EventBus:
         self.keepalive_interval = keepalive_interval
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._closed = False
+        self._abort_requested = False
         self._history: list[Event] = []
+        self._injected_messages: list[dict] = []
 
     def emit(self, event_type: str, data: dict | None = None) -> None:
         """
@@ -123,8 +125,20 @@ class EventBus:
                     "data": {"trace_id": self.trace_id, "ts": time.time()},
                 }
 
+    def inject_message(self, message: dict) -> None:
+        """Add a user message to be picked up by the runtime on next iteration."""
+        self._injected_messages.append(message)
+        logger.debug(f"Message injected into EventBus", extra={"trace_id": self.trace_id})
+
+    def drain_injected_messages(self) -> list[dict]:
+        """Return and clear all pending injected messages."""
+        msgs = self._injected_messages[:]
+        self._injected_messages.clear()
+        return msgs
+
     def close(self) -> None:
         """手动关闭事件总线。"""
+        self._abort_requested = True
         if not self._closed:
             self._closed = True
             # 发送关闭标记
@@ -140,6 +154,10 @@ class EventBus:
     @property
     def is_closed(self) -> bool:
         return self._closed
+
+    @property
+    def abort_requested(self) -> bool:
+        return self._abort_requested
 
     @property
     def history(self) -> list[Event]:

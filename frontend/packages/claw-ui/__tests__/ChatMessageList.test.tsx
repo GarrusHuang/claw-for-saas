@@ -47,6 +47,10 @@ vi.mock('../src/chat/InteractiveMessage.tsx', () => ({
   default: () => null,
 }));
 
+vi.mock('../src/preview/FileArtifactCard.tsx', () => ({
+  default: () => null,
+}));
+
 vi.mock('../src/chat/CollapsibleBlock.tsx', () => ({
   default: ({ children, summary }: { children: React.ReactNode; summary: string }) => (
     <div data-testid="collapsible-block">{summary}{children}</div>
@@ -73,6 +77,8 @@ describe('ChatMessageList', () => {
       plan: null,
       agentPlanProposed: false,
       durationMs: 0,
+      timelineEntries: [],
+      fileArtifacts: [],
     };
     const mod = await import('../src/chat/ChatMessageList.tsx');
     ChatMessageList = mod.default;

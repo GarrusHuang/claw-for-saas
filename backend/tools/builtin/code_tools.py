@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import os
 import time
 
@@ -198,6 +199,9 @@ def write_source_file(
             return {"error": f"无效 mode: {mode} — 支持: create, overwrite, patch"}
 
         size = os.path.getsize(resolved)
+        basename = os.path.basename(resolved)
+        mime_type = mimetypes.guess_type(basename)[0] or "application/octet-stream"
+        session_id = current_session_id.get("")
 
         # 发射 SSE 事件
         bus = current_event_bus.get()
@@ -206,6 +210,13 @@ def write_source_file(
                 "path": path,
                 "mode": mode,
                 "size": size,
+            })
+            bus.emit("file_artifact", {
+                "path": path,
+                "filename": basename,
+                "size_bytes": size,
+                "content_type": mime_type,
+                "session_id": session_id,
             })
 
         result = {"path": path, "mode": mode, "size": size}

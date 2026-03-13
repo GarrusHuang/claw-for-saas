@@ -326,11 +326,13 @@ class AgentGateway:
 
             try:
                 # 加载领域知识
-                skill_knowledge = self.skill_loader.load_for_pipeline(
+                skill_knowledge, loaded_skill_names = self.skill_loader.load_for_pipeline(
                     scenario=scenario,
                     agent_name="universal",
                     business_type=bt,
                 )
+                if loaded_skill_names and event_bus:
+                    event_bus.emit("skills_loaded", {"skills": loaded_skill_names, "count": len(loaded_skill_names)})
             except Exception as e:
                 logger.warning(f"Skill loading failed: {e}")
 
@@ -344,6 +346,23 @@ class AgentGateway:
                 )
             except Exception as e:
                 logger.warning(f"MarkdownMemoryStore error: {e}")
+
+        # ── 5b. 加载知识库索引 (_index.md，两阶段: 索引注入 prompt，按需通过工具读取全文) ──
+        knowledge_index_text = ""
+        try:
+            from dependencies import get_knowledge_service
+            kb_service = get_knowledge_service()
+            # 读取 _index.md 文件（优先用户级，合并全局级）
+            index_parts: list[str] = []
+            for index_path in kb_service.get_index_paths(tenant_id, user_id):
+                if index_path.exists():
+                    try:
+                        index_parts.append(index_path.read_text(encoding="utf-8"))
+                    except Exception as e:
+                        logger.warning(f"Failed to read KB index {index_path}: {e}")
+            knowledge_index_text = "\n\n".join(index_parts)
+        except Exception as e:
+            logger.debug(f"Knowledge index loading skipped: {e}")
 
         # ── 6. 构建系统提示 ──
         from agent.prompt import ToolSummary
@@ -359,6 +378,7 @@ class AgentGateway:
         system_prompt = self.prompt_builder.build_system_prompt(
             skill_knowledge=skill_knowledge,
             memory_context=memory_context,
+            knowledge_index_text=knowledge_index_text,
             user_id=user_id,
             session_id=session_id,
             tool_summaries=tool_summaries,

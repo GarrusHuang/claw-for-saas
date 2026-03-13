@@ -181,20 +181,23 @@ class TestSkillLoader:
     def test_load_for_pipeline_scenario_match(self, multi_skill_dir):
         """load_for_pipeline with scenario match."""
         loader = SkillLoader(skills_dir=str(multi_skill_dir))
-        result = loader.load_for_pipeline(scenario="reimbursement_create")
+        result, names = loader.load_for_pipeline(scenario="reimbursement_create")
         assert "Scenario skill body" in result
+        assert isinstance(names, list)
 
     def test_load_for_pipeline_domain_match(self, multi_skill_dir):
         """load_for_pipeline with domain match by business_type."""
         loader = SkillLoader(skills_dir=str(multi_skill_dir))
-        result = loader.load_for_pipeline(business_type="reimbursement")
+        result, names = loader.load_for_pipeline(business_type="reimbursement")
         assert "Domain skill body" in result
+        assert isinstance(names, list)
 
     def test_load_for_pipeline_capability_match(self, multi_skill_dir):
         """load_for_pipeline with capability match."""
         loader = SkillLoader(skills_dir=str(multi_skill_dir))
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, names = loader.load_for_pipeline(agent_name="universal")
         assert "Capability skill body" in result
+        assert isinstance(names, list)
 
     def test_read_reference_path_traversal(self, skill_dir):
         """read_reference with path traversal returns error."""
@@ -229,7 +232,7 @@ class TestSkillLoader:
         """update_skill updates content, clears cache."""
         loader = SkillLoader(skills_dir=str(skill_dir))
         # First load the body to populate cache
-        loader.load_for_pipeline(business_type="reimbursement")
+        loader.load_for_pipeline(business_type="reimbursement")  # returns (str, list)
         # Now update
         result = loader.update_skill(
             name="test-skill",
@@ -243,17 +246,31 @@ class TestSkillLoader:
         )
         assert result["ok"] is True
         # Verify updated content is loaded (cache cleared)
-        text = loader.load_for_pipeline(business_type="reimbursement")
+        text, _ = loader.load_for_pipeline(business_type="reimbursement")
         assert "Updated body content" in text
 
-    def test_delete_skill(self, skill_dir):
-        """delete_skill removes dir and registry entry."""
+    def test_delete_skill(self, tmp_path):
+        """delete_skill removes user-created skill (priority=4)."""
+        loader = SkillLoader(skills_dir=str(tmp_path))
+        # Create a user-level skill (priority=4) via create_skill
+        result = loader.create_skill(
+            "user-skill",
+            {"name": "user-skill", "description": "A user skill", "type": "domain", "version": "1.0"},
+            "User skill body content for testing deletion in the skill loader system.",
+        )
+        assert result["ok"] is True
+        assert "user-skill" in [s["name"] for s in loader.list_skills()]
+        result = loader.delete_skill("user-skill")
+        assert result["ok"] is True
+        assert "user-skill" not in [s["name"] for s in loader.list_skills()]
+
+    def test_delete_skill_system_forbidden(self, skill_dir):
+        """delete_skill on system skill (priority!=4) returns error."""
         loader = SkillLoader(skills_dir=str(skill_dir))
         assert len(loader.list_skills()) == 1
         result = loader.delete_skill("test-skill")
-        assert result["ok"] is True
-        assert len(loader.list_skills()) == 0
-        assert not (skill_dir / "test-skill").exists()
+        assert result["ok"] is False
+        assert "系统技能" in result["error"]
 
     def test_delete_skill_nonexistent(self, tmp_path):
         """delete_skill nonexistent returns error."""
@@ -333,7 +350,7 @@ Tenant version of my-skill with higher priority content.
         loader.load_tenant_skills(str(tenant_dir))
 
         # Tenant should override builtin
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         assert "Tenant version" in result
         assert "Builtin version" not in result
 
@@ -370,7 +387,7 @@ Builtin version with lower priority.
         from skills.loader import PRIORITY_BUILTIN
         loader._scan_directory(str(builtin_dir), PRIORITY_BUILTIN)
 
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         assert "Tenant version" in result
 
     def test_load_tenant_skills(self, tmp_path):
@@ -451,7 +468,7 @@ type: capability
 ''')
 
         loader = SkillLoader(skills_dir=str(tmp_path), max_single_chars=5000)
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         assert len(result) < 15000
         assert "截断" in result
 
@@ -471,7 +488,7 @@ type: capability
 ''')
 
         loader = SkillLoader(skills_dir=str(tmp_path), max_prompt_chars=8000)
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         # At least one skill should be loaded, one might be dropped
         assert len(result) <= 8000
 
@@ -490,7 +507,7 @@ type: capability
 ''')
 
         loader = SkillLoader(skills_dir=str(tmp_path), max_prompt_chars=7000)
-        result = loader.load_for_pipeline(agent_name="universal")
+        result, _ = loader.load_for_pipeline(agent_name="universal")
         assert len(result) <= 7000
 
 

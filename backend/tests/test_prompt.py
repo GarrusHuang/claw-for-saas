@@ -43,7 +43,8 @@ class TestPromptBuilderInit:
         assert "memory" in sections
         assert "runtime" in sections
         assert "plan_guidance" in sections
-        assert len(sections) == 8
+        assert "knowledge" in sections
+        assert len(sections) == 9
 
 
 # ── register / unregister ──

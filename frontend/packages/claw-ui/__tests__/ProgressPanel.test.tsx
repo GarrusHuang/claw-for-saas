@@ -32,7 +32,10 @@ vi.mock('@claw/core', () => ({
   }),
   aiApi: {
     listTools: vi.fn().mockResolvedValue([]),
+    listKnowledgeFiles: vi.fn().mockResolvedValue({ files: [] }),
+    listUserFiles: vi.fn().mockResolvedValue([]),
   },
+  getAIConfig: vi.fn(() => ({ aiBaseUrl: '' })),
 }));
 
 describe('ProgressPanel', () => {
@@ -51,22 +54,16 @@ describe('ProgressPanel', () => {
     expect(screen.getByText('进度')).toBeInTheDocument();
   });
 
-  it('renders Files section', () => {
+  it('renders Artifacts section', () => {
     mockState = createMockState({ status: 'running', startedAt: Date.now() });
     render(<ProgressPanel />);
-    expect(screen.getByText('文件')).toBeInTheDocument();
+    expect(screen.getByText('制品')).toBeInTheDocument();
   });
 
-  it('renders Instructions section', () => {
+  it('renders Knowledge Base section', () => {
     mockState = createMockState({ status: 'running', startedAt: Date.now() });
     render(<ProgressPanel />);
-    expect(screen.getByText('说明')).toBeInTheDocument();
-  });
-
-  it('renders Context section', () => {
-    mockState = createMockState({ status: 'running', startedAt: Date.now() });
-    render(<ProgressPanel />);
-    expect(screen.getByText('上下文')).toBeInTheDocument();
+    expect(screen.getByText('知识库')).toBeInTheDocument();
   });
 
   it('shows plan steps when they exist', () => {
@@ -91,23 +88,23 @@ describe('ProgressPanel', () => {
     expect(screen.getByText('暂无活跃任务')).toBeInTheDocument();
   });
 
-  it('extracts file names from tool executions', () => {
+  it('shows artifacts from write_source_file tool executions', () => {
     mockState = createMockState({
       status: 'completed',
       durationMs: 5000,
       toolExecutions: [
         {
           id: 't1',
-          toolName: 'read_file',
+          toolName: 'write_source_file',
           success: true,
           latencyMs: 100,
           timestamp: Date.now(),
-          argsSummary: { file_path: '/tmp/test.txt' },
+          argsSummary: { file_path: '/tmp/report.docx' },
         },
       ],
     });
 
     render(<ProgressPanel />);
-    expect(screen.getByText('/tmp/test.txt')).toBeInTheDocument();
+    expect(screen.getByText('report.docx')).toBeInTheDocument();
   });
 });

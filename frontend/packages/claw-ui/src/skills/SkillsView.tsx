@@ -166,9 +166,10 @@ export default function SkillsView() {
               className="skills-card"
               role="button"
               tabIndex={0}
-              onClick={() => handleCardClick(skill.name)}
+              onClick={() => { if ((skill as any).priority === 4) handleCardClick(skill.name); }}
+              style={{ cursor: (skill as any).priority === 4 ? 'pointer' : 'default' }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if ((e.key === 'Enter' || e.key === ' ') && (skill as any).priority === 4) {
                   e.preventDefault();
                   handleCardClick(skill.name);
                 }
@@ -178,10 +179,13 @@ export default function SkillsView() {
               <div className="skills-card-header">
                 <span className="skills-card-name">{skill.name}</span>
                 <div className="skills-card-actions">
+                  {(skill as any).priority === 4 && (
                   <EditOutlined
                     className="skills-card-action-icon"
                     onClick={(e) => { e.stopPropagation(); handleCardClick(skill.name); }}
                   />
+                  )}
+                  {(skill as any).priority === 4 && (
                   <Popconfirm
                     title={`确定删除 "${skill.name}"?`}
                     onConfirm={(e) => { e?.stopPropagation(); handleDelete(skill.name); }}
@@ -196,6 +200,7 @@ export default function SkillsView() {
                       onClick={(e) => e.stopPropagation()}
                     />
                   </Popconfirm>
+                  )}
                 </div>
               </div>
 

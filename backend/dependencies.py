@@ -142,6 +142,12 @@ def get_file_service():
     return FileService(base_dir=files_dir)
 
 
+@lru_cache()
+def get_knowledge_service():
+    from services.knowledge_service import KnowledgeService
+    return KnowledgeService()
+
+
 # LLM client reference (for lifespan shutdown)
 _llm_client_instance: LLMGatewayClient | None = None
 

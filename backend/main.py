@@ -6,6 +6,7 @@ Start:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -23,7 +24,7 @@ from api.session_routes import router as session_router
 from api.correction_routes import router as correction_router
 from api.memory_routes import router as memory_router
 from api.skill_routes import router as skill_router
-from api.file_routes import router as file_router
+from api.file_routes import router as file_router, workspace_router
 from core.logging import setup_logging
 from api.hook_rule_routes import router as hook_rule_router
 from api.plugin_routes import router as plugin_router
@@ -31,6 +32,7 @@ from api.schedule_routes import router as schedule_router
 from api.webhook_routes import router as webhook_router
 from api.usage_routes import router as usage_admin_router
 from api.my_usage_routes import router as my_usage_router
+from api.knowledge_routes import router as knowledge_router
 
 
 @asynccontextmanager
@@ -60,11 +62,40 @@ async def lifespan(app: FastAPI):
         await scheduler.start()
         logger.info("Scheduler started")
 
+    # Start file cleanup background task
+    file_cleanup_task = None
+    if s.file_retention_days > 0:
+        async def _file_cleanup_loop():
+            """每 6 小时清理一次过期的用户上传文件。"""
+            from dependencies import get_file_service
+            while True:
+                try:
+                    await asyncio.sleep(6 * 3600)  # 6 小时
+                    svc = get_file_service()
+                    deleted = svc.cleanup_expired(s.file_retention_days)
+                    if deleted:
+                        logger.info(f"File cleanup: removed {deleted} expired files")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"File cleanup error: {e}")
+
+        file_cleanup_task = asyncio.create_task(_file_cleanup_loop())
+        logger.info(f"File cleanup enabled: retention={s.file_retention_days} days, interval=6h")
+
     logger.info("Agent Gateway routes mounted at /api")
 
     yield
 
     logger.info("Claw-for-SaaS backend shutting down...")
+
+    # Stop file cleanup
+    if file_cleanup_task and not file_cleanup_task.done():
+        file_cleanup_task.cancel()
+        try:
+            await file_cleanup_task
+        except asyncio.CancelledError:
+            pass
 
     # Stop scheduler (A9)
     try:
@@ -123,6 +154,8 @@ app.include_router(schedule_router)
 app.include_router(webhook_router)
 app.include_router(usage_admin_router)
 app.include_router(my_usage_router)
+app.include_router(knowledge_router)
+app.include_router(workspace_router)
 
 
 @app.get("/")

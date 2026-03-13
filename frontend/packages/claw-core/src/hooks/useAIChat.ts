@@ -20,7 +20,7 @@ import { getAIConfig } from '../config.ts';
 import { useAIChatStore } from '../stores/ai-chat.ts';
 import { usePipelineStore } from '../stores/pipeline.ts';
 import { usePipeline } from './usePipeline.ts';
-import { listSessions as apiListSessions, getSessionHistory } from '../services/ai-api.ts';
+import { listSessions as apiListSessions, getSessionHistory, injectMessage } from '../services/ai-api.ts';
 import type { SessionInfo } from '../services/ai-api.ts';
 import type { ScenarioConfig } from '../types/scenario.ts';
 
@@ -160,6 +160,7 @@ export function useAIChat() {
       autoStartedRef.current = null;
       prevAgentMessageRef.current = null;
       streamingMsgIdRef.current = null;
+      clearSessionAction();
     } else if (sessionAction.type === 'load') {
       const loadSession = async (sessionId: string) => {
         try {
@@ -260,11 +261,10 @@ export function useAIChat() {
         } catch (e) {
           console.warn('[useAIChat] Failed to load session:', e);
         }
+        clearSessionAction();
       };
       loadSession(sessionAction.sessionId);
     }
-
-    clearSessionAction();
 
     return () => { cancelled = true; };
   }, [sessionAction, clearSessionAction, setActiveScenario, defaultUserId]);
@@ -272,6 +272,24 @@ export function useAIChat() {
   /** 发送用户消息并调用 Pipeline */
   const sendMessage = useCallback(
     async (text: string, scenario?: string, files?: { fileId: string; filename: string }[]) => {
+      // If pipeline is running, inject message to backend in real-time
+      if (usePipelineStore.getState().status === 'running') {
+        const currentSessionId = usePipelineStore.getState().sessionId;
+        const msgFiles = files?.map(f => ({
+          fileId: f.fileId,
+          filename: f.filename,
+          contentType: (f as { contentType?: string }).contentType,
+          sizeBytes: (f as { sizeBytes?: number }).sizeBytes,
+        }));
+        addMessage('user', text, msgFiles);
+        if (currentSessionId) {
+          injectMessage(currentSessionId, text, files).catch((err) => {
+            console.warn('[useAIChat] Failed to inject message:', err);
+          });
+        }
+        return;
+      }
+
       const scenarioKey = scenario || activeScenario;
       const scenarios = getAIConfig().scenarios;
 
@@ -430,9 +448,10 @@ export function useAIChat() {
           getAIConfig().onScenarioComplete?.(scenarioConfig.key, 'completed');
         }
       }
+
     }
     prevStatusRef.current = pipelineStatus;
-  }, [pipelineStatus, scenarioConfig, setChatDialogState, addMessage]);
+  }, [pipelineStatus, scenarioConfig, setChatDialogState, addMessage, sendMessage]);
 
   return {
     messages,

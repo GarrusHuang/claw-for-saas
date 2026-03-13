@@ -170,6 +170,16 @@ class Settings(BaseSettings):
         description="Docker memory limit",
     )
 
+    # ─── File Upload ───
+    max_file_upload_mb: int = Field(
+        default=100,
+        description="Maximum file upload size in MB",
+    )
+    file_retention_days: int = Field(
+        default=7,
+        description="用户上传的会话文件保留天数 (0=不清理)",
+    )
+
     # ─── Skills ───
     skills_dir: str = Field(
         default="skills",

@@ -25,6 +25,13 @@ export type {
   PendingInteraction, InteractionOption,
 } from '../types/pipeline.ts';
 
+export interface FileArtifact {
+  path: string;
+  filename: string;
+  sizeBytes: number;
+  contentType: string;
+  sessionId: string;
+}
 
 export interface TimelineEntry {
   id: string;
@@ -92,6 +99,12 @@ interface PipelineState {
   // Phase 24: Agent 交互请求
   pendingInteraction: PendingInteraction | null;
 
+  // Phase 6: Agent 生成的文件
+  fileArtifacts: FileArtifact[];
+
+  // Skills loaded for this pipeline
+  loadedSkills: string[];
+
   // 文档采纳 — 宿主表单采纳 AI 生成的文档
   adoptedDocument: GeneratedDocument | null;
 
@@ -144,6 +157,10 @@ interface PipelineState {
   // Phase 24: Agent 交互请求
   setPendingInteraction: (interaction: PendingInteraction | null) => void;
   resolveInteraction: () => void;
+  // Phase 6: File artifacts
+  addFileArtifact: (artifact: FileArtifact) => void;
+  // Skills loaded
+  setLoadedSkills: (skills: string[]) => void;
   // 文档采纳
   adoptDocument: (doc: GeneratedDocument) => void;
 }
@@ -181,6 +198,10 @@ const initialState = {
   planSteps: [] as PlanStepTracking[],
   // Phase 24
   pendingInteraction: null as PendingInteraction | null,
+  // Phase 6: File artifacts
+  fileArtifacts: [] as FileArtifact[],
+  // Skills loaded
+  loadedSkills: [] as string[],
   // 文档采纳
   adoptedDocument: null as GeneratedDocument | null,
   // Metadata
@@ -319,24 +340,54 @@ export const usePipelineStore = create<PipelineState>((set) => ({
     }),
 
   addToolExecution: (data) =>
-    set((state) => ({
-      toolExecutions: [...state.toolExecutions, data],
-      timelineEntries: [...state.timelineEntries, {
+    set((state) => {
+      // 查找并替换对应的 pending 条目
+      const pendingIdx = state.timelineEntries.findIndex(
+        (e) => e.type === 'tool' && e.toolExecution?.pending && e.toolExecution.toolName === data.toolName,
+      );
+      const completedEntry = {
         id: data.id,
         type: 'tool' as const,
         timestamp: data.timestamp || Date.now(),
         toolExecution: data,
-      }],
-      agentIteration: {
-        ...state.agentIteration,
-        callingTools: state.agentIteration.callingTools.filter((t) => t !== data.toolName),
-      },
-    })),
+      };
+      const entries = [...state.timelineEntries];
+      if (pendingIdx >= 0) {
+        entries[pendingIdx] = completedEntry;
+      } else {
+        entries.push(completedEntry);
+      }
+      return {
+        toolExecutions: [...state.toolExecutions, data],
+        timelineEntries: entries,
+        agentIteration: {
+          ...state.agentIteration,
+          callingTools: state.agentIteration.callingTools.filter((t) => t !== data.toolName),
+        },
+      };
+    }),
 
   setCallingTools: (tools) =>
-    set((state) => ({
-      agentIteration: { ...state.agentIteration, callingTools: tools },
-    })),
+    set((state) => {
+      // 为每个工具插入 pending 状态的 timeline 条目
+      const newEntries = tools.map((toolName) => ({
+        id: `pending-${toolName}-${Date.now()}`,
+        type: 'tool' as const,
+        timestamp: Date.now(),
+        toolExecution: {
+          id: `pending-${toolName}-${Date.now()}`,
+          toolName,
+          success: true,
+          latencyMs: 0,
+          timestamp: Date.now(),
+          pending: true,
+        },
+      }));
+      return {
+        agentIteration: { ...state.agentIteration, callingTools: tools },
+        timelineEntries: [...state.timelineEntries, ...newEntries],
+      };
+    }),
 
   setAgentIterationInfo: (current, max) =>
     set((state) => ({
@@ -425,6 +476,13 @@ export const usePipelineStore = create<PipelineState>((set) => ({
   // Phase 24: Agent 交互请求
   setPendingInteraction: (interaction) => set({ pendingInteraction: interaction }),
   resolveInteraction: () => set({ pendingInteraction: null }),
+
+  // Phase 6: File artifacts
+  addFileArtifact: (artifact) =>
+    set((state) => ({ fileArtifacts: [...state.fileArtifacts, artifact] })),
+
+  // Skills loaded
+  setLoadedSkills: (skills) => set({ loadedSkills: skills }),
 
   // 文档采纳
   adoptDocument: (doc) => set({ adoptedDocument: doc }),

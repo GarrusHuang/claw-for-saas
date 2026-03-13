@@ -5,6 +5,8 @@ import {
   SearchOutlined,
   CalendarOutlined,
   BulbOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import {
   useAIChatStore, usePipelineStore, aiApi, getAIConfig,
@@ -13,7 +15,7 @@ import {
 import SearchModal from './SearchModal.tsx';
 import { SESSION_LABEL_MAP } from './constants';
 
-const { listSessions: apiListSessions } = aiApi;
+const { listSessions: apiListSessions, deleteSession: apiDeleteSession } = aiApi;
 
 const { Text } = Typography;
 
@@ -85,6 +87,24 @@ export default function CoworkSidebar() {
     setContentView('skills');
   }, [setContentView]);
 
+  const handleKnowledgeClick = useCallback(() => {
+    setContentView('knowledge');
+  }, [setContentView]);
+
+  const handleDeleteSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    try {
+      await apiDeleteSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+      // 如果删除的是当前会话，新建一个
+      if (sessionId === currentSessionId) {
+        dispatchSessionAction({ type: 'new' });
+      }
+    } catch (err) {
+      console.warn('[CoworkSidebar] Failed to delete session:', err);
+    }
+  }, [currentSessionId, dispatchSessionAction]);
+
   const handleSearchSelect = useCallback((sessionId: string) => {
     setContentView('chat');
     dispatchSessionAction({ type: 'load', sessionId });
@@ -128,6 +148,16 @@ export default function CoworkSidebar() {
           <BulbOutlined style={{ fontSize: 14 }} />
           <span>技能</span>
         </div>
+        <div
+          className={`sidebar-entry${contentView === 'knowledge' ? ' sidebar-entry--active' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={handleKnowledgeClick}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleKnowledgeClick(); } }}
+        >
+          <DatabaseOutlined style={{ fontSize: 14 }} />
+          <span>知识库</span>
+        </div>
       </div>
 
       {/* ── Recents ── */}
@@ -154,22 +184,36 @@ export default function CoworkSidebar() {
                 onClick={() => handleSelectSession(session.session_id)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectSession(session.session_id); } }}
               >
-                <Text
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: isActive ? 600 : 400,
+                      color: isActive ? '#1a6fb5' : '#333',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      display: 'block',
+                    }}
+                  >
+                    {formatSessionLabel(session)}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 11, lineHeight: '14px' }}>
+                    {formatSessionDate(session)}
+                  </Text>
+                </div>
+                <DeleteOutlined
+                  className="session-delete-btn"
                   style={{
-                    fontSize: 14,
-                    fontWeight: isActive ? 600 : 400,
-                    color: isActive ? '#1a6fb5' : '#333',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    display: 'block',
+                    fontSize: 12,
+                    color: '#bbb',
+                    flexShrink: 0,
+                    padding: 4,
+                    opacity: 0,
+                    transition: 'opacity 0.15s',
                   }}
-                >
-                  {formatSessionLabel(session)}
-                </Text>
-                <Text type="secondary" style={{ fontSize: 11, lineHeight: '14px' }}>
-                  {formatSessionDate(session)}
-                </Text>
+                  onClick={(e) => handleDeleteSession(e, session.session_id)}
+                />
               </div>
             );
           })

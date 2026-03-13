@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from core.context import current_event_bus, current_user_id, current_tenant_id
+from core.context import current_event_bus, current_user_id, current_tenant_id, current_session_id
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,9 @@ def _get_file_service():
 
 @file_capability_registry.tool(
     description=(
-        "读取用户上传的文件内容。"
+        "读取当前会话中用户上传的文件内容。"
         "传入 file_id (从 list_user_files 获取)，返回文件的提取文本。"
+        "只能读取当前会话的文件，不能跨会话访问。"
         "支持 PDF/DOCX/TXT/CSV/JSON 等格式的文本提取。"
         "图片文件返回尺寸等元信息。"
         "大文件自动分页 — 使用 offset/limit 参数分段读取。"
@@ -49,10 +50,16 @@ def read_uploaded_file(
     service = _get_file_service()
     tenant_id = current_tenant_id.get()
     user_id = current_user_id.get()
+    session_id = current_session_id.get("")
 
     try:
-        text = service.extract_text(tenant_id, user_id, file_id)
         metadata, _ = service.get_file(tenant_id, user_id, file_id)
+
+        # 会话隔离: 只能读取当前会话的文件
+        if session_id and metadata.session_id and metadata.session_id != session_id:
+            return {"error": f"File {file_id} does not belong to current session"}
+
+        text = service.extract_text(tenant_id, user_id, file_id)
 
         total_chars = len(text)
 
@@ -113,22 +120,28 @@ def read_uploaded_file(
 
 @file_capability_registry.tool(
     description=(
-        "列出当前用户上传的所有文件。"
+        "列出当前会话中用户上传的文件。"
         "返回文件列表，包含 file_id/filename/content_type/size_bytes。"
+        "只列出当前会话关联的文件，不能跨会话访问。"
         "使用 file_id 可调用 read_uploaded_file 读取文件内容。"
     ),
     read_only=True,
 )
 def list_user_files() -> dict:
-    """列出当前用户的所有文件。"""
+    """列出当前会话关联的文件。"""
     service = _get_file_service()
     tenant_id = current_tenant_id.get()
     user_id = current_user_id.get()
+    session_id = current_session_id.get("")
 
     try:
-        files = service.list_files(tenant_id, user_id)
+        if session_id:
+            files = service.list_files_by_session(tenant_id, user_id, session_id)
+        else:
+            files = service.list_files(tenant_id, user_id)
         return {
             "user_id": user_id,
+            "session_id": session_id,
             "file_count": len(files),
             "files": [
                 {
@@ -142,6 +155,157 @@ def list_user_files() -> dict:
         }
     except Exception as e:
         logger.error(f"list_user_files error: {e}")
+        return {"error": str(e)}
+
+
+@file_capability_registry.tool(
+    description=(
+        "按需读取知识库中的文件内容。"
+        "传入 file_id (从系统提示中的 <knowledge> 索引获取)，返回文件的提取文本。"
+        "仅在需要引用知识库中某个文件的详细内容时调用，不要预先读取所有文件。"
+    ),
+    read_only=True,
+)
+def read_knowledge_file(
+    file_id: str,           # 知识库文件 ID
+    offset: int = 0,        # 起始字符偏移 (默认从头)
+    limit: int = 0,         # 读取字符数 (0 = 使用默认页大小)
+) -> dict:
+    """按需读取知识库文件，返回提取的文本内容 (支持分页)。"""
+    from config import settings
+
+    try:
+        from dependencies import get_knowledge_service
+        kb_service = get_knowledge_service()
+    except Exception as e:
+        return {"error": f"Knowledge service not available: {e}"}
+
+    try:
+        text = kb_service.extract_text(file_id)
+        meta = kb_service.get_file_meta(file_id)
+        if not meta:
+            return {"error": f"Knowledge file not found: {file_id}"}
+
+        total_chars = len(text)
+
+        dynamic_page = int(settings.agent_model_context_window * 0.2 * 4)
+        page_size = max(50000, min(512000, dynamic_page))
+        if limit > 0:
+            page_size = limit
+
+        if total_chars > page_size and limit != -1:
+            end = min(offset + page_size, total_chars)
+            if end < total_chars:
+                newline_pos = text.rfind("\n", offset, end)
+                if newline_pos > offset:
+                    end = newline_pos + 1
+
+            page_text = text[offset:end]
+            has_more = end < total_chars
+            result = {
+                "file_id": file_id,
+                "filename": meta.filename,
+                "description": meta.description,
+                "text": page_text,
+                "pagination": {
+                    "offset": offset,
+                    "length": len(page_text),
+                    "total_chars": total_chars,
+                    "has_more": has_more,
+                    "next_offset": end if has_more else None,
+                },
+            }
+            if has_more:
+                result["hint"] = (
+                    f"文件共 {total_chars} 字符，当前显示 {offset}-{end}。"
+                    f"使用 offset={end} 继续读取下一段。"
+                )
+            return result
+
+        return {
+            "file_id": file_id,
+            "filename": meta.filename,
+            "description": meta.description,
+            "text": text[offset:] if offset > 0 else text,
+        }
+    except Exception as e:
+        logger.error(f"read_knowledge_file error: {e}")
+        return {"error": str(e)}
+
+
+@file_capability_registry.tool(
+    description=(
+        "将内容添加到知识库。"
+        "可以传入文本内容 (text_content + filename)，或传入已上传文件的 file_id 将其复制到知识库。"
+        "文件会自动创建元数据并更新知识库索引。"
+        "scope 始终为 user (用户个人知识库)，普通用户不可写入 global。"
+    ),
+    read_only=False,
+)
+def add_to_knowledge_base(
+    filename: str,              # 文件名 (如 "report.md")
+    description: str = "",      # 文件描述
+    text_content: str = "",     # 文本内容 (与 source_file_id 二选一)
+    source_file_id: str = "",   # 从已上传文件复制 (与 text_content 二选一)
+) -> dict:
+    """将内容添加到用户知识库，自动创建元数据和索引。"""
+    tenant_id = current_tenant_id.get()
+    user_id = current_user_id.get()
+
+    if not text_content and not source_file_id:
+        return {"error": "必须提供 text_content 或 source_file_id"}
+
+    try:
+        from dependencies import get_knowledge_service
+        kb_service = get_knowledge_service()
+    except Exception as e:
+        return {"error": f"Knowledge service not available: {e}"}
+
+    try:
+        # 获取文件内容
+        if source_file_id:
+            # 从已上传文件复制
+            file_service = _get_file_service()
+            try:
+                metadata, content = file_service.get_file(tenant_id, user_id, source_file_id)
+                if not filename:
+                    filename = metadata.filename
+            except FileNotFoundError:
+                return {"error": f"Source file not found: {source_file_id}"}
+        else:
+            content = text_content.encode("utf-8")
+
+        # 强制 user scope — 普通用户不可写 global
+        scope = "user"
+
+        meta = kb_service.add_file(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            filename=filename,
+            content=content,
+            scope=scope,
+            description=description,
+        )
+
+        # 触发异步索引 (后台生成摘要 + 更新 _index.md)
+        bus = current_event_bus.get()
+        if bus:
+            import asyncio
+            from api.knowledge_routes import _auto_index
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(_auto_index(kb_service, meta, tenant_id, user_id))
+            except RuntimeError:
+                logger.debug("No event loop for auto-index, skipping")
+
+        from dataclasses import asdict
+        result = asdict(meta)
+        result["status"] = "ok"
+        result["message"] = f"文件 '{meta.filename}' 已添加到个人知识库"
+        return result
+
+    except Exception as e:
+        logger.error(f"add_to_knowledge_base error: {e}")
         return {"error": str(e)}
 
 

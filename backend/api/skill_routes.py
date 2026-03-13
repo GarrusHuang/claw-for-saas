@@ -138,7 +138,8 @@ async def delete_skill(skill_name: str, _user: AuthUser = Depends(get_current_us
     loader = get_skill_loader()
     result = loader.delete_skill(skill_name)
     if not result["ok"]:
-        return JSONResponse(status_code=400, content=result)
+        status_code = 403 if "系统技能" in (result.get("error") or "") else 400
+        return JSONResponse(status_code=status_code, content=result)
     return result
 
 
