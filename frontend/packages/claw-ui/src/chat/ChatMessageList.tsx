@@ -7,12 +7,7 @@ import {
   BulbOutlined,
   ToolOutlined,
   StopOutlined,
-  FileOutlined,
-  FilePdfOutlined,
-  FileExcelOutlined,
-  FileWordOutlined,
   FileImageOutlined,
-  FileZipOutlined,
   EyeOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
@@ -31,6 +26,7 @@ import InteractiveMessage from './InteractiveMessage';
 import CollapsibleBlock from './CollapsibleBlock';
 import FileArtifactCard from '../preview/FileArtifactCard';
 import UniversalFilePreviewModal from '../preview/FilePreviewModal';
+import FileCard from './FileCard';
 
 import type { ChatMessage, ChatMessageFile, ChatTimelineEntry, FileArtifact } from '@claw/core';
 
@@ -528,23 +524,6 @@ function isImageFile(file: ChatMessageFile): boolean {
   return ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext);
 }
 
-function getFileIcon(file: ChatMessageFile) {
-  const ext = file.filename.split('.').pop()?.toLowerCase() || '';
-  if (isImageFile(file)) return <FileImageOutlined style={{ color: '#1890ff' }} />;
-  if (ext === 'pdf') return <FilePdfOutlined style={{ color: '#ff4d4f' }} />;
-  if (['doc', 'docx'].includes(ext)) return <FileWordOutlined style={{ color: '#2f54eb' }} />;
-  if (['xls', 'xlsx', 'csv'].includes(ext)) return <FileExcelOutlined style={{ color: '#52c41a' }} />;
-  if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) return <FileZipOutlined style={{ color: '#faad14' }} />;
-  return <FileOutlined style={{ color: '#8c8c8c' }} />;
-}
-
-function formatFileSize(bytes?: number): string {
-  if (bytes === 0) return '0 B';
-  if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function getFileDownloadUrl(fileId: string): string {
   return `${getAIConfig().aiBaseUrl}/api/files/${fileId}/download`;
@@ -682,17 +661,6 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 
 /* Local FilePreviewModal removed — using UniversalFilePreviewModal from ../preview/FilePreviewModal */
 
-/** 文件类型对应的背景色 */
-function getFileColor(file: ChatMessageFile): { bg: string; border: string; iconColor: string } {
-  const ext = file.filename.split('.').pop()?.toLowerCase() || '';
-  if (isImageFile(file)) return { bg: '#e6f7ff', border: '#91d5ff', iconColor: '#1890ff' };
-  if (ext === 'pdf') return { bg: '#fff1f0', border: '#ffa39e', iconColor: '#ff4d4f' };
-  if (['doc', 'docx'].includes(ext)) return { bg: '#f0f5ff', border: '#adc6ff', iconColor: '#2f54eb' };
-  if (['xls', 'xlsx', 'csv'].includes(ext)) return { bg: '#f6ffed', border: '#b7eb8f', iconColor: '#52c41a' };
-  if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) return { bg: '#fffbe6', border: '#ffe58f', iconColor: '#faad14' };
-  return { bg: '#fafafa', border: '#e8e8e8', iconColor: '#8c8c8c' };
-}
-
 function FileAttachments({ files }: { files: ChatMessageFile[] }) {
   const [previewFile, setPreviewFile] = useState<ChatMessageFile | null>(null);
   const images = files.filter(isImageFile);
@@ -709,43 +677,15 @@ function FileAttachments({ files }: { files: ChatMessageFile[] }) {
         </div>
       )}
 
-      {/* 非图片文件 — 紧凑 Tag 风格 */}
+      {/* 非图片文件 — FileCard 卡片 */}
       {others.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
           {others.map((file) => (
-            <div
+            <FileCard
               key={file.fileId}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '4px 10px', background: '#f5f5f5',
-                borderRadius: 6, border: '1px solid #e8e8e8',
-                fontSize: 12, cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-              onClick={() => setPreviewFile(file)}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#91d5ff';
-                e.currentTarget.style.background = '#e6f7ff';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#e8e8e8';
-                e.currentTarget.style.background = '#f5f5f5';
-              }}
-            >
-              {getFileIcon(file)}
-              <span style={{
-                maxWidth: 150, overflow: 'hidden',
-                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                color: '#595959',
-              }}>
-                {file.filename}
-              </span>
-              {file.sizeBytes != null && (
-                <span style={{ color: '#bfbfbf', fontSize: 11 }}>
-                  {formatFileSize(file.sizeBytes)}
-                </span>
-              )}
-            </div>
+              file={file}
+              onPreview={() => setPreviewFile(file)}
+            />
           ))}
         </div>
       )}
