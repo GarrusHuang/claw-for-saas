@@ -59,9 +59,15 @@ class TestIsUnsafeUrl:
     def test_public_url_safe(self):
         assert _is_unsafe_url("https://api.example.com/v1") is False
 
-    def test_invalid_url_unsafe(self):
-        # Malformed URL should be treated as unsafe
-        assert _is_unsafe_url("not a url at all ://") is False  # urlparse handles this
+    def test_invalid_url_not_parseable(self):
+        # urlparse treats malformed strings as having no hostname → not matched as private IP
+        assert _is_unsafe_url("not a url at all ://") is False
+
+    def test_ipv6_ula_unsafe(self):
+        assert _is_unsafe_url("http://[fd12::1]/api") is True
+
+    def test_ipv6_link_local_unsafe(self):
+        assert _is_unsafe_url("http://[fe80::1]/api") is True
 
 
 # ── _has_path_traversal ──

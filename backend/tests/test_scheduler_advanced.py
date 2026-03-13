@@ -152,7 +152,7 @@ class TestTickLoop:
         scheduler._tick = counting_tick
 
         await scheduler._tick_loop()
-        assert call_count >= 3
+        assert 3 <= call_count <= 10, f"Expected 3-10 ticks, got {call_count}"
 
     async def test_loop_stops_when_not_running(self, tmp_path):
         """Loop should exit when _running becomes False."""

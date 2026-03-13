@@ -88,6 +88,13 @@ class TestWebhookStore:
 
 # ───── WebhookDispatcher ─────
 
+@pytest.fixture(autouse=True)
+def _bypass_dns_resolve():
+    """Bypass DNS rebinding check in all webhook dispatch tests."""
+    with patch("core.webhook._resolve_to_unsafe_ip", return_value=False):
+        yield
+
+
 class TestWebhookDispatcher:
     @pytest.mark.asyncio
     async def test_dispatch_success(self, tmp_path):
@@ -207,3 +214,40 @@ class TestWebhookDispatcher:
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 ok = await dispatcher.dispatch("t1", "test", {})
                 assert ok is False
+
+
+class TestDNSRebindingProtection:
+    """DNS rebinding 防护测试 — 不使用 autouse bypass。"""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_blocks_private_ip_resolution(self, tmp_path):
+        """Webhook URL 解析到内网 IP 时应被阻止。"""
+        store = WebhookStore(str(tmp_path))
+        store.save("t1", WebhookConfig(url="https://evil.com/hook", events=["test"]))
+        dispatcher = WebhookDispatcher(store=store)
+
+        # 模拟 DNS 解析到内网 IP
+        with patch("core.webhook._resolve_to_unsafe_ip", return_value=True):
+            ok = await dispatcher.dispatch("t1", "test", {"data": "x"})
+            assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_dispatch_allows_public_ip_resolution(self, tmp_path):
+        """Webhook URL 解析到公网 IP 时应放行。"""
+        store = WebhookStore(str(tmp_path))
+        store.save("t1", WebhookConfig(url="https://public.com/hook", events=["test"]))
+        dispatcher = WebhookDispatcher(store=store, max_retries=1)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+
+        with patch("core.webhook._resolve_to_unsafe_ip", return_value=False):
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = AsyncMock()
+                mock_client.post.return_value = mock_resp
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                MockClient.return_value = mock_client
+
+                ok = await dispatcher.dispatch("t1", "test", {"data": "x"})
+                assert ok is True

@@ -211,7 +211,9 @@ def check_calculation_verified(event: HookEvent) -> tuple[bool, str, str]:
 # ── Quality Gate Hook ──
 
 # 用于追踪自迭代次数 (per-session)
-_correction_counts: dict[str, int] = {}
+# 格式: {session_key: (count, last_access_time)}
+_correction_counts: dict[str, tuple[int, float]] = {}
+_CORRECTION_TTL_S = 3600  # 1 小时后过期
 
 
 def quality_gate_hook(event: HookEvent) -> HookResult:
@@ -222,17 +224,32 @@ def quality_gate_hook(event: HookEvent) -> HookResult:
     - 不通过 + 未超限 → block + 修正消息 (Agent 继续迭代)
     - 不通过 + 已超限 → allow (降级放行，避免无限循环)
     """
-    # 安全清理: 防止模块级 dict 无限增长
+    import time as _time
+
+    now = _time.time()
+
+    # 安全清理: 过期条目 + 超限裁剪
     if len(_correction_counts) > 50:
-        # LRU-style: keep most recent 50 entries
-        keys = list(_correction_counts.keys())
-        for k in keys[:-50]:
+        # 先清过期条目，再 LRU 裁剪
+        expired = [k for k, (_, ts) in _correction_counts.items() if now - ts > _CORRECTION_TTL_S]
+        for k in expired:
             _correction_counts.pop(k, None)
+        if len(_correction_counts) > 50:
+            keys = list(_correction_counts.keys())
+            for k in keys[:-50]:
+                _correction_counts.pop(k, None)
 
     session_key = f"{event.user_id}:{event.session_id}"
 
-    # 检查自迭代次数
-    current_count = _correction_counts.get(session_key, 0)
+    # 检查自迭代次数 (含 TTL 过期检查)
+    entry = _correction_counts.get(session_key)
+    current_count = 0
+    if entry:
+        count, ts = entry
+        if now - ts > _CORRECTION_TTL_S:
+            _correction_counts.pop(session_key, None)
+        else:
+            current_count = count
     if current_count >= MAX_SELF_CORRECTIONS:
         logger.warning(
             f"Quality gate: max corrections ({MAX_SELF_CORRECTIONS}) reached, "
@@ -251,7 +268,7 @@ def quality_gate_hook(event: HookEvent) -> HookResult:
         return HookResult(action="allow")
 
     # 不通过 → block + 修正提示
-    _correction_counts[session_key] = current_count + 1
+    _correction_counts[session_key] = (current_count + 1, now)
 
     correction_msg = (
         "[质量检查未通过]\n"

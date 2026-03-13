@@ -378,6 +378,13 @@ class TestWebhookStoreDeleteErrors:
 # ═══════════════════════════════════════════════════════════════════
 
 
+@pytest.fixture(autouse=True)
+def _bypass_webhook_dns_resolve():
+    """Bypass DNS rebinding check for webhook dispatch tests."""
+    with patch("core.webhook._resolve_to_unsafe_ip", return_value=False):
+        yield
+
+
 class TestWebhookDispatcherNonSerializableData:
     """dispatch() with data containing non-serializable objects."""
 

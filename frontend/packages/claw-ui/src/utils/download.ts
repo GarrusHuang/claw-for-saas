@@ -12,10 +12,15 @@ export function downloadAsFile(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadFromUrl(url: string, filename: string, headers?: Record<string, string>) {
+export function downloadFromUrl(
+  url: string,
+  filename: string,
+  headers?: Record<string, string>,
+  onError?: (err: Error) => void,
+) {
   fetch(url, headers ? { headers } : undefined)
     .then((res) => {
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      if (!res.ok) throw new Error(`下载失败: HTTP ${res.status}`);
       return res.blob();
     })
     .then((blob) => {
@@ -26,7 +31,10 @@ export function downloadFromUrl(url: string, filename: string, headers?: Record<
       a.click();
       URL.revokeObjectURL(blobUrl);
     })
-    .catch((err) => console.error('Download error:', err));
+    .catch((err) => {
+      console.error('Download error:', err);
+      if (onError) onError(err);
+    });
 }
 
 export function copyToClipboard(text: string) {
