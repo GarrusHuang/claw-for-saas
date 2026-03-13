@@ -15,6 +15,8 @@ from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
+KNOWN_EVENT_TYPES = {"pre_tool_use", "post_tool_use", "agent_stop", "agent_completed", "pre_compact"}
+
 
 @dataclass
 class HookEvent:
@@ -71,6 +73,8 @@ class HookRegistry:
         matcher: str | None = None,
     ) -> None:
         """注册 hook handler。matcher 可按工具名过滤。"""
+        if event_type not in KNOWN_EVENT_TYPES:
+            logger.warning(f"Registering hook for unknown event_type: {event_type!r}")
         if event_type not in self._handlers:
             self._handlers[event_type] = []
         self._handlers[event_type].append(_HookHandler(handler=handler, matcher=matcher))

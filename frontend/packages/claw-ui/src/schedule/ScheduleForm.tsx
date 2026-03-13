@@ -61,7 +61,10 @@ export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFo
     <div className="schedule-form-container">
       <div
         className="schedule-form-back"
+        role="button"
+        tabIndex={0}
         onClick={onBack}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBack(); } }}
       >
         <ArrowLeftOutlined style={{ fontSize: 12 }} />
         <span>返回任务列表</span>

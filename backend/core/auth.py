@@ -121,3 +121,18 @@ async def get_current_user(
     roles = payload.get("roles", [])
 
     return AuthUser(tenant_id=tenant_id, user_id=user_id, roles=roles)
+
+
+async def get_current_user_optional(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> AuthUser | None:
+    """
+    FastAPI dependency — like get_current_user but returns None instead of 401.
+
+    Useful for endpoints that work with or without authentication.
+    """
+    try:
+        return await get_current_user(request, credentials)
+    except HTTPException:
+        return None

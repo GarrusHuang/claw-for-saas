@@ -63,6 +63,8 @@ export interface ChatMessage {
  */
 export function useAIChat() {
   const pipeline = usePipeline();
+  const pipelineRef = useRef(pipeline);
+  pipelineRef.current = pipeline;
   const activeScenario = useAIChatStore((s) => s.activeScenario);
   const setChatDialogState = useAIChatStore((s) => s.setChatDialogState);
   const setActiveScenario = useAIChatStore((s) => s.setActiveScenario);
@@ -149,6 +151,8 @@ export function useAIChat() {
   useEffect(() => {
     if (!sessionAction) return;
 
+    let cancelled = false;
+
     if (sessionAction.type === 'new') {
       setMessages([]);
       usePipelineStore.getState().reset();
@@ -230,6 +234,7 @@ export function useAIChat() {
               });
             }
           }
+          if (cancelled) return;
           setMessages(loaded);
           usePipelineStore.getState().reset();
           usePipelineStore.getState().setSessionId(sessionId);
@@ -260,6 +265,8 @@ export function useAIChat() {
     }
 
     clearSessionAction();
+
+    return () => { cancelled = true; };
   }, [sessionAction, clearSessionAction, setActiveScenario, defaultUserId]);
 
   /** 发送用户消息并调用 Pipeline */
@@ -285,11 +292,11 @@ export function useAIChat() {
           content: `[用户上传文件] ${f.filename} (file_id: ${f.fileId})`,
           filename: f.filename,
         }));
-        await pipeline.invoke({
+        await pipelineRef.current.invoke({
           action: 'general_chat',
           businessType: 'general_chat',
           userMessage: text,
-          sessionId: pipeline.sessionId || undefined,
+          sessionId: pipelineRef.current.sessionId || undefined,
           materials: fileMaterials,
         });
         return;
@@ -312,11 +319,11 @@ export function useAIChat() {
         filename: f.filename,
       })) || [];
 
-      await pipeline.invoke({
+      await pipelineRef.current.invoke({
         action: config.action,
         businessType: config.businessType,
         userMessage: text,
-        sessionId: pipeline.sessionId || undefined,
+        sessionId: pipelineRef.current.sessionId || undefined,
         materials: fileMaterials.length > 0 ? fileMaterials : undefined,
         candidateTypes: config.candidateTypes,
         formFields: config.formFields,
@@ -324,7 +331,7 @@ export function useAIChat() {
         knownValues: config.knownValues,
       });
     },
-    [activeScenario, pipelineStatus, pipeline, addMessage, setActiveScenario],
+    [activeScenario, pipelineStatus, addMessage, setActiveScenario],
   );
 
   /** 通过提示卡片选择场景 */
@@ -340,7 +347,7 @@ export function useAIChat() {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const list = await apiListSessions(defaultUserId);
+      const list = await apiListSessions();
       setSessions(list);
     } catch (e) {
       console.warn('[useAIChat] Failed to fetch sessions:', e);

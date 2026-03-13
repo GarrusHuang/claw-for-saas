@@ -124,8 +124,8 @@ class FileService:
         ext = Path(safe_name).suffix.lower()
 
         # 3. 扩展名检查
-        if ext and ext not in ALLOWED_EXTENSIONS:
-            raise ValueError(f"Unsupported file extension: {ext}")
+        if not ext or ext not in ALLOWED_EXTENSIONS:
+            raise ValueError(f"Unsupported file extension: {ext or '(none)'}")
 
         # 4. 创建用户目录
         user_dir = self._user_dir(tenant_id, user_id)

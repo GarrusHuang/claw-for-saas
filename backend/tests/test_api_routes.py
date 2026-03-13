@@ -110,13 +110,10 @@ class TestHealthAndTools:
         is fixed the endpoint will return 200 with a ``tools`` list.
         """
         resp = isolated_app.get("/api/tools")
-        # Accept either the broken 500 or a future-fixed 200
-        if resp.status_code == 200:
-            data = resp.json()
-            assert "tools" in data
-            assert isinstance(data["tools"], list)
-        else:
-            assert resp.status_code == 500
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tools" in data
+        assert isinstance(data["tools"], list)
 
 
 # ═══════════════════════════════════════════════════════════

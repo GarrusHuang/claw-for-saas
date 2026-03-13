@@ -92,21 +92,6 @@ def test_cors_allowed_origins_comma_parsing(monkeypatch):
     assert origins == ["http://a.com", "http://b.com"]
 
 
-def test_cors_wildcard_disables_credentials():
-    """当 origins=['*'] 时 credentials 应该被禁用。"""
-    origins = ["*"]
-    assert origins == ["*"]  # 通配符
-    allow_credentials = origins != ["*"]
-    assert allow_credentials is False
-
-
-def test_cors_specific_origin_enables_credentials():
-    """指定具体 origin 时 credentials 应该启用。"""
-    origins = ["http://localhost:3000"]
-    allow_credentials = origins != ["*"]
-    assert allow_credentials is True
-
-
 # ── A5: app_debug 默认值 ──
 
 def test_app_debug_defaults_false():

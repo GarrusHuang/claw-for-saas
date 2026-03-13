@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { Button, Tooltip, Modal } from 'antd';
+import { Button, Tooltip } from 'antd';
 import {
   ThunderboltOutlined,
   FileTextOutlined,
@@ -154,10 +154,11 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
     logout();
   }, [logout]);
 
-  if (chatDialogState === 'closed') return null;
-
   const hasMessages = messages.length > 0;
-  const pipelineActive = usePipelineStore.getState().status !== 'idle';
+  const pipelineStatus = usePipelineStore((s) => s.status);
+  const pipelineActive = pipelineStatus !== 'idle';
+
+  if (chatDialogState === 'closed') return null;
 
   return (
     <div className="ai-chat-dialog ai-chat-dialog--fullscreen">

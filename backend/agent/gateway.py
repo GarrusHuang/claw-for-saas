@@ -10,7 +10,9 @@ A2 简化:
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
+import os
 import time
 from typing import Any
 
@@ -39,6 +41,14 @@ from agent.session import SessionManager
 from agent.subagent import SubagentRunner
 
 logger = logging.getLogger(__name__)
+
+
+class SessionBusyError(Exception):
+    """当同一 session 已有正在处理的请求时抛出。"""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        super().__init__(f"Session {session_id} is busy (concurrent request rejected)")
 
 
 class AgentGateway:
@@ -78,6 +88,27 @@ class AgentGateway:
 
     # 会话摘要最大保留条数
     _MAX_CONVERSATION_ENTRIES = 20
+
+    def _acquire_session_lock(
+        self, tenant_id: str, user_id: str, session_id: str,
+    ) -> int:
+        """
+        获取 session 级文件锁 (跨 worker 互斥)。
+
+        使用 fcntl.flock(LOCK_EX | LOCK_NB) 非阻塞锁定 session 的 .lock 文件。
+        返回 fd (调用方负责在请求结束时 close)。
+        如果已被锁定, 抛出 SessionBusyError。
+        """
+        lock_dir = self.session_manager.base_dir / tenant_id / user_id
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = lock_dir / f"{session_id}.lock"
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except (OSError, BlockingIOError):
+            os.close(fd)
+            raise SessionBusyError(session_id)
 
     def _auto_save_memory(
         self,
@@ -228,6 +259,40 @@ class AgentGateway:
 
         current_session_id.set(session_id)
 
+        # ── 2b. 获取 session 级文件锁 (跨 worker 互斥) ──
+        # 同一 session 同一时刻只允许一个请求，避免并发写入导致数据损坏。
+        # 锁定失败抛出 SessionBusyError，由 API 层捕获返回 409。
+        session_lock_fd = self._acquire_session_lock(tenant_id, user_id, session_id)
+
+        try:  # session lock — finally 中释放
+            return await self._chat_inner(
+                tenant_id=tenant_id, user_id=user_id,
+                session_id=session_id, message=message,
+                business_type=business_type, skill_names=skill_names,
+                event_bus=event_bus, materials=materials,
+                start_time=start_time,
+            )
+        finally:
+            try:
+                fcntl.flock(session_lock_fd, fcntl.LOCK_UN)
+                os.close(session_lock_fd)
+            except OSError:
+                pass
+
+    async def _chat_inner(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        message: str,
+        business_type: str,
+        skill_names: list[str] | None,
+        event_bus: EventBus | None,
+        materials: list[dict] | None,
+        start_time: float,
+    ) -> dict:
+        """chat() 的核心逻辑，已在 session lock 保护下执行。"""
         # 发射 session 事件
         if event_bus:
             event_bus.emit("pipeline_started", {
@@ -431,7 +496,7 @@ class AgentGateway:
         if self.hooks:
             from agent.hooks import HookEvent
             stop_event = HookEvent(
-                event_type="agent_stop",
+                event_type="agent_completed",
                 session_id=session_id,
                 user_id=user_id,
                 runtime_steps=[

@@ -213,7 +213,19 @@ class Scheduler:
                 continue
             if task.next_run_at and task.next_run_at <= now:
                 logger.info(f"Triggering scheduled task: {task.name} ({task.id})")
-                asyncio.create_task(self._execute_task(task))
+                # 立即更新 next_run_at 防止下次 tick 重复触发
+                task.next_run_at = compute_next_run(task.cron)
+                self.store.update(task)
+                t = asyncio.create_task(self._execute_task(task))
+                t.add_done_callback(self._task_done_callback)
+
+    def _task_done_callback(self, task: asyncio.Task) -> None:
+        """Log exceptions from fire-and-forget tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error(f"Scheduled task execution failed: {exc}", exc_info=exc)
 
     async def _execute_task(self, task: ScheduledTask) -> None:
         """执行定时任务: 调用 gateway.chat() → 更新状态 → 触发 webhook。"""

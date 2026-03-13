@@ -284,9 +284,11 @@ async def revoke_api_key(tenant_id: str, key_id: str, user: AuthUser = Depends(g
     _require_admin(user)
     from dependencies import get_database
     db = get_database()
-    ok = db.revoke_api_key(key_id)
-    if not ok:
+    # Verify key belongs to this tenant
+    keys = db.list_api_keys(tenant_id)
+    if not any(k.key_id == key_id for k in keys):
         raise HTTPException(status_code=404, detail=f"API key not found: {key_id}")
+    db.revoke_api_key(key_id)
     return {"ok": True}
 
 
@@ -296,7 +298,9 @@ async def delete_api_key(tenant_id: str, key_id: str, user: AuthUser = Depends(g
     _require_admin(user)
     from dependencies import get_database
     db = get_database()
-    ok = db.delete_api_key(key_id)
-    if not ok:
+    # Verify key belongs to this tenant
+    keys = db.list_api_keys(tenant_id)
+    if not any(k.key_id == key_id for k in keys):
         raise HTTPException(status_code=404, detail=f"API key not found: {key_id}")
+    db.delete_api_key(key_id)
     return {"ok": True}

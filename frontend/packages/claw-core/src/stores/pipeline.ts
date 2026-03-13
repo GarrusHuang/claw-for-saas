@@ -138,7 +138,7 @@ interface PipelineState {
   // Phase 21: Plan step tracking (后端驱动)
   initPlanSteps: (steps: PlanStep[]) => void;
   startPlanStep: (index: number) => void;
-  completePlanStep: (index: number, durationMs?: number) => void;
+  completePlanStep: (index: number) => void;
   failPlanStep: (index: number) => void;
   completePlanSteps: () => void;
   // Phase 24: Agent 交互请求
@@ -286,7 +286,7 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       // 同一迭代的 thinking 追加到同一条 entry
       const last = entries[entries.length - 1];
       if (last && last.type === 'thinking' && last.iteration === iteration) {
-        last.content = (last.content || '') + text;
+        entries[entries.length - 1] = { ...last, content: (last.content || '') + text };
       } else {
         entries.push({
           id: `think-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -305,7 +305,7 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       // 同一迭代的 text 追加到同一条 entry
       const last = entries[entries.length - 1];
       if (last && last.type === 'text' && last.iteration === iteration) {
-        last.content = (last.content || '') + text;
+        entries[entries.length - 1] = { ...last, content: (last.content || '') + text };
       } else {
         entries.push({
           id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -396,7 +396,7 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       ),
     })),
 
-  completePlanStep: (index, durationMs) =>
+  completePlanStep: (index) =>
     set((state) => ({
       planSteps: state.planSteps.map((s, i) =>
         i === index ? { ...s, status: 'completed' as const, completedAt: Date.now() } : s,

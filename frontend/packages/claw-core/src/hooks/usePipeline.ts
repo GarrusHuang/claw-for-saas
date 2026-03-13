@@ -141,7 +141,7 @@ export function usePipeline() {
         materials: params.materials || [],
       };
 
-      const client = new AgentSSEClient('/api/chat', requestBody, {
+      const client = new AgentSSEClient(`${getAIConfig().aiBaseUrl}/api/chat`, requestBody, {
         maxRetries: 3,
         retryDelayMs: 1000,
         connectionTimeoutMs: 30_000,

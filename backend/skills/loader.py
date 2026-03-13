@@ -444,9 +444,9 @@ class SkillLoader:
             return {"ok": False, "error": f"Skill '{name}' already exists"}
 
         safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "_")
-        # A7: 优先创建到 builtin/ 子目录
-        builtin_dir = os.path.join(self._skills_dir, "builtin")
-        base = builtin_dir if os.path.isdir(builtin_dir) else self._skills_dir
+        # User-created skills go to user/ directory
+        user_dir = os.path.join(self._skills_dir, "user")
+        base = user_dir if os.path.isdir(user_dir) else self._skills_dir
         skill_dir = os.path.join(base, safe_name)
 
         try:
@@ -520,8 +520,9 @@ class SkillLoader:
             return {"ok": False, "error": f"Skill '{name}' already exists, use update instead"}
 
         safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "_")
-        builtin_dir = os.path.join(self._skills_dir, "builtin")
-        base = builtin_dir if os.path.isdir(builtin_dir) else self._skills_dir
+        # Imported skills go to user/ directory
+        user_dir = os.path.join(self._skills_dir, "user")
+        base = user_dir if os.path.isdir(user_dir) else self._skills_dir
         skill_dir = os.path.join(base, safe_name)
 
         try:

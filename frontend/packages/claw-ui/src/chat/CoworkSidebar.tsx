@@ -11,20 +11,13 @@ import {
   type SessionInfo,
 } from '@claw/core';
 import SearchModal from './SearchModal.tsx';
+import { SESSION_LABEL_MAP } from './constants';
 
 const { listSessions: apiListSessions } = aiApi;
 
 const { Text } = Typography;
 
 // ── Session label formatting ──
-
-const SESSION_LABEL_MAP: Record<string, string> = {
-  reimbursement_create: '报销创建',
-  reimbursement_review: '报销审核',
-  contract_draft: '合同起草',
-  contract_review: '合同审核',
-  general_chat: '自由对话',
-};
 
 function formatSessionLabel(session: SessionInfo): string {
   // 优先使用动态生成的标题
@@ -117,7 +110,10 @@ export default function CoworkSidebar() {
         </div>
         <div
           className={`sidebar-entry${contentView === 'schedule' ? ' sidebar-entry--active' : ''}`}
+          role="button"
+          tabIndex={0}
           onClick={handleScheduledClick}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleScheduledClick(); } }}
         >
           <CalendarOutlined style={{ fontSize: 14 }} />
           <span>定时任务</span>
