@@ -114,50 +114,35 @@ export default function CoworkSidebar() {
     <div className="cowork-sidebar">
       {/* ── Function entries ── */}
       <div className="cowork-sidebar-entries">
-        <div className="sidebar-entry sidebar-entry--new-task" role="button" tabIndex={0} onClick={handleNewSession} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNewSession(); } }}>
+        <button className="sidebar-entry sidebar-entry--new-task" onClick={handleNewSession}>
           <PlusOutlined style={{ fontSize: 14 }} />
           <span>新建任务</span>
-        </div>
-        <div
-          className="sidebar-entry"
-          role="button"
-          tabIndex={0}
-          onClick={() => setSearchOpen(true)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSearchOpen(true); } }}
-        >
+        </button>
+        <button className="sidebar-entry" onClick={() => setSearchOpen(true)}>
           <SearchOutlined style={{ fontSize: 14 }} />
           <span>搜索</span>
-        </div>
-        <div
+        </button>
+        <button
           className={`sidebar-entry${contentView === 'schedule' ? ' sidebar-entry--active' : ''}`}
-          role="button"
-          tabIndex={0}
           onClick={handleScheduledClick}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleScheduledClick(); } }}
         >
           <CalendarOutlined style={{ fontSize: 14 }} />
           <span>定时任务</span>
-        </div>
-        <div
+        </button>
+        <button
           className={`sidebar-entry${contentView === 'skills' ? ' sidebar-entry--active' : ''}`}
-          role="button"
-          tabIndex={0}
           onClick={handleSkillsClick}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSkillsClick(); } }}
         >
           <BulbOutlined style={{ fontSize: 14 }} />
           <span>技能</span>
-        </div>
-        <div
+        </button>
+        <button
           className={`sidebar-entry${contentView === 'knowledge' ? ' sidebar-entry--active' : ''}`}
-          role="button"
-          tabIndex={0}
           onClick={handleKnowledgeClick}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleKnowledgeClick(); } }}
         >
           <DatabaseOutlined style={{ fontSize: 14 }} />
           <span>知识库</span>
-        </div>
+        </button>
       </div>
 
       {/* ── Recents ── */}

@@ -165,8 +165,8 @@ class TestSubagentRunner:
         assert len(tool_names) == 5  # 2 shared + 3 capability
 
     @pytest.mark.asyncio
-    async def test_run_subagent_invalid_whitelist_falls_back(self):
-        """白名单工具全部不存在，回退到全部工具。"""
+    async def test_run_subagent_invalid_whitelist_returns_empty(self):
+        """白名单工具全部不存在，返回空 registry (不回退)。"""
         runner = _make_runner()
 
         with patch("agent.subagent.AgenticRuntime") as MockRuntime:
@@ -181,7 +181,7 @@ class TestSubagentRunner:
 
         call_args = MockRuntime.call_args
         tool_registry = call_args[1]["tool_registry"]
-        assert len(tool_registry.get_tool_names()) == 5  # fallback to all
+        assert len(tool_registry.get_tool_names()) == 0  # empty, respects whitelist
 
     @pytest.mark.asyncio
     async def test_run_subagent_timeout(self):

@@ -669,9 +669,9 @@ class AgenticRuntime:
                     extra={"trace_id": self.trace_id},
                 )
 
-        # 组装 tool_calls
+        # 组装 tool_calls (流中断时丢弃，避免执行截断的参数)
         assembled_tool_calls = None
-        if tool_calls_buf:
+        if tool_calls_buf and not _stream_aborted:
             assembled_tool_calls = []
             for idx in sorted(tool_calls_buf.keys()):
                 buf = tool_calls_buf[idx]
@@ -1445,10 +1445,16 @@ class AgenticRuntime:
             normalized_calls = []
             for i, tc_raw in enumerate(llm_response.tool_calls):
                 if i < len(parsed.tool_calls):
-                    # 使用已修复的 arguments dict → 序列化为合法 JSON
-                    normalized_args = _json.dumps(
-                        parsed.tool_calls[i].arguments, ensure_ascii=False
-                    )
+                    # 优化: 如果原始 arguments 解析后与 parsed 一致，直接复用原始字符串
+                    raw_args_str = tc_raw.get("function", {}).get("arguments", "{}")
+                    try:
+                        raw_parsed = _json.loads(raw_args_str) if isinstance(raw_args_str, str) else raw_args_str
+                        if raw_parsed == parsed.tool_calls[i].arguments:
+                            normalized_args = raw_args_str if isinstance(raw_args_str, str) else _json.dumps(raw_args_str, ensure_ascii=False)
+                        else:
+                            normalized_args = _json.dumps(parsed.tool_calls[i].arguments, ensure_ascii=False)
+                    except (ValueError, TypeError):
+                        normalized_args = _json.dumps(parsed.tool_calls[i].arguments, ensure_ascii=False)
                 else:
                     # 兜底: 多余的原始 tool call
                     normalized_args = tc_raw.get("function", {}).get("arguments", "{}")
@@ -1607,19 +1613,21 @@ class AgenticRuntime:
         检测流式文本是否陷入重复生成。
 
         策略: 取最近一段文本，检查它是否在更早的文本中出现过。
-        如果最近的输出和之前的某段内容高度重合，说明模型在重复自己。
+        仅扫描最近 2KB 的前缀文本（避免 O(n²) 全文扫描拖慢流式输出）。
         """
         if len(text) < 400:
             return False
 
-        # 取最后 100 字（去空白），在前面的文本中查找
+        # 取最后 150 字（去空白），在前面的文本中查找
         tail = "".join(text[-150:].split())
         if len(tail) < 40:
             return False
 
-        # 用 60 字的滑动窗口搜索
+        # 用 60 字的滑动窗口搜索 — 仅扫描最近 2KB 前缀（排除最后 150 字）
         probe = tail[-60:]
-        head = "".join(text[:-150].split())
+        scan_end = max(len(text) - 150, 0)
+        scan_start = max(scan_end - 2048, 0)
+        head = "".join(text[scan_start:scan_end].split())
 
         # 计算 probe 在 head 中出现的次数
         count = 0
