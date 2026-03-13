@@ -235,7 +235,7 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
               )}
             </div>
 
-            <ProgressPanel />
+            {(hasMessages || pipelineActive) && <ProgressPanel />}
           </>
         )}
 
