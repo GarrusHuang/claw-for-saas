@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 import dependencies
 from services.database import DatabaseService
 from services.usage_service import UsageService
+from core.auth import AuthUser, get_current_user
 
 
 def _clear_all_lru_caches():
@@ -51,6 +52,9 @@ def client(tmp_path):
     )
 
     from main import app
+
+    _dev_user = AuthUser(tenant_id="default", user_id="U001", roles=["admin"])
+    app.dependency_overrides[get_current_user] = lambda: _dev_user
 
     with (
         patch.object(dependencies, "get_database", return_value=db),

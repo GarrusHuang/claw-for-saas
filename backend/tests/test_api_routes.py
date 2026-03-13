@@ -25,6 +25,7 @@ from memory.markdown_store import MarkdownMemoryStore
 from services.file_service import FileService
 from agent.hook_rules import HookRuleEngine
 from skills.loader import SkillLoader
+from core.auth import AuthUser, get_current_user
 
 
 def _clear_all_lru_caches():
@@ -61,6 +62,10 @@ def isolated_app(tmp_path):
     sl = SkillLoader(skills_dir=str(skills_dir))
 
     from main import app
+
+    # Override auth to always return a fixed dev user
+    _dev_user = AuthUser(tenant_id="default", user_id="U001")
+    app.dependency_overrides[get_current_user] = lambda: _dev_user
 
     # Patch at both the ``dependencies`` module AND the consuming route
     # modules.  Routes that use ``from dependencies import get_X`` at
