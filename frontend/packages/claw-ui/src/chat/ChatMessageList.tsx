@@ -503,7 +503,11 @@ function formatFileSize(bytes?: number): string {
 }
 
 function getFileDownloadUrl(fileId: string): string {
-  return `${getAIConfig().aiBaseUrl}/files/${fileId}/download`;
+  return `${getAIConfig().aiBaseUrl}/api/files/${fileId}/download`;
+}
+
+function getFileTextUrl(fileId: string): string {
+  return `${getAIConfig().aiBaseUrl}/api/files/${fileId}/text`;
 }
 
 /** 带认证的文件 URL 获取 (img 标签不支持 Authorization header) */
@@ -551,10 +555,20 @@ function ImageThumb({ file, onClick }: { file: ChatMessageFile; onClick: () => v
   return (
     <div
       style={{
-        position: 'relative', width: 120, height: 120, borderRadius: 8,
-        overflow: 'hidden', border: '1px solid #e8e8e8', cursor: 'pointer', background: '#fafafa',
+        position: 'relative', width: 160, height: 120, borderRadius: 10,
+        overflow: 'hidden', border: '1px solid #e0e0e0', cursor: 'pointer',
+        background: '#f8f9fa', transition: 'box-shadow 0.2s, transform 0.15s',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
       }}
       onClick={onClick}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+        e.currentTarget.style.transform = 'translateY(-1px)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+        e.currentTarget.style.transform = 'none';
+      }}
     >
       {blobUrl && !showFallback ? (
         <img
@@ -565,8 +579,8 @@ function ImageThumb({ file, onClick }: { file: ChatMessageFile; onClick: () => v
         />
       ) : showFallback ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 4, height: '100%' }}>
-          <FileImageOutlined style={{ fontSize: 24, color: '#bfbfbf' }} />
-          <span style={{ fontSize: 10, color: '#999', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 4px' }}>{file.filename}</span>
+          <FileImageOutlined style={{ fontSize: 28, color: '#bfbfbf' }} />
+          <span style={{ fontSize: 10, color: '#999', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 6px' }}>{file.filename}</span>
         </div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
@@ -575,11 +589,23 @@ function ImageThumb({ file, onClick }: { file: ChatMessageFile; onClick: () => v
       )}
       <div style={{
         position: 'absolute', bottom: 0, left: 0, right: 0,
-        background: 'linear-gradient(transparent, rgba(0,0,0,0.5))',
-        padding: '12px 6px 4px', color: '#fff', fontSize: 10,
+        background: 'linear-gradient(transparent, rgba(0,0,0,0.55))',
+        padding: '16px 8px 6px', color: '#fff', fontSize: 11,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
         {file.filename}
+      </div>
+      {/* Hover overlay with eye icon */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'rgba(0,0,0,0.15)', opacity: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'opacity 0.2s',
+      }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; }}
+      >
+        <EyeOutlined style={{ fontSize: 22, color: '#fff', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.3))' }} />
       </div>
     </div>
   );
@@ -597,47 +623,59 @@ function isTextFile(file: ChatMessageFile): boolean {
   return ['txt', 'csv', 'json', 'xml', 'yaml', 'yml', 'md', 'log', 'ini', 'conf'].includes(ext);
 }
 
+/** 获取认证 headers */
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const config = getAIConfig();
+  const headers: Record<string, string> = {};
+  if (config.getAuthToken) {
+    const token = await config.getAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } else if (config.authToken) {
+    headers['Authorization'] = `Bearer ${config.authToken}`;
+  }
+  return headers;
+}
+
 /** 通用文件预览 Modal — 图片/PDF/文本 */
 function FilePreviewModal({ file, onClose }: { file: ChatMessageFile; onClose: () => void }) {
   const { blobUrl } = useAuthBlobUrl(file.fileId);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isImg = isImageFile(file);
+  const isPdf = isPdfFile(file);
+  const isTxt = isTextFile(file);
 
   // 文本文件: 先尝试 /text 端点，失败则直接下载原文
   useEffect(() => {
-    if (!isTextFile(file) || isImageFile(file)) return;
+    if (!isTxt || isImg) return;
     setLoading(true);
+    setError(null);
     (async () => {
       try {
-        const config = getAIConfig();
-        const headers: Record<string, string> = {};
-        if (config.getAuthToken) {
-          const token = await config.getAuthToken();
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        } else if (config.authToken) {
-          headers['Authorization'] = `Bearer ${config.authToken}`;
-        }
+        const headers = await getAuthHeaders();
         // 优先 /text 端点
         let text = '';
-        const textRes = await fetch(`${config.aiBaseUrl}/files/${file.fileId}/text`, { headers });
-        if (textRes.ok) {
-          const data = await textRes.json();
-          text = data.text || '';
-        }
+        try {
+          const textRes = await fetch(getFileTextUrl(file.fileId), { headers });
+          if (textRes.ok) {
+            const data = await textRes.json();
+            text = data.text || '';
+          }
+        } catch { /* /text endpoint failed, try raw download */ }
         // 为空则直接读取原始文件
         if (!text) {
           const rawRes = await fetch(getFileDownloadUrl(file.fileId), { headers });
           if (rawRes.ok) text = await rawRes.text();
         }
-        setTextContent(text);
-      } catch { /* ignore */ }
+        setTextContent(text || '(文件内容为空)');
+      } catch {
+        setError('无法加载文件内容');
+      }
       setLoading(false);
     })();
-  }, [file.fileId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const isImg = isImageFile(file);
-  const isPdf = isPdfFile(file);
-  const isTxt = isTextFile(file);
+  }, [file.fileId, isTxt, isImg]);
 
   return (
     <Modal
@@ -651,7 +689,7 @@ function FilePreviewModal({ file, onClose }: { file: ChatMessageFile; onClose: (
       title={file.filename}
     >
       {isImg && blobUrl && (
-        <img src={blobUrl} alt={file.filename} style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain' }} />
+        <img src={blobUrl} alt={file.filename} style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain', display: 'block', margin: '0 auto' }} />
       )}
       {isPdf && blobUrl && (
         <iframe
@@ -663,11 +701,17 @@ function FilePreviewModal({ file, onClose }: { file: ChatMessageFile; onClose: (
       {isTxt && !isImg && (
         loading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: 40, color: '#ff4d4f' }}>
+            <CloseCircleOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block' }} />
+            {error}
+          </div>
         ) : (
           <pre style={{
             maxHeight: '70vh', overflow: 'auto', padding: 16,
             background: '#fafafa', borderRadius: 6, fontSize: 13,
             whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            lineHeight: 1.6,
           }}>
             {textContent ?? ''}
           </pre>
@@ -675,8 +719,25 @@ function FilePreviewModal({ file, onClose }: { file: ChatMessageFile; onClose: (
       )}
       {!isImg && !isPdf && !isTxt && (
         <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
-          <FileOutlined style={{ fontSize: 48, marginBottom: 12 }} />
+          <FileOutlined style={{ fontSize: 48, marginBottom: 12, display: 'block' }} />
           <div>该文件类型不支持预览</div>
+          <Button
+            type="link"
+            style={{ marginTop: 8 }}
+            onClick={async () => {
+              const headers = await getAuthHeaders();
+              const res = await fetch(getFileDownloadUrl(file.fileId), { headers });
+              if (res.ok) {
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = file.filename;
+                a.click();
+                URL.revokeObjectURL(url);
+              }
+            }}
+          >下载文件</Button>
         </div>
       )}
       {!blobUrl && (isImg || isPdf) && (
@@ -686,47 +747,84 @@ function FilePreviewModal({ file, onClose }: { file: ChatMessageFile; onClose: (
   );
 }
 
+/** 文件类型对应的背景色 */
+function getFileColor(file: ChatMessageFile): { bg: string; border: string; iconColor: string } {
+  const ext = file.filename.split('.').pop()?.toLowerCase() || '';
+  if (isImageFile(file)) return { bg: '#e6f7ff', border: '#91d5ff', iconColor: '#1890ff' };
+  if (ext === 'pdf') return { bg: '#fff1f0', border: '#ffa39e', iconColor: '#ff4d4f' };
+  if (['doc', 'docx'].includes(ext)) return { bg: '#f0f5ff', border: '#adc6ff', iconColor: '#2f54eb' };
+  if (['xls', 'xlsx', 'csv'].includes(ext)) return { bg: '#f6ffed', border: '#b7eb8f', iconColor: '#52c41a' };
+  if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) return { bg: '#fffbe6', border: '#ffe58f', iconColor: '#faad14' };
+  return { bg: '#fafafa', border: '#e8e8e8', iconColor: '#8c8c8c' };
+}
+
 function FileAttachments({ files }: { files: ChatMessageFile[] }) {
   const [previewFile, setPreviewFile] = useState<ChatMessageFile | null>(null);
   const images = files.filter(isImageFile);
   const others = files.filter((f) => !isImageFile(f));
 
   return (
-    <div style={{ marginTop: 8 }}>
+    <div style={{ marginTop: 10 }}>
       {/* 图片预览网格 */}
       {images.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: others.length > 0 ? 8 : 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: others.length > 0 ? 10 : 0 }}>
           {images.map((file) => (
             <ImageThumb key={file.fileId} file={file} onClick={() => setPreviewFile(file)} />
           ))}
         </div>
       )}
 
-      {/* 非图片文件卡片 — 点击预览 */}
-      {others.map((file) => (
-        <div
-          key={file.fileId}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '6px 10px', marginBottom: 4,
-            background: '#f5f5f5', borderRadius: 6,
-            border: '1px solid #e8e8e8', fontSize: 12,
-            cursor: 'pointer',
-          }}
-          onClick={() => setPreviewFile(file)}
-        >
-          {getFileIcon(file)}
-          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#333' }}>
-            {file.filename}
-          </span>
-          {file.sizeBytes != null && (
-            <span style={{ color: '#999', fontSize: 11, flexShrink: 0 }}>{formatFileSize(file.sizeBytes)}</span>
-          )}
-          <EyeOutlined style={{ color: '#1890ff', flexShrink: 0 }} title="预览" />
+      {/* 非图片文件卡片 */}
+      {others.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {others.map((file) => {
+            const colors = getFileColor(file);
+            return (
+              <div
+                key={file.fileId}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 14px', minWidth: 180, maxWidth: 280,
+                  background: colors.bg, borderRadius: 10,
+                  border: `1px solid ${colors.border}`, fontSize: 12,
+                  cursor: 'pointer', transition: 'box-shadow 0.2s, transform 0.15s',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                }}
+                onClick={() => setPreviewFile(file)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.boxShadow = '0 3px 10px rgba(0,0,0,0.12)';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
+                  e.currentTarget.style.transform = 'none';
+                }}
+              >
+                <div style={{ fontSize: 22, lineHeight: 1, flexShrink: 0 }}>
+                  {getFileIcon(file)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontWeight: 500, color: '#262626',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    fontSize: 13, lineHeight: '18px',
+                  }}>
+                    {file.filename}
+                  </div>
+                  {file.sizeBytes != null && (
+                    <div style={{ color: '#8c8c8c', fontSize: 11, marginTop: 1 }}>
+                      {formatFileSize(file.sizeBytes)}
+                    </div>
+                  )}
+                </div>
+                <EyeOutlined style={{ color: colors.iconColor, fontSize: 14, flexShrink: 0, opacity: 0.7 }} />
+              </div>
+            );
+          })}
         </div>
-      ))}
+      )}
 
-      {/* 文件预览 Modal (图片/PDF/文本) */}
+      {/* 文件预览 Modal */}
       {previewFile && (
         <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
@@ -795,11 +893,11 @@ export default function ChatMessageList({
         // 不论 running/completed 都保持同样布局，防止完成瞬间元素跳动
         const suppressBody = msg.role === 'assistant' &&
           showLiveTimeline && timelineHasText(liveTimelineEntries);
-        // 持久化时间线: 当 msg.content 为空时，text entries 是唯一内容来源，需要渲染
-        const emptyContent = msg.role === 'assistant' && (!msg.content || msg.content.trim() === '');
-        const persistedShowText = emptyContent;
-        // 如果 content 为空且 timeline 有 text，body 也要抑制 (内容由 PersistedTimeline 渲染)
-        const suppressPersistedBody = showPersistedTimeline && emptyContent && timelineHasText(msg.timeline);
+        // 持久化时间线: 始终显示 text entries 保持交错布局 (与实时一致)
+        // 当 timeline 有 text 时由 PersistedTimeline 负责渲染正文，抑制 MessageItem body 避免重复
+        const persistedTimelineHasText = showPersistedTimeline && timelineHasText(msg.timeline);
+        const persistedShowText = true;
+        const suppressPersistedBody = persistedTimelineHasText;
         return (
           <React.Fragment key={msg.id}>
             {showPersistedTimeline && <PersistedTimeline entries={msg.timeline!} showText={persistedShowText} />}
