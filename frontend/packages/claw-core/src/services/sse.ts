@@ -243,8 +243,8 @@ export class AgentSSEClient {
       handlers.forEach((h) => h(data));
       const wildcardHandlers = this.handlers.get('*') || [];
       wildcardHandlers.forEach((h) => h({ type: eventType, ...data }));
-    } catch {
-      // Ignore JSON parse errors
+    } catch (e) {
+      console.warn('[SSE] Failed to parse event data:', eventType, e);
     }
   }
 }

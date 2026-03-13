@@ -16,7 +16,7 @@ import {
   ToolOutlined,
   EyeOutlined,
 } from '@ant-design/icons';
-import { usePipelineStore, aiApi } from '@claw/core';
+import { usePipelineStore, aiApi, getAIConfig } from '@claw/core';
 import type { PlanStepTracking, ToolExecution } from '@claw/core';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -175,7 +175,7 @@ export default function ProgressPanel() {
     setPreviewFetcher(() => async () => {
       try {
         const resp = await fetch('/api/soul', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('claw_token') || ''}` },
+          headers: { 'Authorization': `Bearer ${getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? ''}` },
         });
         if (resp.ok) {
           const data = await resp.json();
@@ -193,7 +193,7 @@ export default function ProgressPanel() {
       // Try read via source file API
       try {
         const resp = await fetch(`/api/files/preview/${encodeURIComponent(filename)}`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('claw_token') || ''}` },
+          headers: { 'Authorization': `Bearer ${getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? ''}` },
         });
         if (resp.ok) {
           const data = await resp.json();

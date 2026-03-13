@@ -197,15 +197,18 @@ class HookRuleEngine:
             # 格式化消息
             message = rule.message_template
             if message:
-                try:
-                    message = message.format(
-                        tool_name=event.tool_name,
-                        tool_input=event.tool_input,
-                        rule_name=rule.name,
-                        rule_id=rule.rule_id,
-                    )
-                except (KeyError, IndexError):
-                    pass  # 模板变量缺失不影响
+                if "__" in message:
+                    message = f"[Rule {rule.rule_id}] Action blocked"
+                else:
+                    try:
+                        message = message.format(
+                            tool_name=event.tool_name,
+                            tool_input=event.tool_input,
+                            rule_name=rule.name,
+                            rule_id=rule.rule_id,
+                        )
+                    except (KeyError, IndexError, ValueError):
+                        pass  # 模板变量缺失不影响
 
             # 根据 action 返回结果
             if rule.action == "block":

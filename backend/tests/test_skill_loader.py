@@ -532,9 +532,9 @@ Skill from root directory for testing fallback behavior.
         assert len(skills) == 1
         assert skills[0]["name"] == "root-skill"
 
-    def test_create_skill_goes_to_builtin(self, tmp_path):
-        """create_skill puts new skills in builtin/ when it exists."""
-        (tmp_path / "builtin").mkdir()
+    def test_create_skill_goes_to_user(self, tmp_path):
+        """create_skill puts new skills in user/ when it exists."""
+        (tmp_path / "user").mkdir()
         loader = SkillLoader(skills_dir=str(tmp_path))
         result = loader.create_skill(
             name="new-skill",
@@ -542,11 +542,11 @@ Skill from root directory for testing fallback behavior.
             body="New skill body content for testing create location.",
         )
         assert result["ok"] is True
-        assert (tmp_path / "builtin" / "new-skill" / "SKILL.md").exists()
+        assert (tmp_path / "user" / "new-skill" / "SKILL.md").exists()
 
-    def test_import_goes_to_builtin(self, tmp_path):
-        """import_from_content puts imported skills in builtin/ when it exists."""
-        (tmp_path / "builtin").mkdir()
+    def test_import_goes_to_user(self, tmp_path):
+        """import_from_content puts imported skills in user/ when it exists."""
+        (tmp_path / "user").mkdir()
         loader = SkillLoader(skills_dir=str(tmp_path))
         raw = '''---
 name: imported-skill
@@ -557,4 +557,4 @@ Imported skill body for testing import location.
 '''
         result = loader.import_from_content(raw)
         assert result["ok"] is True
-        assert (tmp_path / "builtin" / "imported-skill" / "SKILL.md").exists()
+        assert (tmp_path / "user" / "imported-skill" / "SKILL.md").exists()

@@ -20,7 +20,7 @@ export interface AIConfig {
   /** 认证 token — 注入后所有 API 请求自动携带 Authorization header */
   authToken?: string;
   /** 动态获取 token 的函数 (优先于 authToken 静态值) */
-  getAuthToken?: () => string | null | Promise<string | null>;
+  getAuthToken?: () => string | null;
 }
 
 let _config: AIConfig = {

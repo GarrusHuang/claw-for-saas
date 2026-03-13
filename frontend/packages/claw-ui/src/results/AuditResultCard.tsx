@@ -41,6 +41,8 @@ function AuditRuleItem({ item }: { item: AuditItem }) {
       }}
     >
       <div
+        role="button"
+        tabIndex={0}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -49,6 +51,7 @@ function AuditRuleItem({ item }: { item: AuditItem }) {
           cursor: 'pointer',
         }}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
       >
         <Icon style={{ color: cfg.color, fontSize: 14 }} />
         <Text strong style={{ fontSize: 12, flex: 1 }}>{item.ruleId}</Text>

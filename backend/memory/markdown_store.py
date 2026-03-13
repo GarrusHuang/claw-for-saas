@@ -135,12 +135,9 @@ class MarkdownMemoryStore:
             if mode == "rewrite":
                 self._write_with_lock(path, content)
             else:
-                # append
-                existing = ""
-                if path.exists():
-                    existing = path.read_text(encoding="utf-8")
-                separator = "\n\n" if existing and not existing.endswith("\n\n") else ""
-                self._write_with_lock(path, existing + separator + content)
+                # append — read-modify-write 全部在文件锁内完成，
+                # 防止两个 worker 同时读到旧内容导致 lost update
+                self._append_with_lock(path, content)
             return True
         except OSError as e:
             logger.error(f"Failed to write {path}: {e}")
@@ -318,5 +315,34 @@ class MarkdownMemoryStore:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 f.write(content)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _append_with_lock(path: Path, content: str) -> None:
+        """
+        带文件锁的追加写入 — read-modify-write 在同一把锁内完成。
+
+        使用 "r+" 模式 (或新文件用 "w") 打开，先 flock，再读已有内容，
+        最后 truncate + 写回。保证多 worker 并发时不会 lost update。
+        """
+        if not path.exists():
+            # 文件不存在 — 直接创建并写入
+            with open(path, "w", encoding="utf-8") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    f.write(content)
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            return
+
+        with open(path, "r+", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                existing = f.read()
+                separator = "\n\n" if existing and not existing.endswith("\n\n") else ""
+                f.seek(0)
+                f.write(existing + separator + content)
+                f.truncate()
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)

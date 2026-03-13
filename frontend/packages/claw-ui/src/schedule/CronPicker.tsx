@@ -51,7 +51,7 @@ function buildCron(freq: Frequency, dow: string, dom: string, hour: number, min:
 
 export default function CronPicker({ value, onChange }: CronPickerProps) {
   const parsed = value ? parseCron(value) : null;
-  const [fallbackMode, setFallbackMode] = useState(!value || !parsed ? false : false);
+  const [fallbackMode, setFallbackMode] = useState(!value ? false : !parsed);
 
   const [freq, setFreq] = useState<Frequency>(parsed?.freq ?? 'daily');
   const [dow, setDow] = useState(parsed?.dow ?? '1');
@@ -91,9 +91,9 @@ export default function CronPicker({ value, onChange }: CronPickerProps) {
           placeholder="Cron 表达式 (例: 0 9 * * *)"
           style={{ flex: 1 }}
         />
-        <a style={{ fontSize: 12, whiteSpace: 'nowrap' }} onClick={() => { setFallbackMode(false); emitChange(freq, dow, dom, hour, min); }}>
+        <span role="button" tabIndex={0} style={{ fontSize: 12, whiteSpace: 'nowrap', color: '#1677ff', cursor: 'pointer' }} onClick={() => { setFallbackMode(false); emitChange(freq, dow, dom, hour, min); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFallbackMode(false); emitChange(freq, dow, dom, hour, min); } }}>
           可视化
-        </a>
+        </span>
       </div>
     );
   }
@@ -141,9 +141,9 @@ export default function CronPicker({ value, onChange }: CronPickerProps) {
         style={{ width: 100 }}
         allowClear={false}
       />
-      <a style={{ fontSize: 12, whiteSpace: 'nowrap' }} onClick={() => { setFallbackMode(true); setRawCron(buildCron(freq, dow, dom, hour, min)); }}>
+      <span role="button" tabIndex={0} style={{ fontSize: 12, whiteSpace: 'nowrap', color: '#1677ff', cursor: 'pointer' }} onClick={() => { setFallbackMode(true); setRawCron(buildCron(freq, dow, dom, hour, min)); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFallbackMode(true); setRawCron(buildCron(freq, dow, dom, hour, min)); } }}>
         手动输入
-      </a>
+      </span>
     </div>
   );
 }

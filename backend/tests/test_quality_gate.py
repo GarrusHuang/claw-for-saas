@@ -235,9 +235,9 @@ class TestQualityGateHook:
         assert "U1:S1" not in _correction_counts
 
     def test_cleanup_on_overflow(self):
-        """When dict grows > 100, it should clear."""
-        for i in range(101):
+        """When dict grows > 50, LRU cleanup keeps most recent 50."""
+        for i in range(60):
             _correction_counts[f"user:{i}"] = 1
         event = _make_event(context={"business_type": "query"})
         quality_gate_hook(event)
-        assert len(_correction_counts) <= 1
+        assert len(_correction_counts) <= 51  # 50 kept + 1 new entry

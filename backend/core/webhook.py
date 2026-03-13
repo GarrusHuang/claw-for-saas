@@ -132,21 +132,21 @@ class WebhookDispatcher:
             headers["X-Claw-Signature"] = self._sign(payload, config.secret)
 
         # 指数退避重试
-        for attempt in range(self.max_retries):
-            try:
-                async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            for attempt in range(self.max_retries):
+                try:
                     resp = await client.post(config.url, content=payload, headers=headers)
-                if 200 <= resp.status_code < 300:
-                    logger.info(f"Webhook delivered: {event} → {config.url} (status={resp.status_code})")
-                    return True
-                logger.warning(f"Webhook non-2xx: {resp.status_code} from {config.url}")
-            except Exception as e:
-                logger.warning(f"Webhook attempt {attempt + 1} failed: {e}")
+                    if 200 <= resp.status_code < 300:
+                        logger.info(f"Webhook delivered: {event} → {config.url} (status={resp.status_code})")
+                        return True
+                    logger.warning(f"Webhook non-2xx: {resp.status_code} from {config.url}")
+                except Exception as e:
+                    logger.warning(f"Webhook attempt {attempt + 1} failed: {e}")
 
-            if attempt < self.max_retries - 1:
-                import asyncio
-                delay = 2 ** attempt  # 1s → 2s → 4s
-                await asyncio.sleep(delay)
+                if attempt < self.max_retries - 1:
+                    import asyncio
+                    delay = 2 ** attempt  # 1s → 2s → 4s
+                    await asyncio.sleep(delay)
 
-        logger.error(f"Webhook exhausted retries for {event} → {config.url}")
-        return False
+            logger.error(f"Webhook exhausted retries for {event} → {config.url}")
+            return False

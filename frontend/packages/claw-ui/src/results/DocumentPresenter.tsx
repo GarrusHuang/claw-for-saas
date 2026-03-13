@@ -19,6 +19,7 @@ import remarkGfm from 'remark-gfm';
 import type { GeneratedDocument } from '@claw/core';
 import DocumentPreviewModal from './DocumentPreviewModal';
 import { downloadAsFile, downloadFromUrl, copyToClipboard } from '../utils/download';
+import { getAIConfig } from '@claw/core';
 
 const { Text } = Typography;
 
@@ -49,7 +50,8 @@ export default function DocumentPresenter({
 
   const handleDownload = () => {
     if (hasDocx) {
-      downloadFromUrl(doc.metadata.docx_download_url as string, filename);
+      const token = getAIConfig().getAuthToken?.() ?? getAIConfig().authToken ?? '';
+      downloadFromUrl(doc.metadata.docx_download_url as string, filename, token ? { 'Authorization': `Bearer ${token}` } : undefined);
     } else {
       downloadAsFile(doc.content, filename);
     }
