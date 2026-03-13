@@ -21,7 +21,10 @@ function formatResultLabel(result: SearchResult): string {
 function formatResultDate(result: SearchResult): string {
   if (!result.created_at) return '';
   try {
-    const d = new Date(result.created_at);
+    const ts = typeof result.created_at === 'number'
+      ? (result.created_at < 1e12 ? result.created_at * 1000 : result.created_at)
+      : Number(result.created_at);
+    const d = new Date(ts);
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     const hour = String(d.getHours()).padStart(2, '0');

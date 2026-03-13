@@ -19,6 +19,7 @@ class ScheduleCreateRequest(BaseModel):
     cron: str
     message: str
     business_type: str = "scheduled_task"
+    timezone: str = ""  # IANA tz name (前端传 Intl.DateTimeFormat().resolvedOptions().timeZone)
 
 
 class ScheduleUpdateRequest(BaseModel):
@@ -27,6 +28,7 @@ class ScheduleUpdateRequest(BaseModel):
     message: str | None = None
     business_type: str | None = None
     enabled: bool | None = None
+    timezone: str | None = None
 
 
 @router.get("")
@@ -56,6 +58,7 @@ async def create_schedule(req: ScheduleCreateRequest, user: AuthUser = Depends(g
         user_id=user.user_id,
         tenant_id=user.tenant_id,
         business_type=req.business_type,
+        timezone=req.timezone,
     )
 
     scheduler = get_scheduler()

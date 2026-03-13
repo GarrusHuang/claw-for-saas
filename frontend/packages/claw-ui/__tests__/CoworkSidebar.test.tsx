@@ -25,6 +25,7 @@ vi.mock('@claw/core', () => ({
     listSessions: vi.fn().mockResolvedValue([]),
   },
   getAIConfig: vi.fn(() => ({ defaultUserId: 'U001' })),
+  useNotifications: vi.fn(),
 }));
 
 // ── Tests ──

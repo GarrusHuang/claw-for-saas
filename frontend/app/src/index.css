@@ -470,6 +470,15 @@ body {
   background: #d0ebff;
 }
 
+.cowork-sidebar-session-item--unread {
+  border-left: 3px solid #f59e0b;
+  background: #fffbeb;
+}
+
+.cowork-sidebar-session-item--unread:hover {
+  background: #fef3c7;
+}
+
 /* ── Sidebar skill items ── */
 
 .cowork-sidebar-skill-item {

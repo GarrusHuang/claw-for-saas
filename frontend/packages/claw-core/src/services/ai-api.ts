@@ -56,7 +56,7 @@ export interface SessionInfo {
   session_id: string;
   type?: string;
   business_type?: string;
-  created_at?: string;
+  created_at?: number;
   [key: string]: unknown;
 }
 
@@ -104,7 +104,7 @@ export interface SearchResult {
   session_id: string;
   title?: string;
   business_type?: string;
-  created_at?: string;
+  created_at?: number;
   match_snippet?: string;
   title_match?: boolean;
   [key: string]: unknown;
@@ -321,6 +321,7 @@ export interface ScheduleCreatePayload {
   cron: string;
   message: string;
   business_type?: string;
+  timezone?: string;
 }
 
 export interface ScheduleUpdatePayload {
@@ -329,6 +330,7 @@ export interface ScheduleUpdatePayload {
   message?: string;
   business_type?: string;
   enabled?: boolean;
+  timezone?: string;
 }
 
 export async function listSchedules(): Promise<{ tasks: ScheduledTask[]; total: number }> {

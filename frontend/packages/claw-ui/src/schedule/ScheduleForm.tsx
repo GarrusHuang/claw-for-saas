@@ -32,12 +32,14 @@ export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFo
   const handleSubmit = async (values: { name: string; message: string; cron: string; business_type: string }) => {
     setSubmitting(true);
     try {
+      const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       if (isEdit) {
         await aiApi.updateSchedule(editTask.id, {
           name: values.name,
           message: values.message,
           cron: values.cron,
           business_type: values.business_type,
+          timezone: userTz,
         });
         message.success('任务已更新');
       } else {
@@ -46,6 +48,7 @@ export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFo
           message: values.message,
           cron: values.cron,
           business_type: values.business_type || undefined,
+          timezone: userTz,
         });
         message.success('任务已创建');
       }

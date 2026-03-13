@@ -33,6 +33,7 @@ from api.webhook_routes import router as webhook_router
 from api.usage_routes import router as usage_admin_router
 from api.my_usage_routes import router as my_usage_router
 from api.knowledge_routes import router as knowledge_router
+from api.ws_routes import router as ws_router
 
 
 @asynccontextmanager
@@ -156,6 +157,7 @@ app.include_router(usage_admin_router)
 app.include_router(my_usage_router)
 app.include_router(knowledge_router)
 app.include_router(workspace_router)
+app.include_router(ws_router)
 
 
 @app.get("/")
