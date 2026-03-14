@@ -256,10 +256,10 @@ class TestCreateSchedule:
         resp = client.post("/api/schedules", json=payload)
         assert resp.status_code == 422
 
-    def test_create_missing_cron_returns_422(self, client):
+    def test_create_missing_cron_and_scheduled_at_returns_400(self, client):
         payload = {"name": "No cron", "message": "test"}
         resp = client.post("/api/schedules", json=payload)
-        assert resp.status_code == 422
+        assert resp.status_code == 400
 
     def test_create_missing_message_returns_422(self, client):
         payload = {"name": "No msg", "cron": VALID_CRON}

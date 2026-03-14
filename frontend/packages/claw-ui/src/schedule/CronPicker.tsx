@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Select, TimePicker, Input } from 'antd';
+import { Select, TimePicker, DatePicker, Input } from 'antd';
 import dayjs from 'dayjs';
 
-type Frequency = 'daily' | 'weekday' | 'weekly' | 'monthly';
+type Frequency = 'once' | 'daily' | 'weekday' | 'weekly' | 'monthly';
 
 interface CronPickerProps {
   value?: string;
   onChange: (cron: string) => void;
+  scheduledAt?: number | null;
+  onScheduledAtChange?: (ts: number | null) => void;
 }
 
 const WEEKDAY_OPTIONS = [
@@ -26,6 +28,7 @@ const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => ({
 
 /** Parse a cron string into frequency/dow/dom/hour/min. Returns null if unrecognizable. */
 function parseCron(cron: string): { freq: Frequency; dow: string; dom: string; hour: number; min: number } | null {
+  if (!cron) return null;
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return null;
   const [minS, hourS, domS, , dowS] = parts;
@@ -46,22 +49,34 @@ function buildCron(freq: Frequency, dow: string, dom: string, hour: number, min:
     case 'weekday': return `${min} ${hour} * * 1-5`;
     case 'weekly':  return `${min} ${hour} * * ${dow}`;
     case 'monthly': return `${min} ${hour} ${dom} * *`;
+    case 'once':    return '';
   }
 }
 
-export default function CronPicker({ value, onChange }: CronPickerProps) {
+export default function CronPicker({ value, onChange, scheduledAt, onScheduledAtChange }: CronPickerProps) {
+  // Determine if this is a "once" frequency based on empty cron + scheduledAt
+  const isOnce = !value && scheduledAt != null;
   const parsed = value ? parseCron(value) : null;
-  const [fallbackMode, setFallbackMode] = useState(!value ? false : !parsed);
+  const [fallbackMode, setFallbackMode] = useState(!value && !isOnce ? false : (!parsed && !isOnce));
 
-  const [freq, setFreq] = useState<Frequency>(parsed?.freq ?? 'daily');
+  const [freq, setFreq] = useState<Frequency>(isOnce ? 'once' : (parsed?.freq ?? 'daily'));
   const [dow, setDow] = useState(parsed?.dow ?? '1');
   const [dom, setDom] = useState(parsed?.dom ?? '1');
   const [hour, setHour] = useState(parsed?.hour ?? 9);
   const [min, setMin] = useState(parsed?.min ?? 0);
   const [rawCron, setRawCron] = useState(value ?? '');
+  const [onceDateTime, setOnceDateTime] = useState<dayjs.Dayjs | null>(
+    scheduledAt ? dayjs(scheduledAt * 1000) : null,
+  );
 
   // When value changes externally, try to sync
   useEffect(() => {
+    if (!value && scheduledAt != null) {
+      setFreq('once');
+      setOnceDateTime(dayjs(scheduledAt * 1000));
+      setFallbackMode(false);
+      return;
+    }
     if (!value) return;
     const p = parseCron(value);
     if (p) {
@@ -75,11 +90,16 @@ export default function CronPicker({ value, onChange }: CronPickerProps) {
       setRawCron(value);
       setFallbackMode(true);
     }
-  }, [value]);
+  }, [value, scheduledAt]);
 
   const emitChange = useCallback((f: Frequency, d: string, dm: string, h: number, m: number) => {
+    if (f === 'once') {
+      onChange('');
+      return;
+    }
     onChange(buildCron(f, d, dm, h, m));
-  }, [onChange]);
+    onScheduledAtChange?.(null);
+  }, [onChange, onScheduledAtChange]);
 
   if (fallbackMode) {
     return (
@@ -102,15 +122,43 @@ export default function CronPicker({ value, onChange }: CronPickerProps) {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       <Select
         value={freq}
-        onChange={(v) => { setFreq(v); emitChange(v, dow, dom, hour, min); }}
+        onChange={(v) => {
+          setFreq(v);
+          if (v === 'once') {
+            onChange('');
+            // Set default once time if not set
+            if (!onceDateTime) {
+              const defaultTime = dayjs().add(1, 'day').hour(9).minute(0).second(0);
+              setOnceDateTime(defaultTime);
+              onScheduledAtChange?.(defaultTime.unix());
+            }
+          } else {
+            emitChange(v, dow, dom, hour, min);
+          }
+        }}
         style={{ width: 110 }}
         options={[
+          { label: '一次性', value: 'once' },
           { label: '每天', value: 'daily' },
           { label: '工作日', value: 'weekday' },
           { label: '每周', value: 'weekly' },
           { label: '每月', value: 'monthly' },
         ]}
       />
+      {freq === 'once' && (
+        <DatePicker
+          showTime={{ format: 'HH:mm' }}
+          format="YYYY-MM-DD HH:mm"
+          value={onceDateTime}
+          onChange={(dt) => {
+            setOnceDateTime(dt);
+            onScheduledAtChange?.(dt ? dt.unix() : null);
+          }}
+          placeholder="选择执行时间"
+          style={{ width: 200 }}
+          allowClear={false}
+        />
+      )}
       {freq === 'weekly' && (
         <Select
           value={dow}
@@ -127,23 +175,27 @@ export default function CronPicker({ value, onChange }: CronPickerProps) {
           options={DAY_OPTIONS}
         />
       )}
-      <TimePicker
-        value={dayjs().hour(hour).minute(min)}
-        format="HH:mm"
-        onChange={(t) => {
-          if (!t) return;
-          const h = t.hour();
-          const m = t.minute();
-          setHour(h);
-          setMin(m);
-          emitChange(freq, dow, dom, h, m);
-        }}
-        style={{ width: 100 }}
-        allowClear={false}
-      />
-      <span role="button" tabIndex={0} style={{ fontSize: 12, whiteSpace: 'nowrap', color: '#1677ff', cursor: 'pointer' }} onClick={() => { setFallbackMode(true); setRawCron(buildCron(freq, dow, dom, hour, min)); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFallbackMode(true); setRawCron(buildCron(freq, dow, dom, hour, min)); } }}>
-        手动输入
-      </span>
+      {freq !== 'once' && (
+        <TimePicker
+          value={dayjs().hour(hour).minute(min)}
+          format="HH:mm"
+          onChange={(t) => {
+            if (!t) return;
+            const h = t.hour();
+            const m = t.minute();
+            setHour(h);
+            setMin(m);
+            emitChange(freq, dow, dom, h, m);
+          }}
+          style={{ width: 100 }}
+          allowClear={false}
+        />
+      )}
+      {freq !== 'once' && (
+        <span role="button" tabIndex={0} style={{ fontSize: 12, whiteSpace: 'nowrap', color: '#1677ff', cursor: 'pointer' }} onClick={() => { setFallbackMode(true); setRawCron(buildCron(freq, dow, dom, hour, min)); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFallbackMode(true); setRawCron(buildCron(freq, dow, dom, hour, min)); } }}>
+          手动输入
+        </span>
+      )}
     </div>
   );
 }

@@ -31,6 +31,9 @@ function makeTask(overrides = {}): import('@claw/core').ScheduledTask {
     last_run_at: null,
     last_run_status: '',
     next_run_at: Date.now() / 1000 + 3600,
+    scheduled_at: null,
+    expires_at: null,
+    run_history: [],
     ...overrides,
   };
 }
@@ -46,7 +49,7 @@ describe('ScheduleList', () => {
 
   it('renders header with title and create button', () => {
     render(
-      <ScheduleList tasks={[]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('定时任务')).toBeInTheDocument();
     expect(screen.getByText('新建任务')).toBeInTheDocument();
@@ -54,49 +57,49 @@ describe('ScheduleList', () => {
 
   it('shows empty state when no tasks', () => {
     render(
-      <ScheduleList tasks={[]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('暂无定时任务')).toBeInTheDocument();
   });
 
   it('renders task name in table', () => {
     render(
-      <ScheduleList tasks={[makeTask()]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[makeTask()]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('每日报告')).toBeInTheDocument();
   });
 
   it('renders cron as readable Chinese — daily', () => {
     render(
-      <ScheduleList tasks={[makeTask({ cron: '0 9 * * *' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[makeTask({ cron: '0 9 * * *' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('每天 09:00')).toBeInTheDocument();
   });
 
   it('renders cron as readable Chinese — weekday', () => {
     render(
-      <ScheduleList tasks={[makeTask({ cron: '30 8 * * 1-5' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[makeTask({ cron: '30 8 * * 1-5' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('工作日 08:30')).toBeInTheDocument();
   });
 
   it('renders cron as readable Chinese — weekly', () => {
     render(
-      <ScheduleList tasks={[makeTask({ cron: '0 14 * * 3' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[makeTask({ cron: '0 14 * * 3' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('每周三 14:00')).toBeInTheDocument();
   });
 
   it('renders cron as readable Chinese — monthly', () => {
     render(
-      <ScheduleList tasks={[makeTask({ cron: '0 10 15 * *' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[makeTask({ cron: '0 10 15 * *' })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('每月 15 日 10:00')).toBeInTheDocument();
   });
 
   it('shows "-" when last_run_at is null', () => {
     render(
-      <ScheduleList tasks={[makeTask({ last_run_at: null })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[makeTask({ last_run_at: null })]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('-')).toBeInTheDocument();
   });
@@ -106,7 +109,7 @@ describe('ScheduleList', () => {
     render(
       <ScheduleList
         tasks={[makeTask({ last_run_at: nowSec - 120, last_run_status: 'success' })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     expect(screen.getByText('2分钟前')).toBeInTheDocument();
@@ -119,7 +122,7 @@ describe('ScheduleList', () => {
       makeTask({ id: 't3', name: '任务C' }),
     ];
     render(
-      <ScheduleList tasks={tasks} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={tasks} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     expect(screen.getByText('任务A')).toBeInTheDocument();
     expect(screen.getByText('任务B')).toBeInTheDocument();
@@ -130,7 +133,7 @@ describe('ScheduleList', () => {
 
   it('clicking "新建任务" calls onCreate', async () => {
     render(
-      <ScheduleList tasks={[]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} />
+      <ScheduleList tasks={[]} loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()} />
     );
     screen.getByText('新建任务').click();
     expect(mockCreate).toHaveBeenCalledTimes(1);
@@ -140,7 +143,7 @@ describe('ScheduleList', () => {
     render(
       <ScheduleList
         tasks={[makeTask({ enabled: true }), makeTask({ id: 't2', name: '任务B', enabled: false })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     const switches = document.querySelectorAll('.ant-switch');
@@ -153,7 +156,7 @@ describe('ScheduleList', () => {
     const { container } = render(
       <ScheduleList
         tasks={[makeTask({ cron: '*/5 * * * *' })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     // Non-standard cron falls through describeCron, check table cell content
@@ -166,7 +169,7 @@ describe('ScheduleList', () => {
     render(
       <ScheduleList
         tasks={[makeTask({ last_run_at: Date.now() / 1000 - 5, last_run_status: 'success' })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     expect(screen.getByText('刚刚')).toBeInTheDocument();
@@ -176,7 +179,7 @@ describe('ScheduleList', () => {
     render(
       <ScheduleList
         tasks={[makeTask({ last_run_at: Date.now() / 1000 - 7200, last_run_status: 'failed' })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     expect(screen.getByText('2小时前')).toBeInTheDocument();
@@ -186,7 +189,7 @@ describe('ScheduleList', () => {
     render(
       <ScheduleList
         tasks={[makeTask({ last_run_at: Date.now() / 1000 - 172800, last_run_status: 'success' })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     expect(screen.getByText('2天前')).toBeInTheDocument();
@@ -198,7 +201,7 @@ describe('ScheduleList', () => {
     const { container } = render(
       <ScheduleList
         tasks={[makeTask({ last_run_at: Date.now() / 1000 - 60, last_run_status: 'success' })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     expect(container.querySelector('.schedule-status-dot--success')).toBeInTheDocument();
@@ -208,7 +211,7 @@ describe('ScheduleList', () => {
     const { container } = render(
       <ScheduleList
         tasks={[makeTask({ last_run_at: Date.now() / 1000 - 60, last_run_status: 'failed' })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     expect(container.querySelector('.schedule-status-dot--failed')).toBeInTheDocument();
@@ -218,7 +221,7 @@ describe('ScheduleList', () => {
     const { container } = render(
       <ScheduleList
         tasks={[makeTask({ last_run_at: null })]}
-        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit}
+        loading={false} onRefresh={mockRefresh} onCreate={mockCreate} onEdit={mockEdit} onDetail={vi.fn()}
       />
     );
     expect(container.querySelector('.schedule-status-dot--none')).toBeInTheDocument();

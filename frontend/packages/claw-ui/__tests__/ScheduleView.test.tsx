@@ -36,6 +36,9 @@ function makeTask(overrides = {}): import('@claw/core').ScheduledTask {
     last_run_at: null,
     last_run_status: '',
     next_run_at: Date.now() / 1000 + 3600,
+    scheduled_at: null,
+    expires_at: null,
+    run_history: [],
     ...overrides,
   };
 }

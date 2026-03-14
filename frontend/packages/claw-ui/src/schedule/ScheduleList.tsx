@@ -9,10 +9,12 @@ interface ScheduleListProps {
   onRefresh: () => void;
   onCreate: () => void;
   onEdit: (task: ScheduledTask) => void;
+  onDetail: (task: ScheduledTask) => void;
 }
 
 /** Convert cron expression to readable Chinese text */
 function describeCron(cron: string): string {
+  if (!cron) return '一次性';
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return cron;
   const [minS, hourS, domS, , dowS] = parts;
@@ -28,6 +30,16 @@ function describeCron(cron: string): string {
   return cron;
 }
 
+/** Format cron or scheduled_at for display */
+function describeSchedule(task: ScheduledTask): string {
+  if (task.cron) return describeCron(task.cron);
+  if (task.scheduled_at) {
+    const d = new Date(task.scheduled_at * 1000);
+    return `一次性 ${d.toLocaleDateString('zh-CN')} ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return '-';
+}
+
 /** Format timestamp to relative time */
 function relativeTime(ts: number | null): string {
   if (!ts) return '-';
@@ -38,9 +50,10 @@ function relativeTime(ts: number | null): string {
   return `${Math.floor(diff / 86400)}天前`;
 }
 
-export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEdit }: ScheduleListProps) {
+export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEdit, onDetail }: ScheduleListProps) {
 
-  const handleToggle = useCallback(async (task: ScheduledTask) => {
+  const handleToggle = useCallback(async (task: ScheduledTask, e: React.MouseEvent) => {
+    e.stopPropagation();
     try {
       if (task.enabled) {
         await aiApi.pauseSchedule(task.id);
@@ -63,6 +76,15 @@ export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEd
     }
   }, [onRefresh]);
 
+  const handleRunNow = useCallback(async (taskId: string) => {
+    try {
+      await aiApi.runScheduleNow(taskId);
+      message.success('任务已触发');
+    } catch {
+      message.error('运行失败');
+    }
+  }, []);
+
   const columns = [
     {
       title: '标题',
@@ -72,10 +94,9 @@ export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEd
     },
     {
       title: '计划于',
-      dataIndex: 'cron',
-      key: 'cron',
-      width: 180,
-      render: (cron: string) => describeCron(cron),
+      key: 'schedule',
+      width: 220,
+      render: (_: unknown, record: ScheduledTask) => describeSchedule(record),
     },
     {
       title: '上次执行',
@@ -100,7 +121,8 @@ export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEd
         <Switch
           size="small"
           checked={record.enabled}
-          onChange={() => handleToggle(record)}
+          onChange={() => {}}
+          onClick={(_, e) => handleToggle(record, e as unknown as React.MouseEvent)}
         />
       ),
     },
@@ -112,7 +134,8 @@ export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEd
         <Dropdown
           menu={{
             items: [
-              { key: 'edit', label: '编辑', onClick: () => onEdit(record) },
+              { key: 'edit', label: '编辑', onClick: (info) => { info.domEvent.stopPropagation(); onEdit(record); } },
+              { key: 'run', label: '立即运行', onClick: (info) => { info.domEvent.stopPropagation(); handleRunNow(record.id); } },
               {
                 key: 'delete',
                 label: (
@@ -132,7 +155,12 @@ export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEd
           }}
           trigger={['click']}
         >
-          <Button type="text" size="small" icon={<MoreOutlined />} />
+          <Button
+            type="text"
+            size="small"
+            icon={<MoreOutlined />}
+            onClick={(e) => e.stopPropagation()}
+          />
         </Dropdown>
       ),
     },
@@ -155,6 +183,10 @@ export default function ScheduleList({ tasks, loading, onRefresh, onCreate, onEd
         pagination={false}
         size="middle"
         locale={{ emptyText: '暂无定时任务' }}
+        onRow={(record) => ({
+          onClick: () => onDetail(record),
+          style: { cursor: 'pointer' },
+        })}
       />
     </div>
   );

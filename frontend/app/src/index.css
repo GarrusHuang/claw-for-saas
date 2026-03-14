@@ -647,6 +647,78 @@ body {
   background: #d9d9d9;
 }
 
+.schedule-detail-container {
+  max-width: 720px;
+}
+
+.schedule-detail-section {
+  margin-bottom: 20px;
+}
+
+.schedule-detail-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.schedule-detail-prompt {
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #555;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.schedule-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 24px;
+}
+
+.schedule-detail-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.schedule-detail-label {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.schedule-detail-value {
+  font-size: 13px;
+  color: #333;
+}
+
+.schedule-detail-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.schedule-detail-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #555;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.schedule-detail-history-time {
+  min-width: 140px;
+}
+
+.schedule-detail-history-duration {
+  min-width: 50px;
+  color: #8c8c8c;
+}
+
 /* ══════════════════════════════════════════════
    Plan document (PlanCard)
    ══════════════════════════════════════════════ */

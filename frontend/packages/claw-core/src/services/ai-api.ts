@@ -301,6 +301,14 @@ export async function listTools(): Promise<ToolInfo[]> {
 
 // ── Schedules ──
 
+export interface RunRecord {
+  started_at: number;
+  status: string;
+  duration_s: number;
+  session_id: string;
+  trigger: string;    // "scheduled" | "manual"
+}
+
 export interface ScheduledTask {
   id: string;
   name: string;
@@ -314,20 +322,27 @@ export interface ScheduledTask {
   last_run_at: number | null;
   last_run_status: string;       // "success" | "failed" | ""
   next_run_at: number | null;
+  scheduled_at: number | null;   // 一次性任务时间戳
+  expires_at: number | null;
+  run_history: RunRecord[];
 }
 
 export interface ScheduleCreatePayload {
   name: string;
-  cron: string;
   message: string;
+  cron?: string;
+  scheduled_at?: number;
+  expires_at?: number;
   business_type?: string;
   timezone?: string;
 }
 
 export interface ScheduleUpdatePayload {
   name?: string;
-  cron?: string;
   message?: string;
+  cron?: string;
+  scheduled_at?: number | null;
+  expires_at?: number | null;
   business_type?: string;
   enabled?: boolean;
   timezone?: string;
@@ -359,6 +374,10 @@ export async function pauseSchedule(taskId: string): Promise<{ status: string; t
 
 export async function resumeSchedule(taskId: string): Promise<{ status: string; task_id: string }> {
   return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+}
+
+export async function runScheduleNow(taskId: string): Promise<{ status: string; task_id: string }> {
+  return apiFetch(`/api/schedules/${encodeURIComponent(taskId)}/run`, { method: 'POST' });
 }
 
 // ── Knowledge Base ──
