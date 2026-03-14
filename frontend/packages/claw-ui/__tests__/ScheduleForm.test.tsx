@@ -28,6 +28,9 @@ function makeTask(overrides = {}): import('@claw/core').ScheduledTask {
     last_run_at: null,
     last_run_status: '',
     next_run_at: null,
+    scheduled_at: null,
+    expires_at: null,
+    run_history: [],
     ...overrides,
   };
 }
@@ -57,7 +60,7 @@ describe('ScheduleForm', () => {
     expect(screen.getByText('标题')).toBeInTheDocument();
     expect(screen.getByText('提示词')).toBeInTheDocument();
     expect(screen.getByText('计划')).toBeInTheDocument();
-    expect(screen.getByText('业务类型')).toBeInTheDocument();
+    expect(screen.getByText('到期时间 (可选)')).toBeInTheDocument();
   });
 
   it('has cancel and submit buttons in create mode', () => {

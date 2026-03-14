@@ -22,15 +22,16 @@ schedule_capability_registry = ToolRegistry()
 @schedule_capability_registry.tool(
     description=(
         "创建定时调度任务。"
-        "使用标准 cron 表达式定义执行周期, 每次触发时自动以指定消息调用 Agent。"
-        "示例 cron: '0 9 * * 1-5' = 工作日每天 9 点, '0 */2 * * *' = 每 2 小时。"
+        "循环任务使用 cron 表达式 (如 '0 9 * * 1-5' = 工作日每天 9 点)。"
+        "一次性任务不填 cron, 改用 scheduled_at 指定 ISO 格式执行时间 (如 '2026-03-15T09:00:00')。"
     ),
     read_only=False,
 )
 def create_schedule(
     name: str,              # 任务名称
-    cron: str,              # 5-field cron 表达式
     message: str,           # 每次触发时发送给 Agent 的消息
+    cron: str = "",         # 5-field cron 表达式 (循环任务填写, 一次性任务留空)
+    scheduled_at: str = "", # ISO 格式日期时间 (一次性任务填写, 如 "2026-03-15T09:00:00")
     business_type: str = "scheduled_task",  # 业务类型
 ) -> dict:
     """创建定时调度任务。"""
@@ -38,9 +39,22 @@ def create_schedule(
     if not scheduler:
         return {"error": "调度器未初始化"}
 
-    # 验证 cron 表达式
-    if not croniter.is_valid(cron):
-        return {"error": f"无效的 cron 表达式: {cron}"}
+    # 验证: cron 或 scheduled_at 必须有一个
+    if cron:
+        if not croniter.is_valid(cron):
+            return {"error": f"无效的 cron 表达式: {cron}"}
+    elif not scheduled_at:
+        return {"error": "请提供 cron (循环) 或 scheduled_at (一次性)"}
+
+    # 解析 scheduled_at
+    scheduled_at_ts = None
+    if scheduled_at:
+        try:
+            from datetime import datetime as dt
+            parsed = dt.fromisoformat(scheduled_at)
+            scheduled_at_ts = parsed.timestamp()
+        except ValueError:
+            return {"error": f"无效的时间格式: {scheduled_at}, 请使用 ISO 格式如 2026-03-15T09:00:00"}
 
     tenant_id = current_tenant_id.get("default")
     user_id = current_user_id.get("anonymous")
@@ -54,6 +68,7 @@ def create_schedule(
         user_id=user_id,
         tenant_id=tenant_id,
         business_type=business_type,
+        scheduled_at=scheduled_at_ts,
     )
 
     try:
@@ -63,6 +78,7 @@ def create_schedule(
             "task_id": task.id,
             "name": task.name,
             "cron": task.cron,
+            "scheduled_at": scheduled_at or None,
             "next_run_at": task.next_run_at,
         }
     except Exception as e:

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Form, Input, Button, message } from 'antd';
+import { Form, Input, Button, DatePicker, message } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { aiApi, type ScheduledTask } from '@claw/core';
 import CronPicker from './CronPicker.tsx';
 
@@ -13,6 +14,7 @@ interface ScheduleFormProps {
 export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFormProps) {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState<number | null>(null);
   const isEdit = !!editTask;
 
   useEffect(() => {
@@ -21,24 +23,33 @@ export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFo
         name: editTask.name,
         message: editTask.message,
         cron: editTask.cron,
-        business_type: editTask.business_type,
+        expires_at: editTask.expires_at ? dayjs(editTask.expires_at * 1000) : null,
       });
+      setScheduledAt(editTask.scheduled_at ?? null);
     } else {
       form.resetFields();
-      form.setFieldsValue({ cron: '0 9 * * *', business_type: 'scheduled_task' });
+      form.setFieldsValue({ cron: '0 9 * * *' });
+      setScheduledAt(null);
     }
   }, [editTask, form]);
 
-  const handleSubmit = async (values: { name: string; message: string; cron: string; business_type: string }) => {
+  const handleSubmit = async (values: { name: string; message: string; cron: string; expires_at?: dayjs.Dayjs | null }) => {
     setSubmitting(true);
     try {
       const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const expiresAt = values.expires_at ? values.expires_at.unix() : undefined;
+
+      // cron 和 scheduled_at 互斥: 有 cron 则清 scheduled_at，反之亦然
+      const cronVal = values.cron || '';
+      const scheduledAtVal = cronVal ? null : scheduledAt;
+
       if (isEdit) {
         await aiApi.updateSchedule(editTask.id, {
           name: values.name,
           message: values.message,
-          cron: values.cron,
-          business_type: values.business_type,
+          cron: cronVal,
+          scheduled_at: scheduledAtVal,
+          expires_at: expiresAt ?? null,
           timezone: userTz,
         });
         message.success('任务已更新');
@@ -46,8 +57,9 @@ export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFo
         await aiApi.createSchedule({
           name: values.name,
           message: values.message,
-          cron: values.cron,
-          business_type: values.business_type || undefined,
+          cron: cronVal || undefined,
+          scheduled_at: scheduledAtVal ?? undefined,
+          expires_at: expiresAt,
           timezone: userTz,
         });
         message.success('任务已创建');
@@ -81,7 +93,7 @@ export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFo
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
-        initialValues={{ cron: '0 9 * * *', business_type: 'scheduled_task' }}
+        initialValues={{ cron: '0 9 * * *' }}
       >
         <Form.Item label="标题" name="name" rules={[{ required: true, message: '请输入任务标题' }]}>
           <Input placeholder="输入任务标题" />
@@ -91,15 +103,33 @@ export default function ScheduleForm({ editTask, onBack, onSuccess }: ScheduleFo
           <Input.TextArea rows={6} placeholder="输入要执行的提示词..." />
         </Form.Item>
 
-        <Form.Item label="计划" name="cron" rules={[{ required: true, message: '请设置计划' }]}>
+        <Form.Item label="计划" name="cron" rules={[{
+          validator: (_, value) => {
+            if (!value && !scheduledAt) {
+              return Promise.reject(new Error('请设置计划'));
+            }
+            return Promise.resolve();
+          },
+        }]}>
           <CronPicker
             value={form.getFieldValue('cron')}
             onChange={(cron) => form.setFieldsValue({ cron })}
+            scheduledAt={scheduledAt}
+            onScheduledAtChange={(ts) => {
+              setScheduledAt(ts);
+              // Trigger re-validation
+              form.validateFields(['cron']).catch(() => {});
+            }}
           />
         </Form.Item>
 
-        <Form.Item label="业务类型" name="business_type">
-          <Input placeholder="scheduled_task" />
+        <Form.Item label="到期时间 (可选)" name="expires_at">
+          <DatePicker
+            showTime
+            placeholder="选择到期时间"
+            style={{ width: '100%' }}
+            format="YYYY-MM-DD HH:mm"
+          />
         </Form.Item>
 
         <Form.Item style={{ marginTop: 32 }}>

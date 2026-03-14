@@ -61,7 +61,7 @@ export type {
   MemoryStats,
   FileInfo, ToolInfo,
   CorrectionPayload, CorrectionResult,
-  ScheduledTask, ScheduleCreatePayload, ScheduleUpdatePayload,
+  RunRecord, ScheduledTask, ScheduleCreatePayload, ScheduleUpdatePayload,
   KBFileInfo,
 } from './services/ai-api.ts';
 
