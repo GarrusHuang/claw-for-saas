@@ -8,6 +8,8 @@ import {
   DatabaseOutlined,
   DeleteOutlined,
   RobotOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 import {
   useAIChatStore, usePipelineStore, aiApi, getAIConfig,
@@ -76,6 +78,12 @@ export default function CoworkSidebar() {
     fetchSessions();
   }, [currentSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleSelectSession = useCallback((sessionId: string) => {
+    setContentView('chat');
+    dispatchSessionAction({ type: 'load', sessionId });
+    markRead(sessionId);
+  }, [dispatchSessionAction, setContentView, markRead]);
+
   // ── WebSocket 通知: session 事件实时处理 ──
   useNotifications(useCallback((event) => {
     if (event.type === 'session_created') {
@@ -90,28 +98,49 @@ export default function CoworkSidebar() {
       fetchSessions();
       const taskName = (event.data?.task_name as string) || '';
       if (taskName) {
-        const status = event.data?.status as string;
-        notification.info({
-          message: '定时任务完成',
-          description: `「${taskName}」已${status === 'failed' ? '执行失败' : '执行完成'}`,
+        const isFailed = (event.data?.status as string) === 'failed';
+        const key = `task-done-${sessionId}-${Date.now()}`;
+        notification.open({
+          key,
+          message: null,
+          description: (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <RobotOutlined style={{ fontSize: 18, color: isFailed ? '#ff4d4f' : '#8b5cf6', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: '#1a1a1a' }}>
+                  {isFailed ? '任务执行失败' : '任务执行完成'}
+                </div>
+                <div style={{ fontSize: 12, color: '#666', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {taskName}
+                </div>
+              </div>
+            </div>
+          ),
           placement: 'topRight',
-          duration: 5,
+          duration: 6,
+          closable: false,
+          style: {
+            borderRadius: 10,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+            cursor: 'pointer',
+            padding: '12px 16px',
+            minWidth: 240,
+            maxWidth: 320,
+          },
+          onClick: () => {
+            handleSelectSession(sessionId);
+            notification.destroy(key);
+          },
         });
       }
     }
-  }, [fetchSessions]));
+  }, [fetchSessions, handleSelectSession]));
 
   // ── Handlers ──
   const handleNewSession = useCallback(() => {
     setContentView('chat');
     dispatchSessionAction({ type: 'new' });
   }, [dispatchSessionAction, setContentView]);
-
-  const handleSelectSession = useCallback((sessionId: string) => {
-    setContentView('chat');
-    dispatchSessionAction({ type: 'load', sessionId });
-    markRead(sessionId);
-  }, [dispatchSessionAction, setContentView, markRead]);
 
   const handleScheduledClick = useCallback(() => {
     setContentView('schedule');

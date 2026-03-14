@@ -32,7 +32,6 @@ def create_schedule(
     message: str,           # 每次触发时发送给 Agent 的消息
     cron: str = "",         # 5-field cron 表达式 (循环任务填写, 一次性任务留空)
     scheduled_at: str = "", # ISO 格式日期时间 (一次性任务填写, 如 "2026-03-15T09:00:00")
-    business_type: str = "scheduled_task",  # 业务类型
 ) -> dict:
     """创建定时调度任务。"""
     scheduler = current_scheduler.get(None)
@@ -67,7 +66,7 @@ def create_schedule(
         message=message,
         user_id=user_id,
         tenant_id=tenant_id,
-        business_type=business_type,
+        business_type="scheduled_task",
         scheduled_at=scheduled_at_ts,
     )
 
