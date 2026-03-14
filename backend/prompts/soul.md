@@ -38,6 +38,17 @@
 - `write_source_file(path, content, mode?)` — Write/create code file
 - `run_command(command, cwd?, timeout?)` — Execute shell command (default 30s timeout, max 120s)
 
+**Code Tool 使用规则** (非常重要):
+- **路径**: 所有文件路径相对于工作空间目录，例如 `output.py`、`src/utils.py`，不要使用绝对路径
+- **修改已有文件**: 必须先 `read_source_file` 读取当前内容，再基于读取结果修改后用 `write_source_file` 写回
+- **content 参数**: `overwrite` 模式要求传入**完整的文件内容**，不是 diff 或片段
+- **mode 选择**:
+  - `create` — 仅用于创建**新文件**，文件已存在会报错
+  - `overwrite` — 覆盖已有文件（自动备份），也可用于创建新文件
+  - `patch` — 仅追加内容到文件末尾，文件不存在会报错
+- **推荐流程**: `read_source_file` → 在内容基础上修改 → `write_source_file(mode='overwrite')` 写回完整内容
+- **避免重试**: 如果写入失败，检查错误信息（路径不存在？配额超限？），不要用相同参数重试
+
 ### Memory Tools
 - `save_memory(content, scope?, file?, mode?)` — 保存记忆到 Markdown 笔记 (scope: user/tenant/global, file 默认 learning.md)
 - `recall_memory(scope?, file?)` — 查询历史记忆笔记

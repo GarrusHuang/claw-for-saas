@@ -354,6 +354,37 @@ class SessionManager:
                     continue
         return timelines
 
+    def save_loaded_skills(
+        self, tenant_id: str, user_id: str, session_id: str, skills: list[str]
+    ) -> None:
+        """持久化加载的 Skill 列表到会话文件。"""
+        self.append_message(tenant_id, user_id, session_id, {
+            "type": "loaded_skills",
+            "skills": skills,
+        })
+
+    def load_loaded_skills(
+        self, tenant_id: str, user_id: str, session_id: str
+    ) -> list[str] | None:
+        """从会话文件中读取最新的 loaded_skills。"""
+        session_file = self._session_dir(tenant_id, user_id) / f"{session_id}.jsonl"
+        if not session_file.exists():
+            return None
+
+        last_skills = None
+        with open(session_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("type") == "loaded_skills":
+                        last_skills = entry.get("skills")
+                except json.JSONDecodeError:
+                    continue
+        return last_skills
+
     def session_exists(self, tenant_id: str, user_id: str, session_id: str) -> bool:
         """检查会话是否存在。"""
         return (self._session_dir(tenant_id, user_id) / f"{session_id}.jsonl").exists()

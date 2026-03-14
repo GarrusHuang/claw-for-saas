@@ -191,7 +191,8 @@ class TestToolRegistryExecution:
 
         result = await reg.execute("func", {})
         assert result.success is False
-        assert "Invalid arguments" in result.error
+        assert "Missing required arguments" in result.error
+        assert "required_arg" in result.error
 
     @pytest.mark.asyncio
     async def test_execute_tool_exception(self):

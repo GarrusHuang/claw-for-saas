@@ -54,6 +54,7 @@ async def get_session(session_id: str, user: AuthUser = Depends(get_current_user
     messages = sm.load_messages(user.tenant_id, user.user_id, session_id)
     plan_steps = sm.load_plan_steps(user.tenant_id, user.user_id, session_id)
     timelines = sm.load_timelines(user.tenant_id, user.user_id, session_id)
+    loaded_skills = sm.load_loaded_skills(user.tenant_id, user.user_id, session_id)
     result: dict = {
         "session_id": session_id,
         "user_id": user.user_id,
@@ -64,6 +65,8 @@ async def get_session(session_id: str, user: AuthUser = Depends(get_current_user
         result["plan_steps"] = plan_steps
     if timelines:
         result["timelines"] = timelines
+    if loaded_skills:
+        result["loaded_skills"] = loaded_skills
     return result
 
 

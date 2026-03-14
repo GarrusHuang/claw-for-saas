@@ -20,7 +20,10 @@ import { getAIConfig } from '../config.ts';
 import { useAIChatStore } from '../stores/ai-chat.ts';
 import { usePipelineStore } from '../stores/pipeline.ts';
 import { usePipeline } from './usePipeline.ts';
-import { listSessions as apiListSessions, getSessionHistory, injectMessage } from '../services/ai-api.ts';
+import { listSessions as apiListSessions, getSessionHistory, injectMessage, fetchPipelineSnapshot } from '../services/ai-api.ts';
+import { applyPipelineSnapshot } from '../services/pipeline-dispatcher.ts';
+import { saveSession, restoreSession, saveMessages, restoreMessages } from '../stores/pipeline-cache.ts';
+import { useSessionStatusStore } from '../stores/session-status.ts';
 import type { SessionInfo } from '../services/ai-api.ts';
 import type { ScenarioConfig } from '../types/scenario.ts';
 
@@ -154,6 +157,12 @@ export function useAIChat() {
     let cancelled = false;
 
     if (sessionAction.type === 'new') {
+      // 切走前保存当前 session 的消息和 pipeline 状态
+      const currentSid = usePipelineStore.getState().sessionId;
+      if (currentSid) {
+        saveSession(currentSid);
+        saveMessages(currentSid, messages);
+      }
       setMessages([]);
       usePipelineStore.getState().reset();
       setActiveScenario(null);
@@ -163,6 +172,30 @@ export function useAIChat() {
       clearSessionAction();
     } else if (sessionAction.type === 'load') {
       const loadSession = async (sessionId: string) => {
+        // 切走前保存当前 session
+        const currentSid = usePipelineStore.getState().sessionId;
+        if (currentSid && currentSid !== sessionId) {
+          saveSession(currentSid);
+          saveMessages(currentSid, messages);
+        }
+
+        // 运行中的 session: 优先从缓存恢复 (API 没有未完成的消息)
+        const isRunning = useSessionStatusStore.getState().runningIds.has(sessionId);
+        if (isRunning) {
+          const cachedMessages = restoreMessages(sessionId);
+          if (cachedMessages && restoreSession(sessionId)) {
+            const restored = cachedMessages as ChatMessage[];
+            setMessages(restored);
+            autoStartedRef.current = 'loaded';
+            prevAgentMessageRef.current = null;
+            // 恢复流式气泡引用，避免 useEffect 重复创建
+            const streamingMsg = restored.find(m => m.id.startsWith('msg-stream-'));
+            streamingMsgIdRef.current = streamingMsg?.id || null;
+            clearSessionAction();
+            return;
+          }
+        }
+
         try {
           const detail = await getSessionHistory(defaultUserId, sessionId);
           // 构建 timeline 查找表: turn_index → entries
@@ -257,8 +290,56 @@ export function useAIChat() {
               }
             }
           }
+          // 恢复 loadedSkills (SkillsBadge 显示)
+          if (detail.loaded_skills && detail.loaded_skills.length > 0) {
+            usePipelineStore.getState().setLoadedSkills(detail.loaded_skills);
+          }
+          // 恢复 toolExecutions — 直接 setState，不用 addToolExecution
+          // (addToolExecution 会同时写 timelineEntries，导致 AgentTimeline 把历史工具显示为 live 抽屉)
+          if (detail.timelines) {
+            const histTools: Array<{
+              id: string; toolName: string; success: boolean; latencyMs: number;
+              timestamp: number; argsSummary?: Record<string, string>;
+              resultSummary?: string; blocked?: boolean;
+            }> = [];
+            for (const tl of detail.timelines) {
+              for (const e of (tl.entries || [])) {
+                if (e.type === 'tool' && e.tool_name) {
+                  histTools.push({
+                    id: `hist-tool-${tl.turn_index}-${e.ts}`,
+                    toolName: e.tool_name,
+                    success: e.success ?? true,
+                    latencyMs: e.latency_ms || 0,
+                    timestamp: e.ts ? e.ts * 1000 : Date.now(),
+                    argsSummary: e.args_summary,
+                    resultSummary: e.result_summary,
+                    blocked: e.blocked,
+                  });
+                }
+              }
+            }
+            if (histTools.length > 0) {
+              usePipelineStore.setState({ toolExecutions: histTools });
+            }
+          }
+          // 注意：不手动设 status='running'！
+          // 让 WS 事件自然驱动 store 更新，和首次进入效果完全一致。
+          // status 保持 'idle'，InlinePipelineProgress 不渲染，没有多余抽屉。
+          // 流式文本通过快照恢复（不依赖 status）。
+          // 快照恢复：只补全 F5/切走期间丢失的流式文本
+          fetchPipelineSnapshot(sessionId)
+            .then((snapshot) => {
+              if (usePipelineStore.getState().sessionId === sessionId) {
+                if (!snapshot.is_complete) {
+                  useSessionStatusStore.getState().addRunning(sessionId);
+                }
+                applyPipelineSnapshot(snapshot);
+              }
+            })
+            .catch(() => {});
           autoStartedRef.current = 'loaded';
           prevAgentMessageRef.current = null;
+          streamingMsgIdRef.current = null;
         } catch (e) {
           console.warn('[useAIChat] Failed to load session:', e);
         }
@@ -372,6 +453,32 @@ export function useAIChat() {
       console.warn('[useAIChat] Failed to fetch sessions:', e);
     }
   }, [defaultUserId]);
+
+  // ── F5 保护：beforeunload 时保存当前 session 状态到 sessionStorage ──
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const sid = usePipelineStore.getState().sessionId;
+      if (sid) {
+        saveSession(sid);
+        saveMessages(sid, messages);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [messages]);
+
+  // ── 运行中定期保存（每 3 秒，防止 crash 丢失）──
+  useEffect(() => {
+    if (pipelineStatus !== 'running') return;
+    const timer = setInterval(() => {
+      const sid = usePipelineStore.getState().sessionId;
+      if (sid) {
+        saveSession(sid);
+        saveMessages(sid, messages);
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [pipelineStatus, messages]);
 
   // ── 经典模式自动启动：按钮点击 → 直接开始工作 ──
 

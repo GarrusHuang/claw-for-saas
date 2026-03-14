@@ -50,10 +50,12 @@ export { useAIChatStore } from './stores/ai-chat.ts';
 export type { ChatDialogState, ContentView, SessionAction, AIChatState } from './stores/ai-chat.ts';
 export { useAuthStore } from './stores/auth.ts';
 export type { AuthState } from './stores/auth.ts';
+export { useSessionStatusStore } from './stores/session-status.ts';
+export { saveSession, restoreSession, clearSession, hasSession, saveMessages, restoreMessages } from './stores/pipeline-cache.ts';
+export type { PipelineStateSnapshot } from './stores/pipeline-cache.ts';
 
 // ── Services ──
-export { AgentSSEClient } from './services/sse.ts';
-export type { SSEEventType, SSEEvent, SSEClientOptions } from './services/sse.ts';
+export { dispatchPipelineEvent, applyPipelineSnapshot, setReplayPending } from './services/pipeline-dispatcher.ts';
 export * as aiApi from './services/ai-api.ts';
 export type {
   SessionInfo, SessionDetail, SearchResult,
@@ -63,7 +65,9 @@ export type {
   CorrectionPayload, CorrectionResult,
   RunRecord, ScheduledTask, ScheduleCreatePayload, ScheduleUpdatePayload,
   KBFileInfo,
+  PipelineSnapshot,
 } from './services/ai-api.ts';
+export { fetchPipelineSnapshot, fetchRunningSessions } from './services/ai-api.ts';
 
 // ── Hooks ──
 export { usePipeline } from './hooks/usePipeline.ts';

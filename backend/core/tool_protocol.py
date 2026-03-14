@@ -228,8 +228,52 @@ class ToolCallParser:
             except json.JSONDecodeError:
                 pass
 
+        # 策略 5: 截断的 JSON 字符串修复
+        # LLM 生成长 content 参数时 JSON 可能被截断，例如:
+        # {"path": "output.py", "content": "import os\ndef main():\n    print(...
+        # 尝试: 关闭未终结的字符串值 + 补全 }
+        truncated_result = self._try_fix_truncated_json(s)
+        if truncated_result is not None:
+            logger.debug(f"Fixed truncated JSON: {args_str[:60]}...")
+            return truncated_result
+
         # 所有策略失败
         raise ValueError(f"Cannot parse tool arguments: {args_str[:100]}")
+
+    @staticmethod
+    def _try_fix_truncated_json(s: str) -> dict | None:
+        """
+        尝试修复被截断的 JSON 参数。
+
+        常见场景: write_source_file 的 content 参数很长，LLM 输出被 max_tokens 截断:
+          {"path": "output.py", "content": "import os\ndef main():\n    print(
+        策略: 逐步去掉尾部字符，尝试关闭字符串和对象。
+        """
+        if not s.startswith("{"):
+            return None
+
+        # 从尾部开始，找到最后一个完整的 key-value pair
+        # 尝试在不同位置截断并修复
+        for trim in range(0, min(len(s), 2000), 1):
+            candidate = s if trim == 0 else s[:-trim]
+            # 尝试: candidate + '"}'  (关闭字符串值 + 对象)
+            for suffix in ('"}}', '"}', '"]}', '"}]}', '"}]}}'):
+                try:
+                    result = json.loads(candidate + suffix)
+                    if isinstance(result, dict) and len(result) >= 1:
+                        return result
+                except json.JSONDecodeError:
+                    continue
+            # 尝试: candidate + '}'  (值不是字符串的情况)
+            for suffix in ("}", "]}"):
+                try:
+                    result = json.loads(candidate + suffix)
+                    if isinstance(result, dict) and len(result) >= 1:
+                        return result
+                except json.JSONDecodeError:
+                    continue
+
+        return None
 
     def _parse_hermes_xml(self, content: str) -> list[ParsedToolCall]:
         """解析 Hermes XML <tool_call>JSON</tool_call> 格式。"""

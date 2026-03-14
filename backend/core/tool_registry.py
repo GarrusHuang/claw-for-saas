@@ -289,6 +289,25 @@ class ToolRegistry:
             logger.warning(f"Unknown tool: {name}")
             return ToolResult(success=False, error=f"Unknown tool: {name}")
 
+        # 预校验 required 参数 — 给 LLM 清晰的错误提示（比 Python TypeError 更有用）
+        schema_params = tool.schema.get("function", {}).get("parameters", {})
+        required = schema_params.get("required", [])
+        missing = [r for r in required if r not in arguments]
+        if missing:
+            props = schema_params.get("properties", {})
+            param_hints = [
+                f"  - {p}: {props.get(p, {}).get('description', props.get(p, {}).get('type', 'string'))}"
+                for p in required
+            ]
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Missing required arguments for {name}: {', '.join(missing)}. "
+                    f"You must provide all required parameters:\n"
+                    + "\n".join(param_hints)
+                ),
+            )
+
         try:
             logger.info(f"Executing tool: {name}", extra={"arguments": arguments})
             if asyncio.iscoroutinefunction(tool.func):

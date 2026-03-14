@@ -1,24 +1,29 @@
 /**
  * WebSocket 通知 Hook — 连接后端全局推送通道。
  *
- * 自动管理 WebSocket 连接生命周期 (连接/重连/心跳)，
- * 收到事件时触发注册的回调。
+ * 处理 pipeline_event 事件:
+ * - 当前活跃 session: 通过 dispatcher 更新 store → UI 实时刷新
+ * - 非活跃 session: 静默更新缓存 + 追踪未读状态
  */
 
 import { useEffect, useRef, useCallback } from 'react';
 import { getAIConfig } from '../config.ts';
+import { usePipelineStore } from '../stores/pipeline.ts';
+import { useSessionStatusStore } from '../stores/session-status.ts';
+import { dispatchPipelineEvent } from '../services/pipeline-dispatcher.ts';
+import { fetchRunningSessions } from '../services/ai-api.ts';
 
 export type NotificationHandler = (event: { type: string; data: Record<string, unknown> }) => void;
 
 /**
  * 连接 WebSocket 通知通道，接收服务端推送。
  *
- * @param onNotification - 收到通知时的回调
+ * @param onNotification - 收到通知时的回调 (非 pipeline_event 类型)
  * @param enabled - 是否启用 (默认 true)
  */
 export function useNotifications(onNotification: NotificationHandler, enabled = true): void {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handlerRef = useRef(onNotification);
   handlerRef.current = onNotification;
 
@@ -46,6 +51,15 @@ export function useNotifications(onNotification: NotificationHandler, enabled = 
       wsRef.current = ws;
 
       ws.onopen = () => {
+        // 首次连接 or 重连：拉取运行中的 session 列表恢复蓝点
+        fetchRunningSessions()
+          .then((ids) => {
+            for (const id of ids) {
+              useSessionStatusStore.getState().addRunning(id);
+            }
+          })
+          .catch(() => {});
+
         // 连接成功，启动心跳
         const pingInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
@@ -60,10 +74,58 @@ export function useNotifications(onNotification: NotificationHandler, enabled = 
 
       ws.onmessage = (evt) => {
         try {
-          const data = JSON.parse(evt.data);
+          const msg = JSON.parse(evt.data);
           // 忽略 pong/ping 心跳
-          if (data.type === 'pong' || data.type === 'ping') return;
-          handlerRef.current(data);
+          if (msg.type === 'pong' || msg.type === 'ping') return;
+
+          // ── Pipeline 事件路由 ──
+          if (msg.type === 'pipeline_event') {
+            const payload = msg.data as Record<string, unknown>;
+            const sessionId = payload.session_id as string;
+            const eventType = payload.event_type as string;
+            const eventData = (payload.data as Record<string, unknown>) || {};
+
+            const currentSessionId = usePipelineStore.getState().sessionId;
+            const storeStatus = usePipelineStore.getState().status;
+
+            // 判断是否属于当前活跃 session:
+            // 1. session_id 完全匹配
+            // 2. store 正在 running 且 sessionId 为 null (新建会话，POST 返回前后端还没分配 session_id)
+            //    + trace_id 匹配 (避免多 tab 竞态)
+            const storeTraceId = usePipelineStore.getState().traceId;
+            const isActiveSession =
+              sessionId === currentSessionId ||
+              (!currentSessionId && storeStatus === 'running' &&
+               (!storeTraceId || eventData.trace_id === storeTraceId));
+
+            if (isActiveSession) {
+              // 当前活跃 session → 直接更新 store
+              // 如果 store 还没有 sessionId，从事件中捕获
+              if (!currentSessionId && sessionId) {
+                usePipelineStore.getState().setSessionId(sessionId);
+                useSessionStatusStore.getState().addRunning(sessionId);
+              }
+              dispatchPipelineEvent(eventType, eventData);
+              // 活跃 session 完成/出错时也要清理 runningIds
+              if (eventType === 'pipeline_complete' || eventType === 'error') {
+                useSessionStatusStore.getState().removeRunning(sessionId);
+              }
+            } else {
+              // 非活跃 session → 追踪状态
+              if (eventType === 'pipeline_complete' || eventType === 'error') {
+                useSessionStatusStore.getState().removeRunning(sessionId);
+                useSessionStatusStore.getState().addUnread(sessionId);
+              } else if (eventType !== 'keepalive' && eventType !== 'heartbeat') {
+                // 任何非终结事件都说明该 session 还在跑
+                // (F5 后 pipeline_started 不会重发，靠中途事件恢复 runningIds)
+                useSessionStatusStore.getState().addRunning(sessionId);
+              }
+            }
+            return;
+          }
+
+          // 其他通知类型 → 传递给外部回调
+          handlerRef.current(msg);
         } catch {
           // ignore parse errors
         }
