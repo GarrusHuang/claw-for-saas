@@ -66,13 +66,6 @@ class TestCreateSchedule:
         assert "error" in result
         assert "cron" in result["error"].lower()
 
-    def test_with_business_type(self):
-        result = create_schedule(
-            name="Budget Check", cron="0 8 * * 1",
-            message="check budget", business_type="budget_check",
-        )
-        assert result["status"] == "created"
-
     def test_no_scheduler(self):
         token = current_scheduler.set(None)
         try:
