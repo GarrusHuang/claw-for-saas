@@ -91,6 +91,7 @@ export interface SessionDetail {
       ts: number;
     }>;
   }>;
+  loaded_skills?: string[];
 }
 
 export async function listSessions(): Promise<SessionInfo[]> {
@@ -429,6 +430,48 @@ export async function getKBFileText(fileId: string): Promise<{ file_id: string; 
   return apiFetch(`/api/knowledge/${encodeURIComponent(fileId)}/text`);
 }
 
+// ── Pipeline Snapshot (事件重放快照) ──
+
+export interface PipelineSnapshot {
+  session_id: string;
+  trace_id: string;
+  status: string;
+  streaming_text: string;
+  thinking_text: string;
+  tool_executions: Array<{
+    tool: string;
+    success: boolean;
+    latency_ms: number;
+    args_summary?: Record<string, string>;
+    result_summary?: string;
+    blocked?: boolean;
+    ts: number;
+  }>;
+  plan: { summary: string; steps: unknown[]; detail: string; estimated_actions: number } | null;
+  plan_steps: Array<{ index: number; status: string }>;
+  agent_iteration: { current: number; max: number };
+  agent_message: string | null;
+  loaded_skills: string[];
+  file_artifacts: Array<{
+    path: string;
+    filename: string;
+    size_bytes: number;
+    content_type: string;
+    session_id: string;
+  }>;
+  is_complete: boolean;
+  error: string | null;
+}
+
+export async function fetchPipelineSnapshot(sessionId: string): Promise<PipelineSnapshot> {
+  return apiFetch(`/api/chat/${encodeURIComponent(sessionId)}/events`);
+}
+
+export async function fetchRunningSessions(): Promise<string[]> {
+  const data = await apiFetch<{ session_ids: string[] }>('/api/chat/running');
+  return data.session_ids;
+}
+
 // ── Inject (real-time message injection while pipeline is running) ──
 
 export async function injectMessage(
@@ -442,7 +485,4 @@ export async function injectMessage(
   });
 }
 
-// ── Error Utilities (re-export from sse.ts, single source of truth) ──
-
-export { isNetworkError } from './sse.ts';
 

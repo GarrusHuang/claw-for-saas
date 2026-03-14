@@ -259,6 +259,23 @@ class AgentGateway:
 
         current_session_id.set(session_id)
 
+        # ── 2a. 绑定上传文件到会话 ──
+        if materials:
+            file_ids = [
+                m.get("material_id", "").removeprefix("file-")
+                for m in materials
+                if m.get("material_id", "").startswith("file-")
+            ]
+            if file_ids:
+                try:
+                    from dependencies import get_file_service
+                    fs = get_file_service()
+                    bound = fs.bind_files_to_session(tenant_id, user_id, file_ids, session_id)
+                    if bound:
+                        logger.info(f"Bound {bound} files to session {session_id}")
+                except Exception:
+                    logger.debug("File binding skipped", exc_info=True)
+
         # ── 2b. 获取 session 级文件锁 (跨 worker 互斥) ──
         # 同一 session 同一时刻只允许一个请求，避免并发写入导致数据损坏。
         # 锁定失败抛出 SessionBusyError，由 API 层捕获返回 409。
@@ -333,6 +350,13 @@ class AgentGateway:
                 )
                 if loaded_skill_names and event_bus:
                     event_bus.emit("skills_loaded", {"skills": loaded_skill_names, "count": len(loaded_skill_names)})
+                    # 立即持久化 (不等 pipeline 结束，F5 后也能从 API 恢复)
+                    try:
+                        self.session_manager.save_loaded_skills(
+                            tenant_id, user_id, session_id, loaded_skill_names,
+                        )
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.warning(f"Skill loading failed: {e}")
 

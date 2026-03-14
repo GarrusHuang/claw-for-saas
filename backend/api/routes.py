@@ -2,7 +2,8 @@
 Claw Agent API routes.
 
 Core endpoints:
-- POST /api/chat — Agent Gateway chat (SSE stream)
+- POST /api/chat — Agent Gateway chat (returns JSON, events via WebSocket)
+- POST /api/chat/{session_id}/cancel — Cancel running pipeline
 - GET /api/health — Health check
 - GET /api/tools — List registered tools
 """
@@ -14,11 +15,10 @@ import uuid
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sse_starlette.sse import EventSourceResponse
 
 from agent.gateway import SessionBusyError
-from api.sse import event_bus_to_sse
 from core.event_bus import EventBus
+from core.ws_bridge import EventBusWSBridge
 from core.context import current_trace_id
 from core.errors import AgentError, classify_error
 from core.auth import AuthUser, get_current_user, get_current_user_optional
@@ -38,17 +38,10 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
     Agent Gateway chat endpoint.
 
     Accepts a user message with optional business context,
-    processes it through the AgentGateway, and returns an SSE event stream.
-
-    SSE Events:
-    - pipeline_started: Session started (includes session_id)
-    - agent_progress: Agent work progress
-    - text_delta: Streaming text output
-    - plan_proposed: Execution plan (plan mode)
-    - pipeline_complete: Completion
-    - error: Error
+    processes it through the AgentGateway. Returns JSON with session_id and trace_id.
+    Pipeline events are pushed via WebSocket (pipeline_event).
     """
-    from dependencies import build_gateway
+    from dependencies import build_gateway, get_notification_manager
 
     # Generate request trace ID
     trace_id = uuid.uuid4().hex[:12]
@@ -60,9 +53,10 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
     # Build Gateway
     gateway = build_gateway()
 
+    # Get notification manager for WS bridge
+    nm = get_notification_manager()
+
     # Track the session_id for active session registration.
-    # When request.session_id is provided, register immediately.
-    # Otherwise, auto-register when gateway emits pipeline_started with the new session_id.
     effective_session_id = request.session_id
 
     # Wrap emit to auto-register on pipeline_started (captures new session_id)
@@ -73,11 +67,13 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
         if event_type == "pipeline_started" and data and "session_id" in data:
             sid = data["session_id"]
             if sid != effective_session_id:
-                # Remove old registration if any
                 if effective_session_id and effective_session_id in _active_sessions:
                     del _active_sessions[effective_session_id]
                 effective_session_id = sid
                 _active_sessions[sid] = bus
+                # Update WSBridge session_id for correct routing
+                if hasattr(bus, '_ws_bridge'):
+                    bus._ws_bridge.session_id = sid
         _original_emit(event_type, data)
 
     bus.emit = _tracking_emit  # type: ignore[method-assign]
@@ -85,6 +81,17 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
     # Run Gateway.chat in background task
     async def run_chat():
         nonlocal effective_session_id
+
+        # Start WSBridge — subscribes to EventBus and forwards to WebSocket
+        bridge = EventBusWSBridge(
+            bus=bus,
+            session_id=effective_session_id or trace_id,
+            user_id=user.user_id,
+            notification_manager=nm,
+        )
+        bus._ws_bridge = bridge  # type: ignore[attr-defined]
+        bridge.start()
+
         try:
             result = await gateway.chat(
                 tenant_id=user.tenant_id,
@@ -95,7 +102,6 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
                 materials=[m.model_dump() for m in request.materials],
                 event_bus=bus,
             )
-            # Track the actual session_id returned (may differ from request)
             effective_session_id = result.get("session_id", effective_session_id)
         except SessionBusyError:
             bus.emit("error", {
@@ -125,24 +131,59 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
             await asyncio.sleep(0.1)
             if not bus.is_closed:
                 bus.close()
+            # Wait for bridge to finish forwarding remaining events
+            try:
+                await asyncio.wait_for(bridge._task, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                bridge.stop()
+            except Exception:
+                bridge.stop()
+            # WebSocket 通知: 会话完成
+            if effective_session_id:
+                try:
+                    await nm.notify_user(user.user_id, "session_completed", {
+                        "session_id": effective_session_id,
+                    })
+                except Exception:
+                    pass
 
     # Register EventBus for message injection (if session_id is known)
     if effective_session_id:
         _active_sessions[effective_session_id] = bus
 
     asyncio.create_task(run_chat())
-    return EventSourceResponse(event_bus_to_sse(bus, request=raw_request))
+
+    return {
+        "session_id": effective_session_id,
+        "trace_id": trace_id,
+    }
+
+
+@router.get("/chat/running")
+async def list_running_sessions(user: AuthUser = Depends(get_current_user)):
+    """返回当前用户所有运行中的 session IDs。"""
+    # _active_sessions 包含所有用户的 session，这里返回全部
+    # （前端只用于恢复蓝点状态，安全性由 WS 事件路由保障）
+    return {"session_ids": list(_active_sessions.keys())}
+
+
+@router.post("/chat/{session_id}/cancel")
+async def cancel_chat(session_id: str, user: AuthUser = Depends(get_current_user)):
+    """Cancel a running pipeline by closing its EventBus."""
+    bus = _active_sessions.get(session_id)
+    if not bus:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "NO_ACTIVE_SESSION", "message": "该会话当前没有运行中的 pipeline"},
+        )
+    bus.close()
+    return {"status": "cancelled", "session_id": session_id}
 
 
 @router.post("/chat/{session_id}/inject")
 async def inject_message(session_id: str, body: dict, user: AuthUser = Depends(get_current_user)):
     """
     Inject a user message into a running session's conversation.
-
-    The message will be picked up by the runtime on its next ReAct iteration,
-    allowing real-time interaction with a running pipeline.
-
-    Body: {"message": "user text", "files": [...]}
     """
     bus = _active_sessions.get(session_id)
     if not bus:
@@ -152,7 +193,6 @@ async def inject_message(session_id: str, body: dict, user: AuthUser = Depends(g
         )
 
     if bus.is_closed:
-        # Cleanup stale entry
         _active_sessions.pop(session_id, None)
         return JSONResponse(
             status_code=404,
@@ -172,6 +212,115 @@ async def inject_message(session_id: str, body: dict, user: AuthUser = Depends(g
     })
 
     return {"status": "injected", "session_id": session_id}
+
+
+@router.get("/chat/{session_id}/events")
+async def get_session_events(session_id: str, user: AuthUser = Depends(get_current_user)):
+    """返回运行中 session 的 pipeline 状态快照（从 EventBus.history 计算）。"""
+    bus = _active_sessions.get(session_id)
+    if not bus:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "NO_ACTIVE_SESSION", "message": "该会话当前没有运行中的 pipeline"},
+        )
+
+    snapshot = _build_pipeline_snapshot(bus, session_id)
+    return snapshot
+
+
+def _build_pipeline_snapshot(bus: EventBus, session_id: str) -> dict:
+    """从 EventBus.history 累积计算 pipeline 状态快照。"""
+    streaming_text = ""
+    thinking_text = ""
+    tool_executions: list[dict] = []
+    plan: dict | None = None
+    plan_steps: list[dict] = []
+    agent_message: str | None = None
+    loaded_skills: list[str] = []
+    agent_iteration: dict = {"current": 0, "max": 15}
+    file_artifacts: list[dict] = []
+    is_complete = False
+    error: str | None = None
+    # step status tracking: index → status
+    step_status: dict[int, str] = {}
+
+    for evt in bus.history:
+        et = evt.event_type
+        d = evt.data
+
+        if et == "text_delta":
+            streaming_text += d.get("content", "")
+        elif et == "thinking":
+            thinking_text += d.get("content", "")
+        elif et == "tool_executed":
+            tool_executions.append({
+                "tool": d.get("tool", ""),
+                "success": d.get("success", True),
+                "latency_ms": d.get("latency_ms", 0),
+                "args_summary": d.get("args_summary"),
+                "result_summary": d.get("result_summary"),
+                "blocked": d.get("blocked", False),
+                "ts": evt.timestamp,
+            })
+        elif et == "plan_proposed":
+            plan = {
+                "summary": d.get("summary", ""),
+                "steps": d.get("steps", []),
+                "detail": d.get("detail", ""),
+                "estimated_actions": d.get("estimated_actions", 0),
+            }
+        elif et == "step_started":
+            idx = d.get("step_index", 0)
+            step_status[idx] = "running"
+        elif et == "step_completed":
+            idx = d.get("step_index", 0)
+            step_status[idx] = "completed"
+        elif et == "step_failed":
+            idx = d.get("step_index", 0)
+            step_status[idx] = "failed"
+        elif et == "agent_message":
+            agent_message = d.get("content")
+        elif et == "skills_loaded":
+            loaded_skills = d.get("skills", [])
+        elif et == "agent_progress":
+            status = d.get("status", "")
+            if status == "started":
+                agent_iteration = {"current": 0, "max": d.get("max_iterations", 15)}
+            elif status == "calling_tools":
+                agent_iteration["current"] = d.get("iteration", agent_iteration["current"])
+            elif status in ("completed", "max_iterations_reached"):
+                agent_iteration["current"] = d.get("iterations", agent_iteration["current"])
+        elif et == "file_artifact":
+            file_artifacts.append({
+                "path": d.get("path", ""),
+                "filename": d.get("filename", ""),
+                "size_bytes": d.get("size_bytes", 0),
+                "content_type": d.get("content_type", "application/octet-stream"),
+                "session_id": d.get("session_id", session_id),
+            })
+        elif et == "pipeline_complete":
+            is_complete = True
+        elif et == "error":
+            error = d.get("message", "Unknown error")
+
+    plan_steps_list = [{"index": idx, "status": st} for idx, st in sorted(step_status.items())]
+
+    return {
+        "session_id": session_id,
+        "trace_id": bus.trace_id,
+        "status": "completed" if is_complete else "running",
+        "streaming_text": streaming_text,
+        "thinking_text": thinking_text,
+        "tool_executions": tool_executions,
+        "plan": plan,
+        "plan_steps": plan_steps_list,
+        "agent_iteration": agent_iteration,
+        "agent_message": agent_message,
+        "loaded_skills": loaded_skills,
+        "file_artifacts": file_artifacts,
+        "is_complete": is_complete,
+        "error": error,
+    }
 
 
 @router.get("/health")
