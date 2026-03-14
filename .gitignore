@@ -26,6 +26,10 @@ env/
 backend/data/sessions/
 backend/data/memory/
 backend/data/files/
+backend/data/knowledge/
+backend/data/workspace/
+backend/data/schedules/
+backend/data/webhooks/
 backend/data/hook_rules/
 backend/data/*.db
 
