@@ -292,8 +292,57 @@ class Scheduler:
             task.run_history = task.run_history[-50:]
 
     async def _execute_task(self, task: ScheduledTask, trigger: str = "scheduled") -> None:
-        """执行定时任务: 调用 gateway.chat() → 更新状态 → 触发 webhook。"""
+        """执行定时任务: 调用 gateway.chat() → 更新状态 → 触发 webhook。
+
+        与 POST /api/chat 一致:
+        - 创建 EventBus 捕获 Agent 执行事件
+        - 启动 EventBusWSBridge 将事件实时推送到 WebSocket
+        - 前端侧边栏显示蓝点 + 实时进度
+        """
+        from core.event_bus import EventBus
+        from core.ws_bridge import EventBusWSBridge
+
         started_at = time.time()
+        trace_id = uuid.uuid4().hex[:12]
+        bus = EventBus(trace_id=trace_id)
+        bridge = None
+        effective_session_id: str | None = None
+
+        # 拦截 pipeline_started 捕获 session_id + 立即通知前端刷新会话列表
+        _original_emit = bus.emit
+        _nm = self.notification_manager
+        _user_id = task.user_id
+        _task_name = task.name
+
+        def _tracking_emit(event_type: str, data: dict | None = None) -> None:
+            nonlocal effective_session_id
+            if event_type == "pipeline_started" and data and "session_id" in data:
+                sid = data["session_id"]
+                effective_session_id = sid
+                if hasattr(bus, '_ws_bridge'):
+                    bus._ws_bridge.session_id = sid
+                # 立即通知前端：新会话创建，侧边栏刷新列表 + 显示蓝点
+                if _nm:
+                    asyncio.create_task(_nm.notify_user(_user_id, "session_created", {
+                        "session_id": sid,
+                        "task_name": _task_name,
+                        "source": "scheduled_task",
+                    }))
+            _original_emit(event_type, data)
+
+        bus.emit = _tracking_emit  # type: ignore[method-assign]
+
+        # 启动 WSBridge: 实时转发事件到用户的 WebSocket
+        if self.notification_manager:
+            bridge = EventBusWSBridge(
+                bus=bus,
+                session_id=trace_id,
+                user_id=task.user_id,
+                notification_manager=self.notification_manager,
+            )
+            bus._ws_bridge = bridge  # type: ignore[attr-defined]
+            bridge.start()
+
         try:
             gateway = self.gateway_factory()
             result = await gateway.chat(
@@ -301,7 +350,9 @@ class Scheduler:
                 user_id=task.user_id,
                 message=task.message,
                 business_type=task.business_type,
+                event_bus=bus,
             )
+            effective_session_id = result.get("session_id", effective_session_id)
 
             task.last_run_at = time.time()
             task.last_run_status = "success" if not result.get("error") else "failed"
@@ -339,10 +390,10 @@ class Scheduler:
 
             logger.info(f"Scheduled task completed: {task.name} → {task.last_run_status}")
 
-            # WebSocket 通知用户
-            if self.notification_manager:
-                await self.notification_manager.notify_user(task.user_id, "session_created", {
-                    "session_id": result.get("session_id", ""),
+            # WebSocket 通知用户: 会话完成 (带 task_name 供前端弹浮层)
+            if self.notification_manager and effective_session_id:
+                await self.notification_manager.notify_user(task.user_id, "session_completed", {
+                    "session_id": effective_session_id,
                     "task_name": task.name,
                     "status": task.last_run_status,
                     "source": "scheduled_task",
@@ -380,6 +431,19 @@ class Scheduler:
                         "error": str(e),
                     },
                 )
+
+        finally:
+            # 清理: 关闭 EventBus + 等待 bridge 转发完剩余事件
+            await asyncio.sleep(0.1)
+            if not bus.is_closed:
+                bus.close()
+            if bridge and bridge._task:
+                try:
+                    await asyncio.wait_for(bridge._task, timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    bridge.stop()
+                except Exception:
+                    bridge.stop()
 
     async def run_task_now(self, tenant_id: str, user_id: str, task_id: str) -> bool:
         """立即触发执行任务 (trigger=manual)，不影响定时计划。"""

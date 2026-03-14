@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import {
   useAIChatStore, usePipelineStore, aiApi, getAIConfig,
-  useNotifications,
+  useNotifications, useSessionStatusStore,
   type SessionInfo,
 } from '@claw/core';
 import SearchModal from './SearchModal.tsx';
@@ -58,12 +58,14 @@ export default function CoworkSidebar() {
   // ── State ──
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
+  const unreadIds = useSessionStatusStore((s) => s.unreadIds);
+  const runningIds = useSessionStatusStore((s) => s.runningIds);
+  const markRead = useSessionStatusStore((s) => s.markRead);
 
   // ── Session fetching ──
   const fetchSessions = useCallback(async () => {
     try {
-      const list = await apiListSessions(getAIConfig().defaultUserId);
+      const list = await apiListSessions();
       setSessions(list);
     } catch (err) {
       console.warn('[CoworkSidebar] Failed to fetch sessions:', err);
@@ -74,22 +76,28 @@ export default function CoworkSidebar() {
     fetchSessions();
   }, [currentSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── WebSocket 通知: 后台产生新 session 时实时刷新列表 + 弹出提示 ──
+  // ── WebSocket 通知: session 事件实时处理 ──
   useNotifications(useCallback((event) => {
     if (event.type === 'session_created') {
+      // 定时任务刚触发: 只刷新列表 (蓝点由 pipeline_event 的 addRunning 处理)
+      fetchSessions();
+    } else if (event.type === 'session_completed') {
+      // 任务完成: 刷新列表 + 标记未读 + 弹浮层
       const sessionId = event.data?.session_id as string;
       if (sessionId) {
-        setUnreadIds((prev) => new Set(prev).add(sessionId));
+        useSessionStatusStore.getState().addUnread(sessionId);
       }
       fetchSessions();
-      const taskName = (event.data?.task_name as string) || '定时任务';
-      const status = event.data?.status as string;
-      notification.info({
-        message: '定时任务完成',
-        description: `「${taskName}」已${status === 'success' ? '执行完成' : '执行失败'}`,
-        placement: 'topRight',
-        duration: 5,
-      });
+      const taskName = (event.data?.task_name as string) || '';
+      if (taskName) {
+        const status = event.data?.status as string;
+        notification.info({
+          message: '定时任务完成',
+          description: `「${taskName}」已${status === 'failed' ? '执行失败' : '执行完成'}`,
+          placement: 'topRight',
+          duration: 5,
+        });
+      }
     }
   }, [fetchSessions]));
 
@@ -102,13 +110,8 @@ export default function CoworkSidebar() {
   const handleSelectSession = useCallback((sessionId: string) => {
     setContentView('chat');
     dispatchSessionAction({ type: 'load', sessionId });
-    setUnreadIds((prev) => {
-      if (!prev.has(sessionId)) return prev;
-      const next = new Set(prev);
-      next.delete(sessionId);
-      return next;
-    });
-  }, [dispatchSessionAction, setContentView]);
+    markRead(sessionId);
+  }, [dispatchSessionAction, setContentView, markRead]);
 
   const handleScheduledClick = useCallback(() => {
     setContentView('schedule');
@@ -192,11 +195,12 @@ export default function CoworkSidebar() {
           sessions.map((session) => {
             const isActive = session.session_id === currentSessionId;
             const isUnread = unreadIds.has(session.session_id);
+            const isRunning = runningIds.has(session.session_id);
             const isBot = session.business_type === 'scheduled_task';
             return (
               <div
                 key={session.session_id}
-                className={`cowork-sidebar-session-item${isActive ? ' cowork-sidebar-session-item--active' : ''}${isUnread ? ' cowork-sidebar-session-item--unread' : ''}`}
+                className={`cowork-sidebar-session-item${isActive ? ' cowork-sidebar-session-item--active' : ''}${isUnread && !isRunning ? ' cowork-sidebar-session-item--unread' : ''}`}
                 role="button"
                 tabIndex={0}
                 onClick={() => handleSelectSession(session.session_id)}
@@ -207,7 +211,14 @@ export default function CoworkSidebar() {
                     {isBot && (
                       <RobotOutlined style={{ fontSize: 12, color: '#8b5cf6', flexShrink: 0 }} />
                     )}
-                    {isUnread && (
+                    {isRunning && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: '#3b82f6', flexShrink: 0,
+                        animation: 'pulse 1.5s ease-in-out infinite',
+                      }} />
+                    )}
+                    {isUnread && !isRunning && (
                       <span style={{
                         width: 6, height: 6, borderRadius: '50%',
                         background: '#f59e0b', flexShrink: 0,
