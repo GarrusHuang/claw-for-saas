@@ -29,16 +29,6 @@ vi.mock('@claw/core', () => ({
 }));
 
 // Mock sub-components to isolate ChatMessageList
-vi.mock('../src/chat/ChatResultCards.tsx', () => ({
-  MiniTypeInference: () => null,
-  MiniFieldUpdates: () => null,
-  MiniAuditSummary: () => null,
-}));
-
-vi.mock('../src/results/DocumentPresenter.tsx', () => ({
-  default: () => null,
-}));
-
 vi.mock('../src/chat/InlineUploader.tsx', () => ({
   default: () => null,
 }));
@@ -120,30 +110,4 @@ describe('ChatMessageList', () => {
     expect(userMsg.closest('.msg-user')).not.toBeNull();
   });
 
-  it('renders PlanCard markdown with GFM when plan is proposed', () => {
-    mockPipelineState = {
-      ...mockPipelineState,
-      status: 'running',
-      scenario: 'some_scenario',
-      plan: {
-        summary: 'Test plan',
-        detail: '## Plan detail\n\n| Col1 | Col2 |\n|------|------|\n| a | b |',
-        steps: [],
-        estimatedActions: 3,
-      },
-      agentPlanProposed: true,
-    };
-
-    const messages: { id: string; role: 'user' | 'assistant'; content: string; timestamp: number }[] = [];
-
-    render(<ChatMessageList messages={messages} showPipelineProgress />);
-
-    // PlanCard should render Markdown with remarkGfm for plan.detail
-    const markdownCalls = mockMarkdown.mock.calls;
-    const planCall = markdownCalls.find(
-      (call) => call[0].children && call[0].children.includes('Plan detail'),
-    );
-    expect(planCall).toBeDefined();
-    expect(planCall![0].remarkPlugins).toContain(mockRemarkGfm);
-  });
 });

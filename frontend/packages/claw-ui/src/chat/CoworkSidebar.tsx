@@ -90,14 +90,12 @@ export default function CoworkSidebar() {
       // 定时任务刚触发: 只刷新列表 (蓝点由 pipeline_event 的 addRunning 处理)
       fetchSessions();
     } else if (event.type === 'session_completed') {
-      // 任务完成: 刷新列表 + 标记未读 + 弹浮层
-      const sessionId = event.data?.session_id as string;
-      if (sessionId) {
-        useSessionStatusStore.getState().addUnread(sessionId);
-      }
+      // 任务完成: 刷新列表 + 弹浮层 (addUnread 已由 useNotifications 统一处理)
       fetchSessions();
+      const sessionId = event.data?.session_id as string;
       const taskName = (event.data?.task_name as string) || '';
-      if (taskName) {
+      const currentSessionId = usePipelineStore.getState().sessionId;
+      if (taskName && sessionId !== currentSessionId) {
         const isFailed = (event.data?.status as string) === 'failed';
         const key = `task-done-${sessionId}-${Date.now()}`;
         notification.open({

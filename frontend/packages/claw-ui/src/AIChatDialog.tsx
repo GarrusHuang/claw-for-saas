@@ -220,7 +220,6 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
                   <div className="chat-dialog-body">
                     <ChatMessageList
                       messages={messages}
-                      showPipelineProgress
                       onInteractionRespond={(value, files) => sendMessage(value, undefined, files)}
                     />
                   </div>

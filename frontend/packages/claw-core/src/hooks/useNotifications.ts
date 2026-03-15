@@ -124,6 +124,16 @@ export function useNotifications(onNotification: NotificationHandler, enabled = 
             return;
           }
 
+          // session_completed: 统一在此处管理 addUnread
+          if (msg.type === 'session_completed') {
+            const sid = (msg.data as Record<string, unknown>)?.session_id as string;
+            if (sid && sid !== usePipelineStore.getState().sessionId) {
+              useSessionStatusStore.getState().addUnread(sid);
+            }
+            handlerRef.current(msg);
+            return;
+          }
+
           // 其他通知类型 → 传递给外部回调
           handlerRef.current(msg);
         } catch {
