@@ -134,6 +134,12 @@ export function hasSession(sessionId: string): boolean {
   return sessionStorage.getItem(CACHE_PREFIX + sessionId) !== null;
 }
 
+/** Get cached pipeline status for a session (used to detect F5 during running). */
+export function getCachedStatus(sessionId: string): string | null {
+  const snapshot = storageGet<PipelineStateSnapshot>(CACHE_PREFIX + sessionId);
+  return snapshot?.status ?? null;
+}
+
 /** Save messages for a session. */
 export function saveMessages(sessionId: string, messages: unknown[]): void {
   storageSet(MSG_PREFIX + sessionId, messages);

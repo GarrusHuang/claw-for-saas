@@ -20,6 +20,7 @@ from urllib.parse import quote
 from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 from core.auth import AuthUser, get_current_user
 from dependencies import get_file_service
@@ -59,6 +60,26 @@ async def upload_file(
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+
+class BindSessionBody(BaseModel):
+    file_ids: list[str]
+    session_id: str
+
+
+@router.post("/bind-session")
+async def bind_files_to_session(
+    body: BindSessionBody,
+    user: AuthUser = Depends(get_current_user),
+):
+    """将无 session 的文件绑定到指定会话（新会话首次分配 sessionId 后回填）。"""
+    if not body.file_ids or not body.session_id:
+        raise HTTPException(status_code=400, detail="file_ids and session_id required")
+    service = get_file_service()
+    count = service.bind_files_to_session(
+        user.tenant_id, user.user_id, body.file_ids, body.session_id,
+    )
+    return {"bound": count}
 
 
 @router.get("/")

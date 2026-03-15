@@ -21,9 +21,9 @@ import { getAIConfig } from '../config.ts';
 import { useAIChatStore } from '../stores/ai-chat.ts';
 import { usePipelineStore } from '../stores/pipeline.ts';
 import { usePipeline } from './usePipeline.ts';
-import { listSessions as apiListSessions, getSessionHistory, injectMessage, fetchPipelineSnapshot } from '../services/ai-api.ts';
+import { listSessions as apiListSessions, getSessionHistory, injectMessage, fetchPipelineSnapshot, bindFilesToSession } from '../services/ai-api.ts';
 import { applyPipelineSnapshot } from '../services/pipeline-dispatcher.ts';
-import { saveSession, restoreSession, saveMessages, restoreMessages } from '../stores/pipeline-cache.ts';
+import { saveSession, restoreSession, saveMessages, restoreMessages, getCachedStatus } from '../stores/pipeline-cache.ts';
 import { useSessionStatusStore } from '../stores/session-status.ts';
 import type { SessionInfo, SessionDetail } from '../services/ai-api.ts';
 import type { ScenarioConfig } from '../types/scenario.ts';
@@ -325,12 +325,25 @@ export function useAIChat() {
         }
 
         // 运行中的 session: 优先从缓存恢复 (API 没有未完成的消息)
-        if (useSessionStatusStore.getState().runningIds.has(sessionId)) {
+        // F5 后 runningIds 丢失 (内存状态)，用 getCachedStatus 从 sessionStorage 补充检测
+        const wasCachedRunning = getCachedStatus(sessionId) === 'running';
+        if (wasCachedRunning || useSessionStatusStore.getState().runningIds.has(sessionId)) {
           if (tryRestoreFromCache(sessionId, setMessages, {
             autoStarted: autoStartedRef,
             prevAgentMessage: prevAgentMessageRef,
             streamingMsgId: streamingMsgIdRef,
           })) {
+            // 缓存恢复成功后仍需拉取快照：检测 pipeline 是否已完成
+            fetchPipelineSnapshot(sessionId)
+              .then((snapshot) => {
+                if (usePipelineStore.getState().sessionId === sessionId) {
+                  if (!snapshot.is_complete) {
+                    useSessionStatusStore.getState().addRunning(sessionId);
+                  }
+                  applyPipelineSnapshot(snapshot);
+                }
+              })
+              .catch(() => {});
             clearSessionAction();
             return;
           }
@@ -404,6 +417,7 @@ export function useAIChat() {
       // ── 自由对话 (无场景) ──
       if (!scenarioKey) {
         addMessage('user', text, msgFiles);
+        const prevSessionId = usePipelineStore.getState().sessionId;
         const fileMaterials = files?.map((f) => ({
           material_id: `file-${f.fileId}`,
           material_type: 'file' as const,
@@ -417,6 +431,15 @@ export function useAIChat() {
           sessionId: pipelineRef.current.sessionId || undefined,
           materials: fileMaterials,
         });
+        // 新会话：将上传文件绑定到刚分配的 sessionId
+        if (files && files.length > 0) {
+          const newSessionId = usePipelineStore.getState().sessionId;
+          if (newSessionId && newSessionId !== prevSessionId) {
+            bindFilesToSession(files.map(f => f.fileId), newSessionId).catch(err => {
+              console.warn('[useAIChat] Failed to bind files to session:', err);
+            });
+          }
+        }
         return;
       }
 
@@ -430,6 +453,7 @@ export function useAIChat() {
 
       addMessage('user', text, msgFiles);
 
+      const prevSessionId = usePipelineStore.getState().sessionId;
       const fileMaterials = files?.map(f => ({
         material_id: `file-${f.fileId}`,
         material_type: 'file' as const,
@@ -448,6 +472,15 @@ export function useAIChat() {
         auditRules: config.auditRules,
         knownValues: config.knownValues,
       });
+      // 新会话：将上传文件绑定到刚分配的 sessionId
+      if (files && files.length > 0) {
+        const newSessionId = usePipelineStore.getState().sessionId;
+        if (newSessionId && newSessionId !== prevSessionId) {
+          bindFilesToSession(files.map(f => f.fileId), newSessionId).catch(err => {
+            console.warn('[useAIChat] Failed to bind files to session:', err);
+          });
+        }
+      }
     },
     [activeScenario, pipelineStatus, addMessage, setActiveScenario],
   );

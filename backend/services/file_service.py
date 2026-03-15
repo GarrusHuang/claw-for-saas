@@ -23,7 +23,7 @@ import os
 import re
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -337,6 +337,32 @@ class FileService:
             raise FileNotFoundError(f"File not found: {file_id}")
         data = json.loads(meta_path.read_text(encoding="utf-8"))
         return FileMetadata(**data)
+
+    def _save_metadata(self, tenant_id: str, user_id: str, metadata: FileMetadata) -> None:
+        """保存文件元数据。"""
+        user_dir = self._user_dir(tenant_id, user_id)
+        meta_path = user_dir / f"{metadata.file_id}.meta.json"
+        meta_path.write_text(
+            json.dumps(asdict(metadata), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def bind_files_to_session(
+        self, tenant_id: str, user_id: str,
+        file_ids: list[str], session_id: str,
+    ) -> int:
+        """将指定文件绑定到 session（用于新会话首次分配 sessionId 后回填）。"""
+        count = 0
+        for file_id in file_ids:
+            try:
+                meta = self._load_metadata(tenant_id, user_id, file_id)
+                if not meta.session_id:
+                    updated = replace(meta, session_id=session_id)
+                    self._save_metadata(tenant_id, user_id, updated)
+                    count += 1
+            except FileNotFoundError:
+                logger.warning(f"File not found for binding: {file_id}")
+        return count
 
     def _extract_pdf(self, content: bytes) -> str:
         """从 PDF 提取文本。"""
