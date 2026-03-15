@@ -580,6 +580,15 @@ export default function ChatMessageList({
   const resolveInteraction = usePipelineStore((s) => s.resolveInteraction);
   const fileArtifacts = usePipelineStore((s) => s.fileArtifacts) as FileArtifact[];
 
+  // ── 切换会话时重置滚动状态 ──
+  const sessionKey = messages.length > 0 ? messages[0].id : '';
+  useEffect(() => {
+    isNearBottomRef.current = true;
+    setShowScrollBtn(false);
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [sessionKey]);
+
   // ── 智能自动滚动 ──
   // 用户在底部附近 → 新内容来了自动滚底
   // 用户往上翻了 → 停止自动滚动，显示「跳到最新」按钮
