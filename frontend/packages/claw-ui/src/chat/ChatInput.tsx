@@ -2,7 +2,7 @@ import { useRef, useCallback, useState } from 'react';
 import { Input, Button, message } from 'antd';
 import type { InputRef } from 'antd';
 import { SendOutlined, PlusOutlined, BorderOutlined } from '@ant-design/icons';
-import { aiApi, type FileInfo } from '@claw/core';
+import { aiApi, usePipelineStore, type FileInfo } from '@claw/core';
 import FilePreviewModal from '../preview/FilePreviewModal';
 import FileCard from './FileCard';
 import type { FileCardFile } from './FileCard';
@@ -78,6 +78,7 @@ export default function ChatInput({
           sizeBytes: result.size_bytes,
         }]);
         message.success(`${result.filename} 上传成功`);
+        usePipelineStore.getState().notifyFileUploaded();
       }
     } catch (err) {
       message.error(`文件上传失败: ${err instanceof Error ? err.message : '未知错误'}`);
