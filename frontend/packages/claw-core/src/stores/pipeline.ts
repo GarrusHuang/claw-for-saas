@@ -163,8 +163,6 @@ interface PipelineState {
   setLoadedSkills: (skills: string[]) => void;
   // 文档采纳
   adoptDocument: (doc: GeneratedDocument) => void;
-  // 文件上传信号 (递增触发 ProgressPanel 刷新)
-  notifyFileUploaded: () => void;
 }
 
 const initialState = {
@@ -206,8 +204,6 @@ const initialState = {
   loadedSkills: [] as string[],
   // 文档采纳
   adoptedDocument: null as GeneratedDocument | null,
-  // 文件上传版本号 (递增通知 ProgressPanel 刷新)
-  fileUploadVersion: 0,
   // Metadata
   startedAt: null as number | null,
   completedAt: null as number | null,
@@ -495,6 +491,4 @@ export const usePipelineStore = create<PipelineState>((set) => ({
   // 文档采纳
   adoptDocument: (doc) => set({ adoptedDocument: doc }),
 
-  // 文件上传信号
-  notifyFileUploaded: () => set((state) => ({ fileUploadVersion: state.fileUploadVersion + 1 })),
 }));
