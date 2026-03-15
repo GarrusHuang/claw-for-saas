@@ -21,7 +21,7 @@ import {
   DatabaseOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons';
-import { usePipelineStore, aiApi, getAIConfig } from '@claw/core';
+import { usePipelineStore, aiApi } from '@claw/core';
 import type { PlanStepTracking, ToolExecution, KBFileInfo, FileInfo } from '@claw/core';
 
 const { Text } = Typography;
@@ -245,15 +245,8 @@ export default function ProgressPanel() {
   const [kbFiles, setKbFiles] = useState<KBFileInfo[]>([]);
   const [kbLoading, setKbLoading] = useState(false);
 
-  // 切换 session 时清空知识库文件（避免显示前一个 session 的数据）
   useEffect(() => {
-    setKbFiles([]);
-  }, [sessionId]);
-
-  useEffect(() => {
-    // softReset 会暂时清空 toolExecutions → referencedKbFileIds 变空
-    // 此时保留已有的 kbFiles，避免知识库文件闪烁消失
-    if (referencedKbFileIds.length === 0) return;
+    if (referencedKbFileIds.length === 0) { setKbFiles([]); return; }
     let cancelled = false;
     const load = async () => {
       setKbLoading(true);
