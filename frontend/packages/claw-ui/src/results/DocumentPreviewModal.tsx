@@ -87,7 +87,7 @@ export default function DocumentPreviewModal({
       }
     >
       <div
-        className="document-preview-content markdown-body"
+        className="document-preview-content prose"
         style={{
           maxHeight: '70vh',
           overflow: 'auto',

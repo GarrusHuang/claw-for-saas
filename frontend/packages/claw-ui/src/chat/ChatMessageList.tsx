@@ -12,8 +12,8 @@ import {
   DownOutlined,
 } from '@ant-design/icons';
 import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { usePipelineStore, getAIConfig } from '@claw/core';
+import { MARKDOWN_COMPONENTS, REMARK_PLUGINS } from '../shared/markdownComponents';
 import type { PendingInteraction, ToolExecution, TimelineEntry } from '@claw/core';
 import InlineUploader from './InlineUploader';
 import InteractiveMessage from './InteractiveMessage';
@@ -26,7 +26,6 @@ import type { ChatMessage, ChatMessageFile, ChatTimelineEntry, FileArtifact } fr
 
 const { Text } = Typography;
 
-const REMARK_PLUGINS = [remarkGfm];
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -213,8 +212,8 @@ function AgentTimeline() {
             )}
             {/* text → 正文 (ReactMarkdown) */}
             {hasText && (
-              <div className="msg-ai markdown-body" style={{ marginBottom: hasTools ? 4 : 12 }}>
-                <Markdown remarkPlugins={REMARK_PLUGINS}>{g.text!}</Markdown>
+              <div className="msg-ai prose" style={{ marginBottom: hasTools ? 4 : 12 }}>
+                <Markdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{g.text!}</Markdown>
               </div>
             )}
             {/* tools → 折叠块 */}
@@ -276,8 +275,8 @@ function PersistedTimeline({ entries, showText = false }: { entries: ChatTimelin
               </div>
             )}
             {hasText && (
-              <div className="msg-ai markdown-body" style={{ marginBottom: hasTools ? 4 : 12 }}>
-                <Markdown remarkPlugins={REMARK_PLUGINS}>{g.text!}</Markdown>
+              <div className="msg-ai prose" style={{ marginBottom: hasTools ? 4 : 12 }}>
+                <Markdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{g.text!}</Markdown>
               </div>
             )}
             {hasTools && (
@@ -531,8 +530,8 @@ const MessageItem = memo(function MessageItem({ msg }: { msg: ChatMessage }) {
   }
   return (
     <div style={{ marginBottom: 16 }}>
-      <div className="msg-ai markdown-body">
-        <Markdown remarkPlugins={REMARK_PLUGINS}>{msg.content}</Markdown>
+      <div className="msg-ai prose">
+        <Markdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{msg.content}</Markdown>
       </div>
     </div>
   );
