@@ -51,7 +51,7 @@ export type { ChatDialogState, ContentView, SessionAction, AIChatState } from '.
 export { useAuthStore } from './stores/auth.ts';
 export type { AuthState } from './stores/auth.ts';
 export { useSessionStatusStore } from './stores/session-status.ts';
-export { saveSession, restoreSession, clearSession, hasSession, saveMessages, restoreMessages } from './stores/pipeline-cache.ts';
+export { saveSession, restoreSession, clearSession, hasSession, saveMessages, restoreMessages, getCachedStatus } from './stores/pipeline-cache.ts';
 export type { PipelineStateSnapshot } from './stores/pipeline-cache.ts';
 
 // ── Services ──

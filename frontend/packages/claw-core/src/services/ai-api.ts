@@ -279,6 +279,13 @@ export async function uploadFile(file: File, userId?: string, sessionId?: string
   return res.json() as Promise<FileInfo>;
 }
 
+export async function bindFilesToSession(fileIds: string[], sessionId: string): Promise<void> {
+  await apiFetch('/api/files/bind-session', {
+    method: 'POST',
+    body: JSON.stringify({ file_ids: fileIds, session_id: sessionId }),
+  });
+}
+
 export async function listUserFiles(_userId?: string, sessionId?: string): Promise<FileInfo[]> {
   let url = `/api/files/`;
   if (sessionId) url += `?session_id=${encodeURIComponent(sessionId)}`;

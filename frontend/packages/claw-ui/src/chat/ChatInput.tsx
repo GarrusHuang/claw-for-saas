@@ -2,7 +2,7 @@ import { useRef, useCallback, useState } from 'react';
 import { Input, Button, message } from 'antd';
 import type { InputRef } from 'antd';
 import { SendOutlined, PlusOutlined, BorderOutlined } from '@ant-design/icons';
-import { aiApi, type FileInfo } from '@claw/core';
+import { aiApi, usePipelineStore, type FileInfo } from '@claw/core';
 import FilePreviewModal from '../preview/FilePreviewModal';
 import FileCard from './FileCard';
 import type { FileCardFile } from './FileCard';
@@ -70,7 +70,9 @@ export default function ChatInput({
     setUploading(true);
     try {
       for (const file of Array.from(files)) {
-        const result: FileInfo = await uploadFile(file, undefined, sessionId);
+        // 实时读取 store 中的 sessionId，避免闭包过期
+        const currentSessionId = usePipelineStore.getState().sessionId;
+        const result: FileInfo = await uploadFile(file, undefined, currentSessionId || undefined);
         setAttachedFiles(prev => [...prev, {
           fileId: result.file_id,
           filename: result.filename,
