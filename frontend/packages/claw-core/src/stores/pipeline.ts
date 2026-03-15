@@ -399,11 +399,18 @@ export const usePipelineStore = create<PipelineState>((set) => ({
     })),
 
   completePipeline: (status, durationMs) =>
-    set({
+    set((state) => ({
       status: status === 'success' ? 'completed' : 'failed',
       completedAt: Date.now(),
       durationMs,
-    }),
+      // 清理残留的 pending 工具条目（WS 漏事件时不会永远转圈）
+      timelineEntries: state.timelineEntries.map((e) =>
+        e.type === 'tool' && e.toolExecution?.pending
+          ? { ...e, toolExecution: { ...e.toolExecution, pending: false, success: true } }
+          : e,
+      ),
+      agentIteration: { ...state.agentIteration, callingTools: [] },
+    })),
 
   setError: (error) => set({ error, status: 'failed' }),
 
