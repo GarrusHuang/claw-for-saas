@@ -286,6 +286,10 @@ export async function bindFilesToSession(fileIds: string[], sessionId: string): 
   });
 }
 
+export async function deleteFile(fileId: string): Promise<void> {
+  await apiFetch(`/api/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+}
+
 export async function listUserFiles(_userId?: string, sessionId?: string): Promise<FileInfo[]> {
   let url = `/api/files/`;
   if (sessionId) url += `?session_id=${encodeURIComponent(sessionId)}`;

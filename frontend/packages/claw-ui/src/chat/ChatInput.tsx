@@ -6,7 +6,7 @@ import { aiApi, usePipelineStore, type FileInfo } from '@claw/core';
 import FilePreviewModal from '../preview/FilePreviewModal';
 import FileCard from './FileCard';
 import type { FileCardFile } from './FileCard';
-const { uploadFile } = aiApi;
+const { uploadFile, deleteFile } = aiApi;
 
 const { TextArea } = Input;
 
@@ -93,6 +93,7 @@ export default function ChatInput({
 
   const removeFile = useCallback((fileId: string) => {
     setAttachedFiles(prev => prev.filter(f => f.fileId !== fileId));
+    deleteFile(fileId).catch(() => {});
   }, []);
 
   return (
