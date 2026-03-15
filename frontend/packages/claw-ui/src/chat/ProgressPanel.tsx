@@ -21,7 +21,7 @@ import {
   DatabaseOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons';
-import { usePipelineStore, aiApi } from '@claw/core';
+import { usePipelineStore, aiApi, getAIConfig } from '@claw/core';
 import type { PlanStepTracking, ToolExecution, KBFileInfo, FileInfo } from '@claw/core';
 
 const { Text } = Typography;
