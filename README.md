@@ -10,7 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-1884_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-1881_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
 [![License](https://img.shields.io/badge/License-Internal-lightgrey)](#license)
 
 </div>
@@ -289,13 +289,13 @@ request_input      → Agent 请求用户输入
 ## 测试
 
 ```bash
-# 后端单元测试（1675 用例）
+# 后端单元测试（1674 用例）
 cd backend && python3 -m pytest tests/ -m "not llm" -v
 
-# 后端 + LLM 集成测试（1701 用例，需 LLM 服务在线）
+# 后端 + LLM 集成测试（1700 用例，需 LLM 服务在线）
 cd backend && python3 -m pytest tests/ -v
 
-# 前端单元测试（162 用例）
+# 前端单元测试（160 用例）
 cd frontend && npm test
 
 # 前端 E2E（21 用例）
@@ -304,11 +304,11 @@ cd frontend && npx playwright test
 
 | 层级 | 测试数 | 覆盖范围 |
 |:-----|:-------|:---------|
-| 后端 Unit | 1,675 | 59 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
+| 后端 Unit | 1,674 | 59 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
 | 后端 LLM 集成 | 26 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
-| 前端 Unit | 162 | claw-core (73) · claw-ui (83) · app (6) |
+| 前端 Unit | 160 | claw-core (73) · claw-ui (81) · app (6) |
 | 前端 E2E | 21 | Playwright 关键用户流程 |
-| **合计** | **1,884** | |
+| **合计** | **1,881** | |
 
 ---
 
