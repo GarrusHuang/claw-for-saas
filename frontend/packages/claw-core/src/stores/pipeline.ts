@@ -233,6 +233,8 @@ export const usePipelineStore = create<PipelineState>((set) => ({
         startedAt: null,
         completedAt: null,
       })),
+      // 保留历史 toolExecutions，右栏知识库/制品依赖它跨轮次显示
+      toolExecutions: state.toolExecutions,
     })),
 
   startPipeline: (scenario, steps) =>
