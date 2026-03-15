@@ -190,7 +190,6 @@ export default function ProgressPanel() {
   const planSteps = usePipelineStore((s) => s.planSteps);
   const toolExecutions = usePipelineStore((s) => s.toolExecutions);
   const sessionId = usePipelineStore((s) => s.sessionId);
-  const fileUploadVersion = usePipelineStore((s) => s.fileUploadVersion);
 
   const isRunning = pipelineStatus === 'running';
   const isCompleted = pipelineStatus === 'completed';
@@ -230,10 +229,11 @@ export default function ProgressPanel() {
     setUploadedLoading(false);
   }, [sessionId]);
 
-  // sessionId 变化 或 有新文件上传时刷新上传文件列表
+  // sessionId 变化 或 pipeline 状态变化时刷新上传文件列表
+  // (用户发送带附件的消息后，status 变为 running → 触发刷新)
   useEffect(() => {
     loadUploadedFiles();
-  }, [sessionId, fileUploadVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, pipelineStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Referenced knowledge files (only those read by Agent via read_knowledge_file) ──
   const referencedKbFileIds = Array.from(
