@@ -224,15 +224,10 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       ...initialState,
       sessionId: state.sessionId,
       conversationHistory: state.conversationHistory,
-      // 保留 plan 数据，执行阶段需要 TodoList 持续显示
+      // 保留 plan 数据及其完成状态，普通对话不应重置进度
       plan: state.plan,
       agentPlanProposed: state.agentPlanProposed,
-      planSteps: state.planSteps.map((s) => ({
-        ...s,
-        status: 'pending' as const,
-        startedAt: null,
-        completedAt: null,
-      })),
+      planSteps: state.planSteps,
       // 保留历史 toolExecutions，右栏知识库/制品依赖它跨轮次显示
       toolExecutions: state.toolExecutions,
     })),
@@ -244,15 +239,10 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       scenario,
       sessionId: state.sessionId,
       conversationHistory: state.conversationHistory,
-      // 保留 plan 数据 (执行阶段复用 planning 阶段的 plan steps)
+      // 保留 plan 数据及其完成状态，新 plan 由 initPlanSteps 重置
       plan: state.plan,
       agentPlanProposed: state.agentPlanProposed,
-      planSteps: state.planSteps.map((s) => ({
-        ...s,
-        status: 'pending' as const,
-        startedAt: null,
-        completedAt: null,
-      })),
+      planSteps: state.planSteps,
       // 保留历史 toolExecutions，右栏知识库/制品依赖它跨轮次显示
       toolExecutions: state.toolExecutions,
       startedAt: Date.now(),
