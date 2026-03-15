@@ -229,9 +229,11 @@ export default function ProgressPanel() {
     setUploadedLoading(false);
   }, [sessionId]);
 
+  // sessionId 变化 或 pipeline 状态变化时刷新上传文件列表
+  // (用户在对话中上传文件后，需要 pipeline 结束时拿到最新列表)
   useEffect(() => {
     loadUploadedFiles();
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, pipelineStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Referenced knowledge files (only those read by Agent via read_knowledge_file) ──
   const referencedKbFileIds = Array.from(
