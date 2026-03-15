@@ -80,105 +80,83 @@ function extractFilename(path: string): string {
   return path.split('/').pop() || path;
 }
 
-/* ── Artifact file card ── */
+/* ── 统一竖形文件卡片 ── */
 
-function ArtifactCard({
+function FileCard({
   filename,
-  path,
-  onPreview,
+  subtitle,
+  onClick,
   onDownload,
 }: {
   filename: string;
-  path: string;
-  onPreview: () => void;
-  onDownload: () => void;
+  subtitle?: string;
+  onClick: () => void;
+  onDownload?: () => void;
 }) {
   const tag = getFileTypeTag(filename);
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={onPreview}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPreview(); } }}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       style={{
-        padding: '8px 10px',
+        padding: '10px 8px 8px',
         border: '1px solid #e8e8e8',
         borderRadius: 8,
         cursor: 'pointer',
         transition: 'all 0.15s',
         background: '#fafafa',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
-        gap: 8,
+        gap: 4,
+        position: 'relative',
+        minWidth: 0,
       }}
       onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#91d5ff'; e.currentTarget.style.background = '#f0f7ff'; }}
       onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e8e8e8'; e.currentTarget.style.background = '#fafafa'; }}
     >
-      <span style={{ fontSize: 18, flexShrink: 0 }}>{getFileIcon(filename)}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontWeight: 500, fontSize: 12,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }} title={path}>
-          {filename}
-        </div>
+      {onDownload && (
+        <DownloadOutlined
+          style={{ position: 'absolute', top: 4, right: 6, fontSize: 11, color: '#bfbfbf' }}
+          onClick={(e) => { e.stopPropagation(); onDownload(); }}
+          title="下载"
+        />
+      )}
+      <span style={{ fontSize: 22 }}>{getFileIcon(filename)}</span>
+      <div style={{
+        width: '100%', textAlign: 'center',
+        fontWeight: 500, fontSize: 11, lineHeight: '15px',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        padding: '0 2px',
+      }} title={filename}>
+        {filename}
       </div>
-      <Tag color={tag.color} style={{ fontSize: 10, lineHeight: '18px', padding: '0 4px', margin: 0 }}>
-        {tag.label}
-      </Tag>
-      <DownloadOutlined
-        style={{ fontSize: 13, color: '#8c8c8c', flexShrink: 0, cursor: 'pointer' }}
-        onClick={(e) => { e.stopPropagation(); onDownload(); }}
-        title="下载"
-      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+        {subtitle && <span style={{ fontSize: 10, color: '#bfbfbf' }}>{subtitle}</span>}
+        <Tag color={tag.color} style={{ fontSize: 9, lineHeight: '16px', padding: '0 3px', margin: 0 }}>
+          {tag.label}
+        </Tag>
+      </div>
     </div>
   );
 }
 
-/* ── Knowledge file card (grid) ── */
+/* ── 2 列 grid，超 2 行滚动 ── */
 
-function KnowledgeCard({
-  file,
-  onPreview,
-}: {
-  file: KBFileInfo;
-  onPreview: () => void;
-}) {
-  const tag = getFileTypeTag(file.filename);
+const FILE_GRID_MAX_HEIGHT = 172; // ~2 rows of vertical cards
+
+function FileGrid({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onPreview}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPreview(); } }}
-      style={{
-        padding: '8px 10px',
-        border: '1px solid #e8e8e8',
-        borderRadius: 8,
-        cursor: 'pointer',
-        transition: 'all 0.15s',
-        background: '#fafafa',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#91d5ff'; e.currentTarget.style.background = '#f0f7ff'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e8e8e8'; e.currentTarget.style.background = '#fafafa'; }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 16, flexShrink: 0 }}>{getFileIcon(file.filename)}</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontWeight: 500, fontSize: 12,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }} title={file.filename}>
-            {file.filename}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
-            <span style={{ fontSize: 10, color: '#bfbfbf' }}>{formatSize(file.size_bytes)}</span>
-            <Tag color={tag.color} style={{ fontSize: 9, lineHeight: '16px', padding: '0 3px', margin: 0 }}>
-              {tag.label}
-            </Tag>
-          </div>
-        </div>
-      </div>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: 6,
+      maxHeight: FILE_GRID_MAX_HEIGHT,
+      overflowY: 'auto',
+    }}>
+      {children}
     </div>
   );
 }
@@ -394,17 +372,16 @@ export default function ProgressPanel() {
           )}
         </div>
         {artifacts.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <FileGrid>
             {artifacts.map((a) => (
-              <ArtifactCard
+              <FileCard
                 key={a.path}
                 filename={a.filename}
-                path={a.path}
-                onPreview={() => openArtifactPreview(a.path, a.filename)}
+                onClick={() => openArtifactPreview(a.path, a.filename)}
                 onDownload={() => downloadArtifact(a.path, a.filename)}
               />
             ))}
-          </div>
+          </FileGrid>
         ) : (
           <div style={{ padding: '6px 0' }}>
             <Text type="secondary" style={{ fontSize: 13 }}>暂无制品</Text>
@@ -426,49 +403,16 @@ export default function ProgressPanel() {
         {uploadedLoading ? (
           <div style={{ textAlign: 'center', padding: 16 }}><Spin size="small" /></div>
         ) : uploadedFiles.length > 0 ? (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: 6,
-          }}>
+          <FileGrid>
             {uploadedFiles.map((f) => (
-              <div
+              <FileCard
                 key={f.file_id}
-                role="button"
-                tabIndex={0}
+                filename={f.filename}
+                subtitle={formatSize(f.size_bytes)}
                 onClick={() => openUploadedFilePreview(f)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openUploadedFilePreview(f); } }}
-                style={{
-                  padding: '8px 10px',
-                  border: '1px solid #e8e8e8',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  background: '#fafafa',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#87e8de'; e.currentTarget.style.background = '#e6fffb'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e8e8e8'; e.currentTarget.style.background = '#fafafa'; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 16, flexShrink: 0 }}>{getFileIcon(f.filename)}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontWeight: 500, fontSize: 12,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }} title={f.filename}>
-                      {f.filename}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                      <span style={{ fontSize: 10, color: '#bfbfbf' }}>{formatSize(f.size_bytes)}</span>
-                      <Tag color={getFileTypeTag(f.filename).color} style={{ fontSize: 9, lineHeight: '16px', padding: '0 3px', margin: 0 }}>
-                        {getFileTypeTag(f.filename).label}
-                      </Tag>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              />
             ))}
-          </div>
+          </FileGrid>
         ) : (
           <div style={{ padding: '6px 0' }}>
             <Text type="secondary" style={{ fontSize: 13 }}>暂无上传文件</Text>
@@ -490,19 +434,16 @@ export default function ProgressPanel() {
         {kbLoading ? (
           <div style={{ textAlign: 'center', padding: 16 }}><Spin size="small" /></div>
         ) : kbFiles.length > 0 ? (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: 6,
-          }}>
+          <FileGrid>
             {kbFiles.map((f) => (
-              <KnowledgeCard
+              <FileCard
                 key={f.file_id}
-                file={f}
-                onPreview={() => openKnowledgePreview(f)}
+                filename={f.filename}
+                subtitle={formatSize(f.size_bytes)}
+                onClick={() => openKnowledgePreview(f)}
               />
             ))}
-          </div>
+          </FileGrid>
         ) : (
           <div style={{ padding: '6px 0' }}>
             <Text type="secondary" style={{ fontSize: 13 }}>暂无引用</Text>
