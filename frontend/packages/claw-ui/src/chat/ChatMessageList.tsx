@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, memo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { Typography, Spin } from 'antd';
 import {
   CheckCircleOutlined,
@@ -9,6 +9,7 @@ import {
   FileImageOutlined,
   EyeOutlined,
   LoadingOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -568,7 +569,11 @@ export default function ChatMessageList({
   messages,
   onInteractionRespond,
 }: ChatMessageListProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+
   const pipelineStatus = usePipelineStore((s) => s.status);
   const thinkingText = usePipelineStore((s) => s.thinkingText);
   const liveTimelineEntries = usePipelineStore((s) => s.timelineEntries) as TimelineEntry[];
@@ -576,102 +581,172 @@ export default function ChatMessageList({
   const resolveInteraction = usePipelineStore((s) => s.resolveInteraction);
   const fileArtifacts = usePipelineStore((s) => s.fileArtifacts) as FileArtifact[];
 
-  // 自动滚动到底部
+  // ── 智能自动滚动 ──
+  // 用户在底部附近 → 新内容来了自动滚底
+  // 用户往上翻了 → 停止自动滚动，显示「跳到最新」按钮
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollBtn(!nearBottom);
+  }, []);
+
+  // MutationObserver: DOM 变化时如果在底部就自动滚（rAF 节流）
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, pipelineStatus, thinkingText]);
+    const el = scrollRef.current;
+    if (!el) return;
+    let rafId: number | null = null;
+    const scrollIfNeeded = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (isNearBottomRef.current && el) {
+          el.scrollTop = el.scrollHeight;
+        }
+      });
+    };
+    const observer = new MutationObserver(scrollIfNeeded);
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    isNearBottomRef.current = true;
+    setShowScrollBtn(false);
+  }, []);
 
   // 找到最后一条用户消息的索引，用于定位时间线插入点
   const lastUserIdx = messages.reduce((acc, m, i) => (m.role === 'user' ? i : acc), -1);
 
   return (
-    <div
-      style={{
-        flex: 1,
-        overflow: 'auto',
-        padding: '16px 24px 8px',
-      }}
-    >
-      {messages.map((msg, idx) => {
-        const mode = computeTimelineMode(msg, idx, lastUserIdx, liveTimelineEntries);
-        const hasTimelineText = mode.type === 'live'
-          ? timelineHasText(liveTimelineEntries)
-          : mode.type === 'persisted'
-            ? timelineHasText(mode.entries)
-            : false;
+    <div style={{ flex: 1, position: 'relative', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          padding: '16px 24px 8px',
+        }}
+      >
+        {messages.map((msg, idx) => {
+          const mode = computeTimelineMode(msg, idx, lastUserIdx, liveTimelineEntries);
+          const hasTimelineText = mode.type === 'live'
+            ? timelineHasText(liveTimelineEntries)
+            : mode.type === 'persisted'
+              ? timelineHasText(mode.entries)
+              : false;
 
-        return (
-          <React.Fragment key={msg.id}>
-            {mode.type === 'persisted' && <PersistedTimeline entries={mode.entries} showText={true} />}
-            {mode.type === 'live' && <AgentTimeline />}
-            {!hasTimelineText && <MessageItem msg={msg} />}
-          </React.Fragment>
-        );
-      })}
+          return (
+            <React.Fragment key={msg.id}>
+              {mode.type === 'persisted' && <PersistedTimeline entries={mode.entries} showText={true} />}
+              {mode.type === 'live' && <AgentTimeline />}
+              {!hasTimelineText && <MessageItem msg={msg} />}
+            </React.Fragment>
+          );
+        })}
 
-      {/* 无 assistant 响应时 (pipeline 进行中)，实时时间线显示在消息末尾 */}
-      {lastUserIdx === messages.length - 1 && <AgentTimeline />}
+        {/* 无 assistant 响应时 (pipeline 进行中)，实时时间线显示在消息末尾 */}
+        {lastUserIdx === messages.length - 1 && <AgentTimeline />}
 
-      {/* Phase 6: Agent 生成的文件 */}
-      {fileArtifacts.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          {fileArtifacts.map((artifact, i) => (
-            <FileArtifactCard key={`${artifact.path}-${i}`} artifact={artifact} />
-          ))}
-        </div>
+        {/* Phase 6: Agent 生成的文件 */}
+        {fileArtifacts.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            {fileArtifacts.map((artifact, i) => (
+              <FileArtifactCard key={`${artifact.path}-${i}`} artifact={artifact} />
+            ))}
+          </div>
+        )}
+
+        {/* 运行指示器: pipeline 运行中但 timeline 还没有内容时显示 */}
+        {pipelineStatus === 'running' && (liveTimelineEntries?.length ?? 0) === 0 &&
+         lastUserIdx === messages.length - 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+            <Spin size="small" />
+            <Text type="secondary" style={{ fontSize: 12 }}>Agent 处理中...</Text>
+          </div>
+        )}
+
+        {/* Agent 交互请求 (内联上传 / 确认 / 输入) */}
+        {pendingInteraction && (
+          <div style={{ marginBottom: 16 }}>
+            {pendingInteraction.type === 'upload' && (
+              <InlineUploader
+                prompt={pendingInteraction.prompt}
+                accept={pendingInteraction.accept}
+                onSubmit={(files) => {
+                  resolveInteraction();
+                  onInteractionRespond?.(
+                    `[已上传 ${files.length} 个文件: ${files.map((f) => f.filename).join(', ')}]`,
+                    files,
+                  );
+                }}
+              />
+            )}
+            {pendingInteraction.type === 'confirmation' && (
+              <InteractiveMessage
+                type="confirmation"
+                message={pendingInteraction.message}
+                options={pendingInteraction.options}
+                onRespond={(value) => {
+                  resolveInteraction();
+                  onInteractionRespond?.(value);
+                }}
+              />
+            )}
+            {pendingInteraction.type === 'input' && (
+              <InteractiveMessage
+                type="input"
+                prompt={pendingInteraction.prompt}
+                fieldType={pendingInteraction.fieldType}
+                onRespond={(value) => {
+                  resolveInteraction();
+                  onInteractionRespond?.(value);
+                }}
+              />
+            )}
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      {/* 跳到最新内容 */}
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '5px 14px',
+            borderRadius: 16,
+            border: '1px solid #e8e8e8',
+            background: 'rgba(255,255,255,0.95)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            cursor: 'pointer',
+            fontSize: 12,
+            color: '#595959',
+          }}
+        >
+          <DownOutlined style={{ fontSize: 10 }} />
+          跳到最新
+        </button>
       )}
-
-      {/* 运行指示器: pipeline 运行中但 timeline 还没有内容时显示 */}
-      {pipelineStatus === 'running' && (liveTimelineEntries?.length ?? 0) === 0 &&
-       lastUserIdx === messages.length - 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-          <Spin size="small" />
-          <Text type="secondary" style={{ fontSize: 12 }}>Agent 处理中...</Text>
-        </div>
-      )}
-
-      {/* Agent 交互请求 (内联上传 / 确认 / 输入) */}
-      {pendingInteraction && (
-        <div style={{ marginBottom: 16 }}>
-          {pendingInteraction.type === 'upload' && (
-            <InlineUploader
-              prompt={pendingInteraction.prompt}
-              accept={pendingInteraction.accept}
-              onSubmit={(files) => {
-                resolveInteraction();
-                onInteractionRespond?.(
-                  `[已上传 ${files.length} 个文件: ${files.map((f) => f.filename).join(', ')}]`,
-                  files,
-                );
-              }}
-            />
-          )}
-          {pendingInteraction.type === 'confirmation' && (
-            <InteractiveMessage
-              type="confirmation"
-              message={pendingInteraction.message}
-              options={pendingInteraction.options}
-              onRespond={(value) => {
-                resolveInteraction();
-                onInteractionRespond?.(value);
-              }}
-            />
-          )}
-          {pendingInteraction.type === 'input' && (
-            <InteractiveMessage
-              type="input"
-              prompt={pendingInteraction.prompt}
-              fieldType={pendingInteraction.fieldType}
-              onRespond={(value) => {
-                resolveInteraction();
-                onInteractionRespond?.(value);
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      <div ref={bottomRef} />
     </div>
   );
 }
