@@ -15,6 +15,7 @@
  * - Pipeline 完成后自动回调 (fullscreen → sidepanel + onScenarioComplete)
  */
 
+import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAIConfig } from '../config.ts';
 import { useAIChatStore } from '../stores/ai-chat.ts';
@@ -24,8 +25,9 @@ import { listSessions as apiListSessions, getSessionHistory, injectMessage, fetc
 import { applyPipelineSnapshot } from '../services/pipeline-dispatcher.ts';
 import { saveSession, restoreSession, saveMessages, restoreMessages } from '../stores/pipeline-cache.ts';
 import { useSessionStatusStore } from '../stores/session-status.ts';
-import type { SessionInfo } from '../services/ai-api.ts';
+import type { SessionInfo, SessionDetail } from '../services/ai-api.ts';
 import type { ScenarioConfig } from '../types/scenario.ts';
+import type { ToolExecution } from '../types/pipeline.ts';
 
 /** 时间线条目 (持久化到 session，加载时恢复) */
 export interface ChatTimelineEntry {
@@ -59,6 +61,149 @@ export interface ChatMessage {
   timeline?: ChatTimelineEntry[];
   /** 用户消息附带的文件 */
   files?: ChatMessageFile[];
+}
+
+// ── loadSession 子函数 ──
+
+/** 尝试从 sessionStorage 缓存恢复。成功返回 true。 */
+function tryRestoreFromCache(
+  sessionId: string,
+  setMessages: (msgs: ChatMessage[]) => void,
+  refs: {
+    autoStarted: React.MutableRefObject<string | null>;
+    prevAgentMessage: React.MutableRefObject<string | null>;
+    streamingMsgId: React.MutableRefObject<string | null>;
+  },
+): boolean {
+  const cachedMessages = restoreMessages(sessionId);
+  if (!cachedMessages || !restoreSession(sessionId)) return false;
+  const restored = cachedMessages as ChatMessage[];
+  setMessages(restored);
+  refs.autoStarted.current = 'loaded';
+  refs.prevAgentMessage.current = null;
+  const streamingMsg = restored.find(m => m.id.startsWith('msg-stream-'));
+  refs.streamingMsgId.current = streamingMsg?.id || null;
+  return true;
+}
+
+/** 从 API 历史构建消息列表（含 timeline 合并、assistant 去重）。 */
+function buildMessagesFromHistory(
+  detail: SessionDetail,
+  sessionId: string,
+): ChatMessage[] {
+  // timeline 查找表
+  const timelineMap = new Map<number, ChatTimelineEntry[]>();
+  if (detail.timelines) {
+    for (const tl of detail.timelines) {
+      const entries = (tl.entries || []).map(e => ({
+        type: e.type as 'thinking' | 'tool' | 'text',
+        content: e.content,
+        iteration: e.iteration,
+        tool_name: e.tool_name,
+        success: e.success,
+        blocked: e.blocked,
+        latency_ms: e.latency_ms,
+        args_summary: e.args_summary,
+        result_summary: e.result_summary,
+        ts: e.ts,
+      }));
+      const existing = timelineMap.get(tl.turn_index) || [];
+      timelineMap.set(tl.turn_index, [...existing, ...entries]);
+    }
+  }
+
+  // 消息构建（跳过 ReAct 中间 assistant、合并 timeline）
+  const filtered = detail.messages.filter(m => m.role === 'user' || m.role === 'assistant');
+  let assistantIdx = 0;
+  const loaded: ChatMessage[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const m = filtered[i];
+    if (m.role === 'assistant') {
+      const isLastInRun = i + 1 >= filtered.length || filtered[i + 1].role !== 'assistant';
+      if (isLastInRun) {
+        const msg: ChatMessage = {
+          id: `hist-${sessionId}-${loaded.length}`,
+          role: 'assistant',
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+          timestamp: Date.now() - (filtered.length - i) * 1000,
+        };
+        const tl = timelineMap.get(assistantIdx);
+        if (tl && tl.length > 0) msg.timeline = tl;
+        loaded.push(msg);
+        assistantIdx++;
+      }
+    } else {
+      // 用户消息（含附件恢复）
+      const rawFiles = (m as Record<string, unknown>).files;
+      const files: ChatMessageFile[] | undefined = Array.isArray(rawFiles)
+        ? rawFiles.map((f: Record<string, unknown>) => ({
+            fileId: (f.fileId ?? f.file_id ?? '') as string,
+            filename: (f.filename ?? '') as string,
+            contentType: (f.contentType ?? f.content_type) as string | undefined,
+            sizeBytes: (f.sizeBytes ?? f.size_bytes) as number | undefined,
+          })).filter(f => f.fileId)
+        : undefined;
+      loaded.push({
+        id: `hist-${sessionId}-${loaded.length}`,
+        role: 'user',
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        timestamp: Date.now() - (filtered.length - i) * 1000,
+        ...(files && files.length > 0 ? { files } : {}),
+      });
+    }
+  }
+  return loaded;
+}
+
+/** 从 API detail 恢复 pipeline store 状态。 */
+function restoreStoreState(detail: SessionDetail, sessionId: string): void {
+  usePipelineStore.getState().reset();
+  usePipelineStore.getState().setSessionId(sessionId);
+
+  // Plan steps
+  if (detail.plan_steps && detail.plan_steps.length > 0) {
+    usePipelineStore.getState().initPlanSteps(
+      detail.plan_steps.map(s => ({ step: s.index, description: s.description || s.action || '' })),
+    );
+    for (const s of detail.plan_steps) {
+      if (s.status === 'completed') usePipelineStore.getState().completePlanStep(s.index);
+      else if (s.status === 'failed') usePipelineStore.getState().failPlanStep(s.index);
+    }
+  }
+
+  // Loaded skills
+  if (detail.loaded_skills && detail.loaded_skills.length > 0) {
+    usePipelineStore.getState().setLoadedSkills(detail.loaded_skills);
+  }
+
+  // Tool executions (直接 setState，不用 addToolExecution 避免 timelineEntries 污染)
+  if (detail.timelines) {
+    const histTools: ToolExecution[] = [];
+    for (const tl of detail.timelines) {
+      for (const e of (tl.entries || [])) {
+        if (e.type === 'tool' && e.tool_name) {
+          histTools.push({
+            id: `hist-tool-${tl.turn_index}-${e.ts}`,
+            toolName: e.tool_name,
+            success: e.success ?? true,
+            latencyMs: e.latency_ms || 0,
+            timestamp: e.ts ? e.ts * 1000 : Date.now(),
+            argsSummary: e.args_summary,
+            resultSummary: e.result_summary,
+            blocked: e.blocked,
+          });
+        }
+      }
+    }
+    if (histTools.length > 0) {
+      usePipelineStore.setState({ toolExecutions: histTools });
+    }
+  }
+
+  // Running session: 设 status
+  if (useSessionStatusStore.getState().runningIds.has(sessionId)) {
+    usePipelineStore.setState({ status: 'running' as const, startedAt: Date.now() });
+  }
 }
 
 /**
@@ -180,153 +325,25 @@ export function useAIChat() {
         }
 
         // 运行中的 session: 优先从缓存恢复 (API 没有未完成的消息)
-        const isRunning = useSessionStatusStore.getState().runningIds.has(sessionId);
-        if (isRunning) {
-          const cachedMessages = restoreMessages(sessionId);
-          if (cachedMessages && restoreSession(sessionId)) {
-            const restored = cachedMessages as ChatMessage[];
-            setMessages(restored);
-            autoStartedRef.current = 'loaded';
-            prevAgentMessageRef.current = null;
-            // 恢复流式气泡引用，避免 useEffect 重复创建
-            const streamingMsg = restored.find(m => m.id.startsWith('msg-stream-'));
-            streamingMsgIdRef.current = streamingMsg?.id || null;
+        if (useSessionStatusStore.getState().runningIds.has(sessionId)) {
+          if (tryRestoreFromCache(sessionId, setMessages, {
+            autoStarted: autoStartedRef,
+            prevAgentMessage: prevAgentMessageRef,
+            streamingMsgId: streamingMsgIdRef,
+          })) {
             clearSessionAction();
             return;
           }
         }
 
+        // API 加载
         try {
           const detail = await getSessionHistory(defaultUserId, sessionId);
-          // 构建 timeline 查找表: turn_index → entries
-          const timelineMap = new Map<number, ChatTimelineEntry[]>();
-          if (detail.timelines) {
-            for (const tl of detail.timelines) {
-              const entries = (tl.entries || []).map((e) => ({
-                type: e.type as 'thinking' | 'tool' | 'text',
-                content: e.content,
-                iteration: e.iteration,
-                tool_name: e.tool_name,
-                success: e.success,
-                blocked: e.blocked,
-                latency_ms: e.latency_ms,
-                args_summary: e.args_summary,
-                result_summary: e.result_summary,
-                ts: e.ts,
-              }));
-              // 合并同一 turn 的 entries
-              const existing = timelineMap.get(tl.turn_index) || [];
-              timelineMap.set(tl.turn_index, [...existing, ...entries]);
-            }
-          }
-
-          // 构建消息列表:
-          // - 跳过 ReAct 循环中的中间 assistant 消息 (仅保留每轮最后一条)
-          // - 附加 timeline 到对应的 assistant 消息
-          const filtered = detail.messages.filter(
-            (m) => m.role === 'user' || m.role === 'assistant',
-          );
-          let assistantIdx = 0;
-          const loaded: ChatMessage[] = [];
-          for (let i = 0; i < filtered.length; i++) {
-            const m = filtered[i];
-            if (m.role === 'assistant') {
-              const isLastInRun =
-                i + 1 >= filtered.length || filtered[i + 1].role !== 'assistant';
-              if (isLastInRun) {
-                // 仅保留连续 assistant 消息中的最后一条 (最终回复)
-                const msg: ChatMessage = {
-                  id: `hist-${sessionId}-${loaded.length}`,
-                  role: 'assistant',
-                  content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-                  timestamp: Date.now() - (filtered.length - i) * 1000,
-                };
-                const tl = timelineMap.get(assistantIdx);
-                if (tl && tl.length > 0) {
-                  msg.timeline = tl;
-                }
-                loaded.push(msg);
-                // assistantIdx 仅在最终 assistant 消息时递增，与 timeline turn_index 对齐
-                assistantIdx++;
-              }
-            } else {
-              // 恢复用户消息附带的文件
-              const rawFiles = (m as Record<string, unknown>).files;
-              const files: ChatMessageFile[] | undefined = Array.isArray(rawFiles)
-                ? rawFiles.map((f: Record<string, unknown>) => ({
-                    fileId: (f.fileId ?? f.file_id ?? '') as string,
-                    filename: (f.filename ?? '') as string,
-                    contentType: (f.contentType ?? f.content_type) as string | undefined,
-                    sizeBytes: (f.sizeBytes ?? f.size_bytes) as number | undefined,
-                  })).filter((f) => f.fileId)
-                : undefined;
-              loaded.push({
-                id: `hist-${sessionId}-${loaded.length}`,
-                role: 'user',
-                content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-                timestamp: Date.now() - (filtered.length - i) * 1000,
-                ...(files && files.length > 0 ? { files } : {}),
-              });
-            }
-          }
           if (cancelled) return;
-          setMessages(loaded);
-          usePipelineStore.getState().reset();
-          usePipelineStore.getState().setSessionId(sessionId);
-          // 恢复 plan steps (右栏常驻显示)
-          if (detail.plan_steps && detail.plan_steps.length > 0) {
-            usePipelineStore.getState().initPlanSteps(
-              detail.plan_steps.map((s) => ({
-                step: s.index,
-                description: s.description || s.action || '',
-              })),
-            );
-            // 恢复每个步骤的完成状态
-            for (const s of detail.plan_steps) {
-              if (s.status === 'completed') {
-                usePipelineStore.getState().completePlanStep(s.index);
-              } else if (s.status === 'failed') {
-                usePipelineStore.getState().failPlanStep(s.index);
-              }
-            }
-          }
-          // 恢复 loadedSkills (SkillsBadge 显示)
-          if (detail.loaded_skills && detail.loaded_skills.length > 0) {
-            usePipelineStore.getState().setLoadedSkills(detail.loaded_skills);
-          }
-          // 恢复 toolExecutions — 直接 setState，不用 addToolExecution
-          // (addToolExecution 会同时写 timelineEntries，导致 AgentTimeline 把历史工具显示为 live 抽屉)
-          if (detail.timelines) {
-            const histTools: Array<{
-              id: string; toolName: string; success: boolean; latencyMs: number;
-              timestamp: number; argsSummary?: Record<string, string>;
-              resultSummary?: string; blocked?: boolean;
-            }> = [];
-            for (const tl of detail.timelines) {
-              for (const e of (tl.entries || [])) {
-                if (e.type === 'tool' && e.tool_name) {
-                  histTools.push({
-                    id: `hist-tool-${tl.turn_index}-${e.ts}`,
-                    toolName: e.tool_name,
-                    success: e.success ?? true,
-                    latencyMs: e.latency_ms || 0,
-                    timestamp: e.ts ? e.ts * 1000 : Date.now(),
-                    argsSummary: e.args_summary,
-                    resultSummary: e.result_summary,
-                    blocked: e.blocked,
-                  });
-                }
-              }
-            }
-            if (histTools.length > 0) {
-              usePipelineStore.setState({ toolExecutions: histTools });
-            }
-          }
-          // 注意：不手动设 status='running'！
-          // 让 WS 事件自然驱动 store 更新，和首次进入效果完全一致。
-          // status 保持 'idle'，InlinePipelineProgress 不渲染，没有多余抽屉。
-          // 流式文本通过快照恢复（不依赖 status）。
-          // 快照恢复：只补全 F5/切走期间丢失的流式文本
+          setMessages(buildMessagesFromHistory(detail, sessionId));
+          restoreStoreState(detail, sessionId);
+
+          // 快照补全 (running session 的流式文本)
           fetchPipelineSnapshot(sessionId)
             .then((snapshot) => {
               if (usePipelineStore.getState().sessionId === sessionId) {
@@ -337,6 +354,7 @@ export function useAIChat() {
               }
             })
             .catch(() => {});
+
           autoStartedRef.current = 'loaded';
           prevAgentMessageRef.current = null;
           streamingMsgIdRef.current = null;

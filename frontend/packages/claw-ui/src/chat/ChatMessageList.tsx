@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState, memo } from 'react';
-import { Typography, Spin, Button, Modal } from 'antd';
+import { Typography, Spin } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
-  ThunderboltOutlined,
   BulbOutlined,
   ToolOutlined,
   StopOutlined,
@@ -15,12 +14,6 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { usePipelineStore, getAIConfig } from '@claw/core';
 import type { PendingInteraction, ToolExecution, TimelineEntry } from '@claw/core';
-import {
-  MiniTypeInference,
-  MiniFieldUpdates,
-  MiniAuditSummary,
-} from './ChatResultCards';
-import DocumentPresenter from '../results/DocumentPresenter';
 import InlineUploader from './InlineUploader';
 import InteractiveMessage from './InteractiveMessage';
 import CollapsibleBlock from './CollapsibleBlock';
@@ -36,191 +29,7 @@ const REMARK_PLUGINS = [remarkGfm];
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
-  showPipelineProgress?: boolean;
   onInteractionRespond?: (value: string, files?: { fileId: string; filename: string }[]) => void;
-}
-
-// ── PlanCard 组件 — 在聊天流中渲染 Agent 提出的方案 ──
-
-function PlanCard() {
-  const plan = usePipelineStore((s) => s.plan);
-  const agentPlanProposed = usePipelineStore((s) => s.agentPlanProposed);
-  const status = usePipelineStore((s) => s.status);
-
-  // 仅当 Agent 主动 propose 时才显示 PlanCard
-  if (!agentPlanProposed || !plan) return null;
-
-  const steps = Array.isArray(plan.steps) ? plan.steps : [];
-  const isExecuting = status === 'running';
-
-  // 是否有完整的 Markdown 文档
-  const hasDetail = !!plan.detail && plan.detail.trim().length > 0;
-
-  return (
-    <div className="plan-document">
-      {/* ── 文档头部 ── */}
-      <div className="plan-document-header">
-        <div className="plan-document-title-row">
-          <ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 16 }} />
-          <span className="plan-document-title">执行方案</span>
-          {isExecuting && (
-            <span className="plan-document-badge plan-document-badge--confirmed">执行中</span>
-          )}
-          {!isExecuting && (
-            <span className="plan-document-badge plan-document-badge--auto">自主执行</span>
-          )}
-        </div>
-        {plan.summary && (
-          <div className="plan-document-summary">{plan.summary}</div>
-        )}
-      </div>
-
-      {/* ── Markdown 文档正文 ── */}
-      {hasDetail ? (
-        <div className="plan-document-body markdown-body">
-          <Markdown remarkPlugins={REMARK_PLUGINS}>{plan.detail}</Markdown>
-        </div>
-      ) : steps.length > 0 ? (
-        /* 回退: 无 detail 时仍显示简单步骤列表 */
-        <div className="plan-document-body">
-          <div className="plan-document-steps-fallback">
-            {steps.map((step, i) => {
-              const desc = typeof step === 'string'
-                ? step
-                : (step as { description?: string }).description || JSON.stringify(step);
-              return (
-                <div key={i} className="plan-document-step-item">
-                  <span className="plan-document-step-num">{i + 1}</span>
-                  <Text style={{ fontSize: 13 }}>{desc}</Text>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-
-      {/* ── 操作区 ── */}
-      <div className="plan-document-footer">
-        {isExecuting && (
-          <div className="plan-document-actions">
-            <Text type="success" style={{ fontSize: 12 }}>
-              <CheckCircleOutlined style={{ marginRight: 4 }} />
-              正在执行...
-            </Text>
-          </div>
-        )}
-        {plan.estimatedActions > 0 && (
-          <div className="plan-document-meta">
-            预计 {plan.estimatedActions} 次工具调用
-            {steps.length > 0 && ` · ${steps.length} 个步骤`}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── SkillsBadge 组件 — 显示加载的技能 ──
-
-function SkillsBadge() {
-  const loadedSkills = usePipelineStore((s) => s.loadedSkills);
-  if (!loadedSkills || loadedSkills.length === 0) return null;
-
-  return (
-    <CollapsibleBlock
-      icon={<BulbOutlined style={{ color: '#722ed1', fontSize: 12 }} />}
-      summary={`使用了 ${loadedSkills.length} 个技能`}
-    >
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-        {loadedSkills.map((name) => (
-          <span key={name} style={{
-            display: 'inline-block', padding: '2px 8px',
-            background: '#f0f5ff', border: '1px solid #adc6ff',
-            borderRadius: 4, fontSize: 11, color: '#2f54eb',
-          }}>
-            {name}
-          </span>
-        ))}
-      </div>
-    </CollapsibleBlock>
-  );
-}
-
-// ── Pipeline 进度组件 — 折叠摘要 ──
-
-function InlinePipelineProgress() {
-  const status = usePipelineStore((s) => s.status);
-  const inferredType = usePipelineStore((s) => s.inferredType);
-  const fieldValues = usePipelineStore((s) => s.fieldValues);
-  const auditSummary = usePipelineStore((s) => s.auditSummary);
-  const document = usePipelineStore((s) => s.document);
-  const toolExecutions = usePipelineStore((s) => s.toolExecutions);
-  const durationMs = usePipelineStore((s) => s.durationMs);
-
-  if (status === 'idle') return null;
-
-  // Build one-line summary
-  const parts: string[] = [];
-  if (toolExecutions.length > 0) parts.push(`执行了 ${toolExecutions.length} 个工具`);
-  if (fieldValues.length > 0) parts.push(`填充了 ${fieldValues.length} 个字段`);
-  if (inferredType) parts.push(`类型: ${inferredType.docType}`);
-  if (auditSummary) parts.push(`审计: ${auditSummary.conclusion}`);
-  if (document) parts.push(`文档: ${document.title}`);
-  const summaryText = parts.length > 0 ? parts.join(', ') : '处理中...';
-
-  return (
-    <div>
-      {/* PlanCard — Agent 提出的方案 */}
-      <PlanCard />
-
-      {/* SkillsBadge — 加载的技能 */}
-      <SkillsBadge />
-
-      {/* Pipeline progress as collapsible */}
-      <CollapsibleBlock
-        icon={<ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 12 }} />}
-        summary={status === 'running' ? `Agent 工作中 — ${summaryText}` : summaryText}
-      >
-        {/* 实时处理状态 */}
-        {status === 'running' && (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <Spin size="small" />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Agent 自主处理中...
-              </Text>
-            </div>
-          </div>
-        )}
-
-        {/* 结果卡片 */}
-        {inferredType && <MiniTypeInference data={inferredType} />}
-        {fieldValues.length > 0 && <MiniFieldUpdates fields={fieldValues} />}
-        {auditSummary && <MiniAuditSummary data={auditSummary} />}
-        {document && <DocumentPresenter document={document} />}
-      </CollapsibleBlock>
-
-      {/* 完成提示 */}
-      {status === 'completed' && durationMs > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 4 }} />
-            处理完成，用时 {(durationMs / 1000).toFixed(1)}s
-          </Text>
-        </div>
-      )}
-
-      {/* 失败提示 */}
-      {status === 'failed' && (
-        <div style={{ marginTop: 8 }}>
-          <Text type="danger" style={{ fontSize: 11 }}>
-            <CloseCircleOutlined style={{ marginRight: 4 }} />
-            处理失败
-          </Text>
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── 工具调用折叠行 — 逐条嵌入文档流 ──
@@ -728,16 +537,39 @@ const MessageItem = memo(function MessageItem({ msg }: { msg: ChatMessage }) {
   );
 });
 
+// ── Timeline 渲染模式判断 ──
+
+type TimelineMode =
+  | { type: 'live' }
+  | { type: 'persisted'; entries: ChatTimelineEntry[] }
+  | { type: 'none' };
+
+function computeTimelineMode(
+  msg: ChatMessage,
+  idx: number,
+  lastUserIdx: number,
+  liveEntries: TimelineEntry[],
+): TimelineMode {
+  if (msg.role !== 'assistant') return { type: 'none' };
+  // 实时 timeline：仅最后一条用户消息后的 assistant 消息
+  if (idx === lastUserIdx + 1 && liveEntries.length > 0) {
+    return { type: 'live' };
+  }
+  // 持久化 timeline：历史消息自带的 timeline
+  if (msg.timeline && msg.timeline.length > 0) {
+    return { type: 'persisted', entries: msg.timeline };
+  }
+  return { type: 'none' };
+}
+
 // ── 主组件 ──
 
 export default function ChatMessageList({
   messages,
-  showPipelineProgress = true,
   onInteractionRespond,
 }: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const pipelineStatus = usePipelineStore((s) => s.status);
-  const pipelineScenario = usePipelineStore((s) => s.scenario);
   const thinkingText = usePipelineStore((s) => s.thinkingText);
   const liveTimelineEntries = usePipelineStore((s) => s.timelineEntries) as TimelineEntry[];
   const pendingInteraction = usePipelineStore((s) => s.pendingInteraction) as PendingInteraction | null;
@@ -761,26 +593,18 @@ export default function ChatMessageList({
       }}
     >
       {messages.map((msg, idx) => {
-        // 每条 assistant 消息前渲染其持久化的时间线 (历史数据)
-        const hasPersistedTimeline = msg.role === 'assistant' && msg.timeline && msg.timeline.length > 0;
-        // 实时时间线: 当 store 中有 entries 时优先使用 (保持交错布局，避免完成后跳动)
-        const showLiveTimeline = idx === lastUserIdx + 1 && msg.role === 'assistant' && (liveTimelineEntries?.length ?? 0) > 0;
-        // 持久化时间线: 仅当无实时数据时才使用 (加载历史 session 时)
-        const showPersistedTimeline = hasPersistedTimeline && !showLiveTimeline;
-        // 实时 timeline 有 text 条目时抑制 body (避免和 timeline 正文重复)
-        // 不论 running/completed 都保持同样布局，防止完成瞬间元素跳动
-        const suppressBody = msg.role === 'assistant' &&
-          showLiveTimeline && timelineHasText(liveTimelineEntries);
-        // 持久化时间线: 始终显示 text entries 保持交错布局 (与实时一致)
-        // 当 timeline 有 text 时由 PersistedTimeline 负责渲染正文，抑制 MessageItem body 避免重复
-        const persistedTimelineHasText = showPersistedTimeline && timelineHasText(msg.timeline);
-        const persistedShowText = true;
-        const suppressPersistedBody = persistedTimelineHasText;
+        const mode = computeTimelineMode(msg, idx, lastUserIdx, liveTimelineEntries);
+        const hasTimelineText = mode.type === 'live'
+          ? timelineHasText(liveTimelineEntries)
+          : mode.type === 'persisted'
+            ? timelineHasText(mode.entries)
+            : false;
+
         return (
           <React.Fragment key={msg.id}>
-            {showPersistedTimeline && <PersistedTimeline entries={msg.timeline!} showText={persistedShowText} />}
-            {showLiveTimeline && <AgentTimeline />}
-            {!suppressBody && !suppressPersistedBody && <MessageItem msg={msg} />}
+            {mode.type === 'persisted' && <PersistedTimeline entries={mode.entries} showText={true} />}
+            {mode.type === 'live' && <AgentTimeline />}
+            {!hasTimelineText && <MessageItem msg={msg} />}
           </React.Fragment>
         );
       })}
@@ -797,10 +621,12 @@ export default function ChatMessageList({
         </div>
       )}
 
-      {/* Pipeline 实时进度 — 折叠摘要 */}
-      {showPipelineProgress && pipelineStatus !== 'idle' && pipelineScenario !== 'general_chat' && (
-        <div style={{ marginBottom: 16 }}>
-          <InlinePipelineProgress />
+      {/* 运行指示器: pipeline 运行中但 timeline 还没有内容时显示 */}
+      {pipelineStatus === 'running' && (liveTimelineEntries?.length ?? 0) === 0 &&
+       lastUserIdx === messages.length - 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+          <Spin size="small" />
+          <Text type="secondary" style={{ fontSize: 12 }}>Agent 处理中...</Text>
         </div>
       )}
 

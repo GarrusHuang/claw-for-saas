@@ -14,10 +14,21 @@ vi.mock('@claw/core', () => ({
     };
     return selector(state);
   }),
-  usePipelineStore: vi.fn((selector: (state: Record<string, unknown>) => unknown) => {
+  usePipelineStore: Object.assign(
+    vi.fn((selector: (state: Record<string, unknown>) => unknown) => {
+      const state = {
+        sessionId: null,
+        status: 'idle',
+      };
+      return selector(state);
+    }),
+    { getState: () => ({ sessionId: null, status: 'idle' }) },
+  ),
+  useSessionStatusStore: vi.fn((selector: (state: Record<string, unknown>) => unknown) => {
     const state = {
-      sessionId: null,
-      status: 'idle',
+      unreadIds: new Set(),
+      runningIds: new Set(),
+      markRead: vi.fn(),
     };
     return selector(state);
   }),
