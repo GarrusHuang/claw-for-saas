@@ -724,27 +724,29 @@ export default function ChatMessageList({
       {showScrollBtn && (
         <button
           onClick={scrollToBottom}
+          aria-label="跳到最新"
           style={{
             position: 'absolute',
-            bottom: 8,
+            bottom: 12,
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 10,
+            width: 36,
+            height: 36,
+            borderRadius: '50%',
+            border: 'none',
+            background: 'rgba(22,119,255,0.9)',
+            boxShadow: '0 2px 10px rgba(22,119,255,0.35)',
+            cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: 4,
-            padding: '5px 14px',
-            borderRadius: 16,
-            border: '1px solid #e8e8e8',
-            background: 'rgba(255,255,255,0.95)',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-            cursor: 'pointer',
-            fontSize: 12,
-            color: '#595959',
+            justifyContent: 'center',
+            transition: 'transform 0.15s, box-shadow 0.15s',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateX(-50%) scale(1.1)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(22,119,255,0.45)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateX(-50%)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(22,119,255,0.35)'; }}
         >
-          <DownOutlined style={{ fontSize: 10 }} />
-          跳到最新
+          <DownOutlined style={{ fontSize: 16, color: '#fff' }} />
         </button>
       )}
     </div>
