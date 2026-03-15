@@ -276,7 +276,7 @@ export default function ProgressPanel() {
       } else if (config.authToken) {
         headers['Authorization'] = `Bearer ${config.authToken}`;
       }
-      const encodedPath = encodeURIComponent(filePath);
+      const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
       const res = await fetch(
         `${config.aiBaseUrl}/api/workspace/${sessionId}/files/${encodedPath}/download`,
         { headers }
@@ -305,7 +305,7 @@ export default function ProgressPanel() {
     setPreviewFileId(file.file_id);
     setPreviewFilename(file.filename);
     setPreviewApiBase('/api/knowledge');
-    setPreviewHideDownload(false);
+    setPreviewHideDownload(true);
     setPreviewOpen(true);
   }, []);
 

@@ -1,12 +1,14 @@
 /**
  * 统一文件预览组件 — 按文件类型路由到子渲染器。
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Spin, Table, Button, Tabs } from 'antd';
 import { DownloadOutlined, CodeOutlined, EyeOutlined } from '@ant-design/icons';
+import { renderAsync } from 'docx-preview';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getAIConfig } from '@claw/core';
+import HighlightedCode from '../shared/HighlightedCode';
 
 interface PreviewData {
   type: string;
@@ -17,6 +19,7 @@ interface PreviewData {
   render_url?: string;
   language?: string;
   sheets?: Array<{ name: string; headers: string[]; rows: string[][] }>;
+  html?: string;
   content_type?: string;
   size_bytes?: number;
 }
@@ -24,6 +27,7 @@ interface PreviewData {
 interface UniversalFilePreviewProps {
   previewData: PreviewData;
   fileId?: string;
+  hideDownload?: boolean;
 }
 
 /** Get auth headers for fetch requests */
@@ -57,7 +61,7 @@ function ImagePreview({ url }: { url: string }) {
   return <img src={blobUrl} alt="" style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block', margin: '0 auto' }} />;
 }
 
-function PdfPreview({ url }: { url: string }) {
+function PdfPreview({ url, hideDownload }: { url: string; hideDownload?: boolean }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -72,19 +76,58 @@ function PdfPreview({ url }: { url: string }) {
     return () => { cancelled = true; if (blobUrl) URL.revokeObjectURL(blobUrl); };
   }, [url]); // eslint-disable-line
   if (!blobUrl) return <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>;
-  return <iframe src={blobUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title="PDF Preview" />;
+  const src = hideDownload ? `${blobUrl}#toolbar=0&navpanes=0` : blobUrl;
+  return <iframe src={src} style={{ width: '100%', height: '70vh', border: 'none' }} title="PDF Preview" />;
+}
+
+function DocxPreview({ url }: { url: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const render = useCallback(async () => {
+    if (!containerRef.current) return;
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${getAIConfig().aiBaseUrl}${url}`, { headers });
+      if (!res.ok) { setError(`HTTP ${res.status}`); setLoading(false); return; }
+      const blob = await res.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      await renderAsync(arrayBuffer, containerRef.current, undefined, {
+        className: 'docx-preview-body',
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: true,
+        ignoreFonts: false,
+        breakPages: true,
+        ignoreLastRenderedPageBreak: true,
+        experimental: false,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'DOCX 渲染失败');
+    }
+    setLoading(false);
+  }, [url]);
+
+  useEffect(() => { render(); }, [render]);
+
+  if (error) return <div style={{ textAlign: 'center', padding: 40, color: '#ff4d4f' }}>{error}</div>;
+  return (
+    <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+      {loading && <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}
+      <div ref={containerRef} />
+    </div>
+  );
 }
 
 function CodePreview({ content, language }: { content: string; language?: string }) {
   return (
-    <pre style={{
-      maxHeight: '70vh', overflow: 'auto', padding: 16,
-      background: '#f6f8fa', borderRadius: 6, fontSize: 13,
-      whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6,
-      fontFamily: 'monospace',
-    }}>
-      <code className={language ? `language-${language}` : ''}>{content}</code>
-    </pre>
+    <HighlightedCode
+      code={content}
+      language={language}
+      showLineNumbers
+      maxHeight="70vh"
+    />
   );
 }
 
@@ -114,6 +157,46 @@ function ExcelPreview({ sheets }: { sheets: Array<{ name: string; headers: strin
     ),
   }));
   return sheets.length === 1 ? <>{items[0].children}</> : <Tabs items={items} />;
+}
+
+function SvgPreview({ source, url }: { source: string; url: string }) {
+  const [mode, setMode] = useState<'preview' | 'source'>('preview');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (mode === 'preview') {
+      let cancelled = false;
+      (async () => {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${getAIConfig().aiBaseUrl}${url}`, { headers });
+        if (res.ok && !cancelled) {
+          const blob = await res.blob();
+          setBlobUrl(URL.createObjectURL(blob));
+        }
+      })();
+      return () => { cancelled = true; if (blobUrl) URL.revokeObjectURL(blobUrl); };
+    }
+  }, [mode, url]); // eslint-disable-line
+
+  return (
+    <div>
+      <div style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
+        <Button size="small" type={mode === 'preview' ? 'primary' : 'default'} icon={<EyeOutlined />} onClick={() => setMode('preview')}>效果预览</Button>
+        <Button size="small" type={mode === 'source' ? 'primary' : 'default'} icon={<CodeOutlined />} onClick={() => setMode('source')}>查看源码</Button>
+      </div>
+      {mode === 'preview' ? (
+        blobUrl ? (
+          <div style={{ textAlign: 'center', padding: 20, maxHeight: '60vh', overflow: 'auto', background: '#fafafa', borderRadius: 4, border: '1px solid #e8e8e8' }}>
+            <img src={blobUrl} alt="SVG" style={{ maxWidth: '100%', maxHeight: '55vh', objectFit: 'contain' }} />
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        )
+      ) : (
+        <CodePreview content={source} language="xml" />
+      )}
+    </div>
+  );
 }
 
 function HtmlPreview({ source, renderUrl }: { source: string; renderUrl?: string }) {
@@ -154,15 +237,16 @@ function HtmlPreview({ source, renderUrl }: { source: string; renderUrl?: string
   );
 }
 
-export default function UniversalFilePreview({ previewData, fileId }: UniversalFilePreviewProps) {
+export default function UniversalFilePreview({ previewData, fileId, hideDownload }: UniversalFilePreviewProps) {
   const { type } = previewData;
 
   if (type === 'image') return <ImagePreview url={previewData.url!} />;
-  if (type === 'pdf') return <PdfPreview url={previewData.url!} />;
-  if (type === 'docx') return <div className="markdown-body"><Markdown remarkPlugins={[remarkGfm]}>{previewData.content || ''}</Markdown></div>;
+  if (type === 'svg') return <SvgPreview source={previewData.source || ''} url={previewData.url!} />;
+  if (type === 'pdf') return <PdfPreview url={previewData.url!} hideDownload={hideDownload} />;
+  if (type === 'docx') return <DocxPreview url={previewData.url!} />;
   if (type === 'excel') return <ExcelPreview sheets={previewData.sheets || []} />;
   if (type === 'code') return <CodePreview content={previewData.content || ''} language={previewData.language} />;
-  if (type === 'markdown') return <div className="markdown-body" style={{ maxHeight: '70vh', overflow: 'auto' }}><Markdown remarkPlugins={[remarkGfm]}>{previewData.content || ''}</Markdown></div>;
+  if (type === 'markdown') return <div className="prose" style={{ maxWidth: 'none', maxHeight: '70vh', overflow: 'auto' }}><Markdown remarkPlugins={[remarkGfm]}>{previewData.content || ''}</Markdown></div>;
   if (type === 'html') return <HtmlPreview source={previewData.source || ''} renderUrl={previewData.render_url} />;
   if (type === 'text') return <CodePreview content={previewData.content || ''} />;
 

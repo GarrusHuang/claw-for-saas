@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@plugin '@tailwindcss/typography';
 
 /* ── Base ── */
 
@@ -1033,3 +1034,79 @@ body {
   display: flex;
   align-items: center;
 }
+
+/* ══════════════════════════════════════════════
+   Syntax-highlighted code blocks
+   ══════════════════════════════════════════════ */
+
+.highlighted-code {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e8e8e8;
+}
+
+.highlighted-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: #f0f2f5;
+  border-bottom: 1px solid #e8e8e8;
+  font-size: 12px;
+}
+
+.highlighted-code-body pre {
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* Prevent msg-ai default pre/code styles from conflicting */
+.msg-ai .highlighted-code pre {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.msg-ai .highlighted-code {
+  margin: 10px 0;
+}
+
+/* Tailwind prose — 强制覆盖 Ant Design Modal 的样式重置 */
+.prose h1 { font-size: 1.875em !important; font-weight: 700 !important; margin-top: 0 !important; margin-bottom: 0.8em !important; line-height: 1.3 !important; }
+.prose h2 { font-size: 1.5em !important; font-weight: 600 !important; margin-top: 1.6em !important; margin-bottom: 0.6em !important; line-height: 1.35 !important; }
+.prose h3 { font-size: 1.25em !important; font-weight: 600 !important; margin-top: 1.4em !important; margin-bottom: 0.5em !important; line-height: 1.4 !important; }
+.prose h4 { font-size: 1.1em !important; font-weight: 600 !important; margin-top: 1.2em !important; margin-bottom: 0.4em !important; }
+.prose p { margin-top: 0.75em !important; margin-bottom: 0.75em !important; }
+.prose ul, .prose ol { padding-left: 1.5em !important; margin-top: 0.75em !important; margin-bottom: 0.75em !important; }
+.prose li { margin-top: 0.25em !important; margin-bottom: 0.25em !important; }
+.prose blockquote { border-left: 3px solid #d1d5db !important; padding-left: 1em !important; color: #6b7280 !important; font-style: italic !important; margin: 1em 0 !important; }
+.prose table { border-collapse: collapse !important; width: 100% !important; }
+.prose th, .prose td { border: 1px solid #e5e7eb !important; padding: 0.5em 0.75em !important; }
+.prose th { background: #f9fafb !important; font-weight: 600 !important; }
+.prose a { color: #1677ff !important; text-decoration: none !important; }
+.prose a:hover { text-decoration: underline !important; }
+.prose hr { border: none !important; border-top: 1px solid #e5e7eb !important; margin: 1.5em 0 !important; }
+.prose img { max-width: 100% !important; }
+.prose code { font-size: 0.9em !important; }
+
+/* 聊天消息内 prose 缩小标题 */
+.msg-ai.prose { max-width: none; font-size: 14px; line-height: 1.75; color: #1a1a1a; }
+.msg-ai.prose h1 { font-size: 22px !important; }
+.msg-ai.prose h2 { font-size: 18px !important; }
+.msg-ai.prose h3 { font-size: 16px !important; }
+
+/* ══════════════════════════════════════════════
+   DOCX preview (mammoth HTML)
+   ══════════════════════════════════════════════ */
+
+.docx-preview h1 { font-size: 22px; font-weight: 700; margin: 20px 0 12px; }
+.docx-preview h2 { font-size: 18px; font-weight: 600; margin: 18px 0 10px; }
+.docx-preview h3 { font-size: 16px; font-weight: 600; margin: 14px 0 8px; }
+.docx-preview p { margin: 8px 0; }
+.docx-preview ul, .docx-preview ol { padding-left: 24px; margin: 8px 0; }
+.docx-preview li { margin: 4px 0; }
+.docx-preview table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.docx-preview th, .docx-preview td { border: 1px solid #e8e8e8; padding: 8px 12px; font-size: 13px; }
+.docx-preview th { background: #fafafa; font-weight: 600; }
+.docx-preview strong { font-weight: 600; }
+.docx-preview em { font-style: italic; }

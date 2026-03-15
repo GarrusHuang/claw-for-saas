@@ -128,6 +128,112 @@ async def download_knowledge_file(file_id: str, _user: AuthUser = Depends(get_cu
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
     )
 
+@router.get("/{file_id}/preview")
+async def preview_knowledge_file(file_id: str, _user: AuthUser = Depends(get_current_user)):
+    """返回知识文件的结构化预览数据。"""
+    service = _get_service()
+    result = service.get_file(file_id)
+    if not result:
+        return JSONResponse(status_code=404, content={"error": "File not found"})
+    meta, content = result
+
+    from pathlib import Path
+    ext = Path(meta.filename).suffix.lower()
+    base_url = f"/api/knowledge/{file_id}"
+
+    # Image
+    # SVG — 效果预览 + 源码双模式
+    if ext == '.svg':
+        try:
+            source = content.decode('utf-8')
+        except UnicodeDecodeError:
+            source = content.decode('utf-8', errors='replace')
+        return {"type": "svg", "source": source, "url": f"{base_url}/download", "filename": meta.filename}
+
+    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'):
+        return {"type": "image", "url": f"{base_url}/download", "filename": meta.filename}
+
+    # PDF
+    if ext == '.pdf':
+        return {"type": "pdf", "url": f"{base_url}/download", "filename": meta.filename}
+
+    # DOCX — 前端用 docx-preview 渲染原始文件
+    if ext in ('.docx', '.doc'):
+        return {"type": "docx", "url": f"{base_url}/download", "filename": meta.filename}
+
+    # Excel
+    if ext in ('.xlsx', '.xls'):
+        try:
+            from api.file_routes import _extract_excel
+            sheets = _extract_excel(content)
+            return {"type": "excel", "sheets": sheets, "filename": meta.filename}
+        except Exception as e:
+            return {"type": "text", "content": f"[Excel 解析失败: {e}]", "filename": meta.filename}
+
+    # HTML
+    if ext == '.html':
+        try:
+            source = content.decode('utf-8')
+        except UnicodeDecodeError:
+            source = content.decode('utf-8', errors='replace')
+        return {"type": "html", "source": source, "render_url": f"{base_url}/render", "filename": meta.filename}
+
+    # Code files
+    code_exts = {
+        '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+        '.jsx': 'jsx', '.tsx': 'tsx', '.css': 'css', '.scss': 'scss',
+        '.java': 'java', '.go': 'go', '.rs': 'rust', '.c': 'c',
+        '.cpp': 'cpp', '.h': 'c', '.rb': 'ruby', '.php': 'php',
+        '.sh': 'bash', '.sql': 'sql', '.yaml': 'yaml', '.yml': 'yaml',
+        '.xml': 'xml', '.svg': 'xml',
+    }
+    if ext in code_exts:
+        try:
+            text = content.decode('utf-8')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='replace')
+        return {"type": "code", "content": text, "language": code_exts[ext], "filename": meta.filename}
+
+    # Markdown
+    if ext == '.md':
+        try:
+            text = content.decode('utf-8')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='replace')
+        return {"type": "markdown", "content": text, "filename": meta.filename}
+
+    # Plain text
+    if ext in ('.txt', '.csv', '.json', '.log', '.ini', '.conf'):
+        try:
+            text = content.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                text = content.decode('gbk')
+            except UnicodeDecodeError:
+                text = content.decode('utf-8', errors='replace')
+        lang = 'json' if ext == '.json' else 'csv' if ext == '.csv' else ''
+        return {"type": "code" if lang else "text", "content": text, "language": lang, "filename": meta.filename}
+
+    # Fallback
+    return {
+        "type": "unsupported",
+        "filename": meta.filename,
+        "content_type": meta.content_type,
+        "size_bytes": meta.size_bytes,
+    }
+
+
+@router.get("/{file_id}/render")
+async def render_knowledge_file(file_id: str, _user: AuthUser = Depends(get_current_user)):
+    """原样返回 HTML 知识文件 (用于 iframe 加载)。"""
+    service = _get_service()
+    result = service.get_file(file_id)
+    if not result:
+        return JSONResponse(status_code=404, content={"error": "File not found"})
+    _, content = result
+    return Response(content=content, media_type="text/html")
+
+
 @router.get("/{file_id}/text")
 async def get_knowledge_file_text(file_id: str, _user: AuthUser = Depends(get_current_user)):
     """提取知识文件文本。"""

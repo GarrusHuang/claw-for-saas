@@ -105,7 +105,7 @@ export default function DocumentPresenter({
 
         {/* Preview */}
         <div
-          className="document-presenter-preview markdown-body"
+          className="document-presenter-preview prose"
           onClick={() => setPreviewOpen(true)}
         >
           <Markdown remarkPlugins={[remarkGfm]}>{previewContent}</Markdown>

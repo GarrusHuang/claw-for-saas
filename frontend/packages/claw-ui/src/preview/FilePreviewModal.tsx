@@ -92,7 +92,7 @@ export default function FilePreviewModal({ open, fileId, filename, onClose, apiB
       {loading && <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>}
       {error && <div style={{ textAlign: 'center', padding: 40, color: '#ff4d4f' }}>{error}</div>}
       {previewData && !loading && (
-        <UniversalFilePreview previewData={previewData as any} fileId={fileId} />
+        <UniversalFilePreview previewData={previewData as any} fileId={fileId} hideDownload={hideDownload} />
       )}
     </Modal>
   );

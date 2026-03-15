@@ -178,18 +178,25 @@ async def preview_file(file_id: str, user: AuthUser = Depends(get_current_user))
     ext = Path(metadata.filename).suffix.lower()
     base_url = f"/api/files/{file_id}"
 
+    # SVG — 效果预览 + 源码双模式
+    if ext == '.svg':
+        try:
+            source = content.decode('utf-8')
+        except UnicodeDecodeError:
+            source = content.decode('utf-8', errors='replace')
+        return {"type": "svg", "source": source, "url": f"{base_url}/download", "filename": metadata.filename}
+
     # Image
-    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'):
+    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'):
         return {"type": "image", "url": f"{base_url}/download", "filename": metadata.filename}
 
     # PDF
     if ext == '.pdf':
         return {"type": "pdf", "url": f"{base_url}/download", "filename": metadata.filename}
 
-    # DOCX
+    # DOCX — 前端用 docx-preview 渲染原始文件
     if ext in ('.docx', '.doc'):
-        text = service.extract_text(user.tenant_id, user.user_id, file_id)
-        return {"type": "docx", "content": text, "filename": metadata.filename}
+        return {"type": "docx", "url": f"{base_url}/download", "filename": metadata.filename}
 
     # Excel
     if ext in ('.xlsx', '.xls'):
@@ -390,24 +397,25 @@ async def preview_workspace_file(
     filename = file_path.name
     base_url = f"/api/workspace/{session_id}/files/{quote(path, safe='/')}"
 
+    # SVG — 效果预览 + 源码双模式
+    if ext == '.svg':
+        try:
+            source = content.decode('utf-8')
+        except UnicodeDecodeError:
+            source = content.decode('utf-8', errors='replace')
+        return {"type": "svg", "source": source, "url": f"{base_url}/download", "filename": filename}
+
     # Image
-    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'):
+    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'):
         return {"type": "image", "url": f"{base_url}/download", "filename": filename}
 
     # PDF
     if ext == '.pdf':
         return {"type": "pdf", "url": f"{base_url}/download", "filename": filename}
 
-    # DOCX
+    # DOCX — 前端用 docx-preview 渲染原始文件
     if ext in ('.docx', '.doc'):
-        try:
-            import io
-            from docx import Document as DocxDocument
-            doc = DocxDocument(io.BytesIO(content))
-            text = "\n".join(p.text for p in doc.paragraphs)
-        except Exception:
-            text = "(DOCX 解析失败)"
-        return {"type": "docx", "content": text, "filename": filename}
+        return {"type": "docx", "url": f"{base_url}/download", "filename": filename}
 
     # Excel
     if ext in ('.xlsx', '.xls'):
@@ -423,7 +431,7 @@ async def preview_workspace_file(
             source = content.decode('utf-8')
         except UnicodeDecodeError:
             source = content.decode('utf-8', errors='replace')
-        return {"type": "html", "source": source, "filename": filename}
+        return {"type": "html", "source": source, "render_url": f"{base_url}/render", "filename": filename}
 
     # Code files
     code_exts = {
@@ -467,3 +475,20 @@ async def preview_workspace_file(
         "filename": filename,
         "size_bytes": len(content),
     }
+
+
+@workspace_router.get("/{session_id}/files/{path:path}/render")
+async def render_workspace_file(
+    session_id: str,
+    path: str,
+    user: AuthUser = Depends(get_current_user),
+):
+    """原样返回 workspace HTML 文件 (用于 iframe 加载)。"""
+    workspace = _get_workspace_dir(user.tenant_id, user.user_id, session_id)
+    file_path = _safe_resolve(workspace, path)
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+
+    content = file_path.read_bytes()
+    return Response(content=content, media_type="text/html")

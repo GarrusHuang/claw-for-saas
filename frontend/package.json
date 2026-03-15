@@ -17,5 +17,8 @@
     "@testing-library/user-event": "^14.6.1",
     "jsdom": "^28.1.0",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@tailwindcss/typography": "^0.5.19"
   }
 }
