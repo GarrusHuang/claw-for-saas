@@ -417,7 +417,7 @@ describe('Pipeline Store', () => {
     expect(s.planSteps[2].status).toBe('completed');
   });
 
-  it('softReset resets plan steps to pending', () => {
+  it('softReset preserves plan steps status (no reset to pending)', () => {
     const store = usePipelineStore.getState();
     store.initPlanSteps([
       { step: 1, description: 'A' },
@@ -429,9 +429,10 @@ describe('Pipeline Store', () => {
 
     store.softReset();
     const s = usePipelineStore.getState();
-    expect(s.planSteps[0].status).toBe('pending');
-    expect(s.planSteps[0].startedAt).toBeNull();
-    expect(s.planSteps[1].status).toBe('pending');
+    // softReset 保持 planSteps 原状，只有 initPlanSteps 才重置
+    expect(s.planSteps[0].status).toBe('completed');
+    expect(s.planSteps[0].startedAt).not.toBeNull();
+    expect(s.planSteps[1].status).toBe('running');
   });
 
 });
