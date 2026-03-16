@@ -162,41 +162,48 @@ class TestUpdateStepEvents:
         assert len(events) == 1
 
 
-class TestCompleteAll:
-    def test_complete_all_pending(self):
-        pt = PlanTracker([
-            {"action": "s1"},
-            {"action": "s2"},
-        ], None)
-        pt.complete_all()
-        assert all(s["status"] == "completed" for s in pt.steps)
+class TestSequenceCheck:
+    """步骤必须按顺序推进 — 拒绝跳步。"""
 
-    def test_complete_all_with_running(self):
-        pt = PlanTracker([
-            {"action": "s1"},
-            {"action": "s2"},
-        ], None)
+    def test_skip_step_rejected(self):
+        """跳过步骤 0 直接启动步骤 1 → 报错。"""
+        pt = PlanTracker([{"action": "s1"}, {"action": "s2"}], None)
+        result = pt.update_step(1, "running")
+        assert result["ok"] is False
+        assert "前置步骤" in result["error"]
+        assert pt.steps[1]["status"] == "pending"
+
+    def test_sequential_ok(self):
+        """按顺序推进 → 正常。"""
+        pt = PlanTracker([{"action": "s1"}, {"action": "s2"}], None)
+        assert pt.update_step(0, "running")["ok"]
+        assert pt.update_step(0, "completed")["ok"]
+        assert pt.update_step(1, "running")["ok"]
+        assert pt.steps[1]["status"] == "running"
+
+    def test_failed_step_allows_next(self):
+        """前置步骤 failed 后可以继续下一步。"""
+        pt = PlanTracker([{"action": "s1"}, {"action": "s2"}], None)
         pt.update_step(0, "running")
-        pt.complete_all()
-        assert pt.steps[0]["status"] == "completed"
+        pt.update_step(0, "failed")
+        result = pt.update_step(1, "running")
+        assert result["ok"]
+        assert pt.steps[1]["status"] == "running"
+
+    def test_running_predecessor_blocks(self):
+        """前置步骤还在 running 时不能启动下一步。"""
+        pt = PlanTracker([{"action": "s1"}, {"action": "s2"}], None)
+        pt.update_step(0, "running")
+        result = pt.update_step(1, "running")
+        assert result["ok"] is False
+        assert pt.steps[1]["status"] == "pending"
+
+    def test_completed_status_no_sequence_check(self):
+        """标记 completed 不做前置检查 (允许 AI 补标完成)。"""
+        pt = PlanTracker([{"action": "s1"}, {"action": "s2"}], None)
+        result = pt.update_step(1, "completed")
+        assert result["ok"]
         assert pt.steps[1]["status"] == "completed"
-
-    def test_complete_all_skips_already_completed(self):
-        events = []
-
-        class FakeBus:
-            def emit(self, event_type, data):
-                events.append((event_type, data))
-
-        pt = PlanTracker([{"action": "s1"}, {"action": "s2"}], FakeBus())
-        pt.update_step(0, "running")
-        pt.update_step(0, "completed")
-        events.clear()
-
-        pt.complete_all()  # 只 complete s2
-        completed_events = [e for e in events if e[0] == "step_completed"]
-        assert len(completed_events) == 1
-        assert completed_events[0][1]["step_index"] == 1
 
 
 class TestFailCurrent:

@@ -182,7 +182,6 @@ export function dispatchPipelineEvent(
       break;
 
     case 'pipeline_complete':
-      store.completePlanSteps();
       store.completePipeline(data.status as string, (data.duration_ms as number) || 0);
       store.addConversationTurn('assistant', '处理完成');
       store.addEvent({ type: 'pipeline_complete', data, timestamp: Date.now() });

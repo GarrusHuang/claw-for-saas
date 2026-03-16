@@ -565,8 +565,7 @@ class AgentGateway:
         if tracker:
             if result.error:
                 tracker.fail_current()
-            else:
-                tracker.complete_all()
+            # 正常完成时保持步骤原样，不兜底补全
             # 持久化 plan steps 到会话文件
             try:
                 self.session_manager.save_plan_steps(

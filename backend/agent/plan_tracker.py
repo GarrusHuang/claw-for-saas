@@ -5,7 +5,7 @@ PlanTracker — AI 主动驱动 plan step 推进。
 1. propose_plan 执行时创建 PlanTracker(steps, event_bus)
 2. AI 在执行每个步骤前后主动调用 update_plan_step 工具
 3. update_plan_step → PlanTracker.update_step(index, status) → 发射 SSE 事件
-4. pipeline 结束时调用 complete_all() 标记剩余步骤完成 (兜底)
+4. 步骤必须按顺序推进（不可跳步），错误时 fail_current() 标记当前步骤
 """
 
 from __future__ import annotations
@@ -65,6 +65,20 @@ class PlanTracker:
         now = time.time()
 
         if status == "running":
+            # 前置步骤完成检查 — 拒绝跳步
+            incomplete = [
+                i for i in range(step_index)
+                if self._steps[i]["status"] not in ("completed", "failed")
+            ]
+            if incomplete:
+                statuses = {i: self._steps[i]["status"] for i in incomplete}
+                return {
+                    "ok": False,
+                    "error": (
+                        f"步骤 {step_index} 无法开始：前置步骤 {incomplete} 尚未完成 "
+                        f"(状态: {statuses})，请先按顺序完成这些步骤"
+                    ),
+                }
             if step["status"] == "running":
                 return {"ok": True}  # 已经在运行，幂等
             step["status"] = "running"
@@ -100,22 +114,6 @@ class PlanTracker:
 
         else:
             return {"ok": False, "error": f"无效状态: {status}，支持 running/completed/failed"}
-
-    def complete_all(self) -> None:
-        """Pipeline 完成时标记所有剩余步骤为 completed (兜底)。"""
-        now = time.time()
-        for i, step in enumerate(self._steps):
-            if step["status"] in ("pending", "running"):
-                duration_ms = 0
-                if step["status"] == "running" and step["started_at"]:
-                    duration_ms = round((now - step["started_at"]) * 1000)
-                step["status"] = "completed"
-                step["completed_at"] = now
-                self._emit("step_completed", {
-                    "step_index": i,
-                    "action": step["action"],
-                    "duration_ms": duration_ms,
-                })
 
     def fail_current(self) -> None:
         """Pipeline 失败时标记当前运行中的步骤为 failed。"""

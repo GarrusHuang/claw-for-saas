@@ -153,7 +153,6 @@ interface PipelineState {
   startPlanStep: (index: number) => void;
   completePlanStep: (index: number) => void;
   failPlanStep: (index: number) => void;
-  completePlanSteps: () => void;
   // Phase 24: Agent 交互请求
   setPendingInteraction: (interaction: PendingInteraction | null) => void;
   resolveInteraction: () => void;
@@ -461,18 +460,6 @@ export const usePipelineStore = create<PipelineState>((set) => ({
         i === index ? { ...s, status: 'failed' as const, completedAt: Date.now() } : s,
       ),
     })),
-
-  completePlanSteps: () =>
-    set((state) => {
-      const now = Date.now();
-      return {
-        planSteps: state.planSteps.map((s) =>
-          s.status === 'running' || s.status === 'pending'
-            ? { ...s, status: 'completed' as const, completedAt: now }
-            : s,
-        ),
-      };
-    }),
 
   // Phase 24: Agent 交互请求
   setPendingInteraction: (interaction) => set({ pendingInteraction: interaction }),
