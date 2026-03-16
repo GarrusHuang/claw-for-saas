@@ -103,6 +103,14 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
                 event_bus=bus,
             )
             effective_session_id = result.get("session_id", effective_session_id)
+        except asyncio.CancelledError:
+            # 即时取消 — 发 cancelled 事件，不改步骤状态
+            if not bus.is_closed:
+                bus.emit("pipeline_complete", {
+                    "status": "cancelled",
+                    "duration_ms": 0,
+                    "summary": {"session_id": effective_session_id},
+                })
         except SessionBusyError:
             bus.emit("error", {
                 "code": "SESSION_BUSY",
@@ -151,7 +159,8 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
     if effective_session_id:
         _active_sessions[effective_session_id] = bus
 
-    asyncio.create_task(run_chat())
+    task = asyncio.create_task(run_chat())
+    bus._chat_task = task  # type: ignore[attr-defined]
 
     return {
         "session_id": effective_session_id,
@@ -169,14 +178,17 @@ async def list_running_sessions(user: AuthUser = Depends(get_current_user)):
 
 @router.post("/chat/{session_id}/cancel")
 async def cancel_chat(session_id: str, user: AuthUser = Depends(get_current_user)):
-    """Cancel a running pipeline by closing its EventBus."""
+    """Cancel a running pipeline by cancelling its asyncio Task."""
     bus = _active_sessions.get(session_id)
     if not bus:
         return JSONResponse(
             status_code=404,
             content={"error": "NO_ACTIVE_SESSION", "message": "该会话当前没有运行中的 pipeline"},
         )
-    bus.close()
+    # 即时取消: cancel Task 让 CancelledError 在 await 点抛出
+    chat_task = getattr(bus, '_chat_task', None)
+    if chat_task and not chat_task.done():
+        chat_task.cancel()
     return {"status": "cancelled", "session_id": session_id}
 
 

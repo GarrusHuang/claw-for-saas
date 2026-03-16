@@ -399,7 +399,7 @@ describe('Pipeline Store', () => {
     expect(s.planSteps[0].completedAt).not.toBeNull();
   });
 
-  it('completePlanSteps marks all remaining as completed', () => {
+  it('pipeline_complete does not force-complete pending plan steps', () => {
     const store = usePipelineStore.getState();
     store.initPlanSteps([
       { step: 1, description: 'A' },
@@ -409,12 +409,13 @@ describe('Pipeline Store', () => {
 
     store.startPlanStep(0);
     store.completePlanStep(0);
-    store.completePlanSteps();
+    // Simulate pipeline_complete — no completePlanSteps called
+    store.completePipeline('success', 1000);
 
     const s = usePipelineStore.getState();
     expect(s.planSteps[0].status).toBe('completed');
-    expect(s.planSteps[1].status).toBe('completed');
-    expect(s.planSteps[2].status).toBe('completed');
+    expect(s.planSteps[1].status).toBe('pending');
+    expect(s.planSteps[2].status).toBe('pending');
   });
 
   it('softReset preserves plan steps status (no reset to pending)', () => {
