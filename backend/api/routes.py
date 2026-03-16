@@ -104,8 +104,11 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
             )
             effective_session_id = result.get("session_id", effective_session_id)
         except asyncio.CancelledError:
-            # 即时取消 — 发 cancelled 事件，不改步骤状态
-            if not bus.is_closed:
+            # gateway 内部已处理 CancelledError 并正常返回，这里是边界安全网
+            has_complete = any(
+                e.event_type == "pipeline_complete" for e in bus.history
+            )
+            if not has_complete and not bus.is_closed:
                 bus.emit("pipeline_complete", {
                     "status": "cancelled",
                     "duration_ms": 0,

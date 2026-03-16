@@ -89,6 +89,20 @@ class AgentGateway:
     # 会话摘要最大保留条数
     _MAX_CONVERSATION_ENTRIES = 20
 
+    @staticmethod
+    def _extract_partial_answer(event_bus: EventBus | None) -> str:
+        """从 EventBus history 提取已流式输出的文本，拼成取消消息。"""
+        if not event_bus:
+            return "[任务被终止]"
+        parts: list[str] = []
+        for evt in event_bus.history:
+            if evt.event_type == "text_delta":
+                parts.append(evt.data.get("content", ""))
+        streaming_text = "".join(parts).strip()
+        if streaming_text:
+            return f"[任务被终止]\n\n{streaming_text}"
+        return "[任务被终止]"
+
     def _acquire_session_lock(
         self, tenant_id: str, user_id: str, session_id: str,
     ) -> int:
@@ -320,6 +334,14 @@ class AgentGateway:
         # ── 3. 加载会话历史 ──
         history_messages = self.session_manager.load_messages(tenant_id, user_id, session_id)
 
+        # ── 3b. 恢复上一轮的 PlanTracker (跨请求续接) ──
+        saved_plan = self.session_manager.load_plan_steps(tenant_id, user_id, session_id)
+        if saved_plan:
+            from agent.plan_tracker import PlanTracker
+            restored_tracker = PlanTracker.restore(saved_plan, event_bus=event_bus)
+            current_plan_tracker.set(restored_tracker)
+            logger.info(f"Restored PlanTracker with {len(saved_plan)} steps for session {session_id}")
+
         # ── 4. 加载 Skills (A7: 多源) ──
         skill_knowledge = ""
 
@@ -483,13 +505,21 @@ class AgentGateway:
         if history_messages:
             initial_messages = history_messages
 
+        result: RuntimeResult | None = None
+        cancelled = False
+        runtime_error: Exception | None = None
+
         try:
-            result: RuntimeResult = await runtime.run(
+            result = await runtime.run(
                 system_prompt=system_prompt,
                 user_message=user_message,
                 initial_messages=initial_messages,
             )
+        except asyncio.CancelledError:
+            cancelled = True
+            logger.info(f"Pipeline cancelled for session {session_id}")
         except Exception as e:
+            runtime_error = e
             logger.error(f"AgenticRuntime failed: {e}")
             if event_bus:
                 event_bus.emit("error", {
@@ -497,75 +527,81 @@ class AgentGateway:
                     "message": str(e),
                     "recoverable": False,
                 })
-            return {
-                "session_id": session_id,
-                "answer": f"执行失败: {e}",
-                "error": str(e),
-            }
 
-        # ── 9. 持久化 assistant 回复 (用户消息已在步骤 7b 提前保存) ──
+        # ── 以下所有 save 无论哪种终止都执行 ──
+
+        # ── 9. 持久化 assistant 回复 — 总是保存 ──
+        if cancelled:
+            answer = self._extract_partial_answer(event_bus)
+        elif runtime_error:
+            answer = f"执行失败: {runtime_error}"
+        else:
+            answer = result.final_answer
+
         self.session_manager.append_message(
             tenant_id, user_id, session_id,
-            {"role": "assistant", "content": result.final_answer, "ts": time.time()},
+            {"role": "assistant", "content": answer, "ts": time.time()},
         )
 
-        # ── 9b. 自动保存记忆 (OpenClaw 模式: 不依赖 LLM 调用) ──
-        self._auto_save_memory(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            message=message,
-            answer=result.final_answer or "",
-        )
-
-        # 上下文压缩检查
-        history = self.session_manager.load_messages(tenant_id, user_id, session_id)
-        if len(history) > 20:
-            try:
-                await self.session_manager.compact(tenant_id, user_id, session_id, self.llm_client)
-            except Exception as e:
-                logger.warning(f"Session compaction failed: {e}")
-
-        # ── 10. 发射 Agent 文字回复 ──
-        if result.final_answer and event_bus:
-            event_bus.emit("agent_message", {
-                "content": result.final_answer,
-            })
-
-        # 发射 thinking 汇总 (如果有且前端开启了展示思考)
-        if result.thinking and event_bus:
-            event_bus.emit("thinking_complete", {
-                "content": result.thinking,
-            })
-
-        # ── 11. 触发 agent_stop hook ──
-        if self.hooks:
-            from agent.hooks import HookEvent
-            stop_event = HookEvent(
-                event_type="agent_completed",
-                session_id=session_id,
+        # ── 9b/10/10c/11: memory/compact/agent_message/thinking/hooks — 仅正常完成 ──
+        if result and not cancelled and not runtime_error:
+            # 9b. 自动保存记忆 (OpenClaw 模式: 不依赖 LLM 调用)
+            self._auto_save_memory(
+                tenant_id=tenant_id,
                 user_id=user_id,
-                runtime_steps=[
-                    {"tool": s.tool_name, "args": s.tool_args, "result": s.tool_result}
-                    for s in result.steps
-                    if s.tool_name
-                ],
-                context={
-                    "final_answer": result.final_answer,
-                    "iterations": result.iterations,
-                    "business_type": business_type,
-                },
+                message=message,
+                answer=result.final_answer or "",
             )
-            try:
-                await self.hooks.fire(stop_event)
-            except Exception as e:
-                logger.warning(f"agent_stop hook error: {e}")
 
-        # ── 12. PlanTracker 收尾 + 持久化 ──
+            # 上下文压缩检查
+            history = self.session_manager.load_messages(tenant_id, user_id, session_id)
+            if len(history) > 20:
+                try:
+                    await self.session_manager.compact(tenant_id, user_id, session_id, self.llm_client)
+                except Exception as e:
+                    logger.warning(f"Session compaction failed: {e}")
+
+            # 10. 发射 Agent 文字回复
+            if result.final_answer and event_bus:
+                event_bus.emit("agent_message", {
+                    "content": result.final_answer,
+                })
+
+            # 发射 thinking 汇总 (如果有且前端开启了展示思考)
+            if result.thinking and event_bus:
+                event_bus.emit("thinking_complete", {
+                    "content": result.thinking,
+                })
+
+            # 11. 触发 agent_stop hook
+            if self.hooks:
+                from agent.hooks import HookEvent
+                stop_event = HookEvent(
+                    event_type="agent_completed",
+                    session_id=session_id,
+                    user_id=user_id,
+                    runtime_steps=[
+                        {"tool": s.tool_name, "args": s.tool_args, "result": s.tool_result}
+                        for s in result.steps
+                        if s.tool_name
+                    ],
+                    context={
+                        "final_answer": result.final_answer,
+                        "iterations": result.iterations,
+                        "business_type": business_type,
+                    },
+                )
+                try:
+                    await self.hooks.fire(stop_event)
+                except Exception as e:
+                    logger.warning(f"agent_stop hook error: {e}")
+
+        # ── 12. PlanTracker 收尾 + 持久化 — 总是保存 ──
         tracker = current_plan_tracker.get(None)
         if tracker:
-            if result.error:
+            if runtime_error:
                 tracker.fail_current()
-            # 正常完成时保持步骤原样，不兜底补全
+            # cancelled/success: 不改步骤状态 (auto-complete 在执行期间已处理)
             # 持久化 plan steps 到会话文件
             try:
                 self.session_manager.save_plan_steps(
@@ -574,7 +610,7 @@ class AgentGateway:
             except Exception as e:
                 logger.debug(f"Failed to persist plan steps: {e}", exc_info=True)
 
-        # ── 12b. 持久化 timeline (thinking + text + tool_executed) ──
+        # ── 12b. 持久化 timeline — 总是保存 (从 bus.history 提取，不依赖 result) ──
         if event_bus:
             try:
                 # 从 EventBus history 提取 thinking + text_delta + tool_executed 事件
@@ -647,51 +683,61 @@ class AgentGateway:
             except Exception as e:
                 logger.debug(f"Failed to persist timeline: {e}", exc_info=True)
 
-        # ── 13. 发射完成事件 ──
+        # ── 13. 发射完成事件 — 总是发射 ──
         duration_ms = (time.time() - start_time) * 1000
         if event_bus:
-            status = "failed" if result.error else "success"
+            if cancelled:
+                status = "cancelled"
+            elif runtime_error or (result and result.error):
+                status = "failed"
+            else:
+                status = "success"
+
+            summary: dict[str, Any] = {"session_id": session_id}
+            if result:
+                summary.update({
+                    "iterations": result.iterations,
+                    "tool_calls": result.tool_call_count,
+                    "max_iterations_reached": result.max_iterations_reached,
+                })
 
             event_bus.emit("pipeline_complete", {
                 "status": status,
                 "duration_ms": round(duration_ms, 1),
-                "summary": {
-                    "iterations": result.iterations,
-                    "tool_calls": result.tool_call_count,
-                    "max_iterations_reached": result.max_iterations_reached,
-                    "session_id": session_id,
-                },
+                "summary": summary,
             })
 
-        # ── 14. 记录用量 (A10) ──
-        try:
-            from dependencies import get_usage_service
-            usage_svc = get_usage_service()
-            tool_names_used = list({
-                s.tool_name for s in result.steps
-                if s.step_type == StepType.TOOL_CALL and s.tool_name
-            })
-            usage_svc.record_pipeline(
-                tenant_id=tenant_id, user_id=user_id,
-                session_id=session_id, business_type=business_type,
-                prompt_tokens=result.token_usage.prompt_tokens,
-                completion_tokens=result.token_usage.completion_tokens,
-                total_tokens=result.token_usage.total_tokens,
-                tool_call_count=result.tool_call_count,
-                iterations=result.iterations,
-                duration_ms=round(duration_ms, 1),
-                status="failed" if result.error else "success",
-                model=self.llm_client.config.model,
-                tool_names=tool_names_used,
-            )
-        except Exception as e:
-            logger.warning(f"Usage recording failed: {e}")
+        # ── 14. 记录用量 (A10) — 仅正常完成 ──
+        if result and not cancelled and not runtime_error:
+            try:
+                from dependencies import get_usage_service
+                usage_svc = get_usage_service()
+                tool_names_used = list({
+                    s.tool_name for s in result.steps
+                    if s.step_type == StepType.TOOL_CALL and s.tool_name
+                })
+                usage_svc.record_pipeline(
+                    tenant_id=tenant_id, user_id=user_id,
+                    session_id=session_id, business_type=business_type,
+                    prompt_tokens=result.token_usage.prompt_tokens,
+                    completion_tokens=result.token_usage.completion_tokens,
+                    total_tokens=result.token_usage.total_tokens,
+                    tool_call_count=result.tool_call_count,
+                    iterations=result.iterations,
+                    duration_ms=round(duration_ms, 1),
+                    status="failed" if result.error else "success",
+                    model=self.llm_client.config.model,
+                    tool_names=tool_names_used,
+                )
+            except Exception as e:
+                logger.warning(f"Usage recording failed: {e}")
 
         return {
             "session_id": session_id,
-            "answer": result.final_answer,
-            "iterations": result.iterations,
-            "tool_calls": result.tool_call_count,
+            "answer": answer,
+            "iterations": result.iterations if result else 0,
+            "tool_calls": result.tool_call_count if result else 0,
             "duration_ms": round(duration_ms, 1),
-            "max_iterations_reached": result.max_iterations_reached,
+            "max_iterations_reached": result.max_iterations_reached if result else False,
+            **({"error": str(runtime_error)} if runtime_error else {}),
         }

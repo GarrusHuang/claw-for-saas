@@ -166,7 +166,8 @@ function restoreStoreState(detail: SessionDetail, sessionId: string): void {
       detail.plan_steps.map(s => ({ step: s.index, description: s.description || s.action || '' })),
     );
     for (const s of detail.plan_steps) {
-      if (s.status === 'completed') usePipelineStore.getState().completePlanStep(s.index);
+      if (s.status === 'running') usePipelineStore.getState().startPlanStep(s.index);
+      else if (s.status === 'completed') usePipelineStore.getState().completePlanStep(s.index);
       else if (s.status === 'failed') usePipelineStore.getState().failPlanStep(s.index);
     }
   }

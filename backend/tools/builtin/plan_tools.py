@@ -31,11 +31,11 @@ plan_capability_registry = ToolRegistry()
         "steps: 执行步骤摘要列表:\n"
         "  [{'action': '推断单据类型', 'description': '分析材料确定单据类型'}, ...]\n"
         "estimated_actions: 预计的工具调用次数。\n\n"
-        "【重要】调用 propose_plan 后，必须在执行每个步骤前后调用 update_plan_step 更新进度:\n"
-        "  1. 开始步骤前: update_plan_step(step_index=0, status='running')\n"
-        "  2. 完成步骤后: update_plan_step(step_index=0, status='completed')\n"
-        "  3. 然后开始下一步: update_plan_step(step_index=1, status='running')\n"
-        "  以此类推，确保用户能看到实时进度。"
+        "【重要】每个步骤必须严格遵循 running → 工作 → completed 的流程:\n"
+        "  update_plan_step(step_index=N, status='running')    # 标记开始\n"
+        "  ... 调用工具完成实际工作 ...\n"
+        "  update_plan_step(step_index=N, status='completed')  # 标记完成\n"
+        "  绝对不能跳过 completed。做完一步的工作后，必须立刻调 completed，然后再做任何其他事情。"
     ),
     read_only=False,
 )
@@ -67,29 +67,26 @@ def propose_plan(
     tracker = PlanTracker(steps, event_bus=bus)
     current_plan_tracker.set(tracker)
 
+    step_count = len(steps)
     return {
         "status": "ok",
         "message": (
-            "计划已记录。请立即按计划开始执行。"
-            "执行每个步骤前后必须调用 update_plan_step 更新进度状态。"
+            f"计划已记录 (共 {step_count} 步)。请立即按计划开始执行。"
+            "每步必须: running → 工作 → completed，绝对不能跳过 completed。"
         ),
     }
 
 
 @plan_capability_registry.tool(
     description=(
-        "更新执行计划中某个步骤的状态。在执行每个步骤前后必须调用此工具，"
-        "让用户能看到实时进度。\n"
+        "更新执行计划中某个步骤的状态。\n"
         "step_index: 步骤索引 (从 0 开始)。\n"
-        "status: 目标状态:\n"
-        "  - 'running': 开始执行此步骤 (步骤变为蓝色加载状态)\n"
-        "  - 'completed': 此步骤已完成 (步骤变为绿色完成状态)\n"
-        "  - 'failed': 此步骤执行失败 (步骤变为红色失败状态)\n\n"
-        "典型用法:\n"
-        "  update_plan_step(step_index=0, status='running')   # 开始第1步\n"
-        "  ... 调用其他工具完成实际工作 ...\n"
-        "  update_plan_step(step_index=0, status='completed') # 第1步完成\n"
-        "  update_plan_step(step_index=1, status='running')   # 开始第2步"
+        "status: 'running' (开始) | 'completed' (完成) | 'failed' (失败)\n\n"
+        "【核心规则】每个步骤必须成对调用:\n"
+        "  update_plan_step(step_index=N, status='running')    # 开始\n"
+        "  ... 执行工作 ...\n"
+        "  update_plan_step(step_index=N, status='completed')  # 完成\n"
+        "做完一步的工作后，立刻调 completed，不能跳过。"
     ),
     read_only=False,
 )
@@ -102,4 +99,13 @@ def update_plan_step(
     if tracker is None:
         return {"ok": False, "error": "尚未创建计划，请先调用 propose_plan"}
 
-    return tracker.update_step(step_index, status)
+    result = tracker.update_step(step_index, status)
+
+    # 每次 running 都提醒：做完工作后立即 complete
+    if result.get("ok") and status == "running":
+        result["reminder"] = (
+            f"步骤 {step_index} 已开始。完成工作后必须立即调用 "
+            f"update_plan_step(step_index={step_index}, status='completed')。"
+        )
+
+    return result
