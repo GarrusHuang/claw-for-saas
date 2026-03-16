@@ -133,13 +133,14 @@ class TestUsageTracking:
 
 @pytest.mark.llm
 class TestLLMIntegration:
-    """Integration tests with real LLM at 127.0.0.1:7225."""
+    """Integration tests with real LLM (URL from .env)."""
 
     @pytest.fixture
     def client(self):
+        from tests.conftest import LLM_BASE_URL, LLM_MODEL
         cfg = LLMClientConfig(
-            base_url="http://127.0.0.1:7225/v1",
-            model="instruct_model",
+            base_url=LLM_BASE_URL,
+            model=LLM_MODEL,
             timeout_s=30.0,
             max_retries=1,
         )
@@ -167,9 +168,10 @@ class TestLLMIntegration:
 
     @pytest.mark.asyncio
     async def test_context_manager(self):
+        from tests.conftest import LLM_BASE_URL, LLM_MODEL
         cfg = LLMClientConfig(
-            base_url="http://127.0.0.1:7225/v1",
-            model="instruct_model",
+            base_url=LLM_BASE_URL,
+            model=LLM_MODEL,
             timeout_s=30.0,
         )
         async with LLMGatewayClient(cfg) as client:
@@ -181,8 +183,9 @@ class TestLLMIntegration:
 
     @pytest.mark.asyncio
     async def test_connection_error(self):
+        from tests.conftest import LLM_BASE_URL
         cfg = LLMClientConfig(
-            base_url="http://127.0.0.1:59999/v1",
+            base_url=LLM_BASE_URL.rsplit(":", 1)[0] + ":59999/v1",
             max_retries=0,
             timeout_s=5.0,
         )

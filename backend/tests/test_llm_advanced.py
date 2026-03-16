@@ -1,7 +1,7 @@
 """
 Advanced LLM integration tests — 补全 10 类缺失覆盖。
 
-LLM endpoint: http://127.0.0.1:7225/v1, model: instruct_model
+LLM endpoint: from .env (LLM_BASE_URL / LLM_MODEL)
 
 Categories:
   1. Multi-tool single iteration (runtime)
@@ -29,6 +29,7 @@ from core.runtime import AgenticRuntime, RuntimeConfig, RuntimeResult
 from core.tool_registry import ToolRegistry
 from core.tool_protocol import ToolCallParser
 from core.event_bus import EventBus
+from tests.conftest import LLM_BASE_URL, LLM_MODEL, LLM_API_KEY
 
 pytestmark = pytest.mark.llm
 
@@ -39,9 +40,9 @@ pytestmark = pytest.mark.llm
 @pytest.fixture
 def llm_client():
     config = LLMClientConfig(
-        base_url="http://127.0.0.1:7225/v1",
-        model="instruct_model",
-        api_key="not-needed",
+        base_url=LLM_BASE_URL,
+        model=LLM_MODEL,
+        api_key=LLM_API_KEY,
         timeout_s=60,
     )
     return LLMGatewayClient(config)
@@ -515,8 +516,8 @@ async def test_quality_gate_blocks_and_corrects(llm_client):
 async def test_llm_connection_error_handling():
     """LLM client should raise LLMClientError on connection failure."""
     cfg = LLMClientConfig(
-        base_url="http://127.0.0.1:59999/v1",  # wrong port
-        model="instruct_model",
+        base_url=LLM_BASE_URL.rsplit(":", 1)[0] + ":59999/v1",  # wrong port
+        model=LLM_MODEL,
         max_retries=0,
         timeout_s=5.0,
     )
@@ -594,9 +595,9 @@ async def test_gateway_with_skills_and_memory(tmp_path):
     )
 
     config = LLMClientConfig(
-        base_url="http://127.0.0.1:7225/v1",
-        model="instruct_model",
-        api_key="not-needed",
+        base_url=LLM_BASE_URL,
+        model=LLM_MODEL,
+        api_key=LLM_API_KEY,
         timeout_s=60,
     )
     llm_client = LLMGatewayClient(config)
@@ -683,9 +684,9 @@ async def test_gateway_multi_turn_with_tools(tmp_path):
     )
 
     config = LLMClientConfig(
-        base_url="http://127.0.0.1:7225/v1",
-        model="instruct_model",
-        api_key="not-needed",
+        base_url=LLM_BASE_URL,
+        model=LLM_MODEL,
+        api_key=LLM_API_KEY,
         timeout_s=60,
     )
     llm_client = LLMGatewayClient(config)

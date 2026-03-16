@@ -6,6 +6,12 @@ from pathlib import Path
 
 import pytest
 
+# ── LLM 配置：统一从环境变量读取，只需改 .env ──
+
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:39107/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "instruct_model")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "not-needed")
+
 
 @pytest.fixture
 def tmp_dir(tmp_path):
