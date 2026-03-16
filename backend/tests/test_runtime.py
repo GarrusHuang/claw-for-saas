@@ -1,7 +1,7 @@
 """
 Integration tests for core/runtime.py — AgenticRuntime with REAL LLM.
 
-LLM endpoint: http://127.0.0.1:7225/v1, model: instruct_model
+LLM endpoint: from .env (LLM_BASE_URL / LLM_MODEL)
 """
 import sys
 import os
@@ -15,14 +15,15 @@ from core.runtime import AgenticRuntime, RuntimeConfig, RuntimeResult
 from core.tool_registry import ToolRegistry
 from core.tool_protocol import ToolCallParser
 from core.event_bus import EventBus
+from tests.conftest import LLM_BASE_URL, LLM_MODEL, LLM_API_KEY
 
 
 @pytest.fixture
 def llm_client():
     config = LLMClientConfig(
-        base_url="http://127.0.0.1:7225/v1",
-        model="instruct_model",
-        api_key="not-needed",
+        base_url=LLM_BASE_URL,
+        model=LLM_MODEL,
+        api_key=LLM_API_KEY,
         timeout_s=60,
     )
     return LLMGatewayClient(config)

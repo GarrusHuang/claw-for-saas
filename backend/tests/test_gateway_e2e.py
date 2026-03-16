@@ -1,7 +1,7 @@
 """
 E2E tests for agent/gateway.py — AgentGateway.chat() with REAL LLM.
 
-These tests call the real LLM at http://127.0.0.1:7225/v1.
+LLM endpoint: from .env (LLM_BASE_URL / LLM_MODEL).
 They are slow by nature and require network access to the LLM server.
 """
 
@@ -14,6 +14,7 @@ import pytest
 import asyncio
 
 from core.event_bus import EventBus
+from tests.conftest import LLM_BASE_URL, LLM_MODEL, LLM_API_KEY
 
 pytestmark = pytest.mark.llm
 
@@ -32,9 +33,9 @@ async def gateway(tmp_path):
     from tools.registry_builder import build_full_registry, build_shared_registry, build_capability_registry
 
     config = LLMClientConfig(
-        base_url="http://127.0.0.1:7225/v1",
-        model="instruct_model",
-        api_key="not-needed",
+        base_url=LLM_BASE_URL,
+        model=LLM_MODEL,
+        api_key=LLM_API_KEY,
         timeout_s=60,
     )
     llm_client = LLMGatewayClient(config)
