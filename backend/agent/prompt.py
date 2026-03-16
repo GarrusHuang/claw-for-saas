@@ -356,7 +356,9 @@ class PromptBuilder:
 
     @staticmethod
     def _build_plan_guidance_section(_ctx: PromptContext) -> str:
-        return (
+        from core.context import current_plan_tracker
+
+        base = (
             "\n<plan_guidance>\n"
             "你拥有 propose_plan 和 update_plan_step 两个进度管理工具。\n\n"
             "使用规则：\n"
@@ -372,8 +374,37 @@ class PromptBuilder:
             "- 如果需要用户补充信息 → 保持 running，等用户回复并确认信息完整后再标 completed\n"
             "- 如果工具返回错误 → 标 failed，不要标 completed\n"
             "- \"已经问了用户\" 不等于 completed，\"拿到了用户的回答并处理完\" 才是 completed\n"
-            "</plan_guidance>"
         )
+
+        # 注入已恢复的 plan 状态
+        tracker = current_plan_tracker.get(None)
+        if tracker and tracker.steps:
+            has_incomplete = any(s["status"] != "completed" for s in tracker.steps)
+            if has_incomplete:
+                base += (
+                    "\n【当前存在未完成的执行计划】你必须使用 update_plan_step 继续推进，"
+                    "不要重新调用 propose_plan。\n"
+                )
+                for s in tracker.steps:
+                    status_icon = {"completed": "✅", "running": "🔄", "failed": "❌"}.get(s["status"], "⬚")
+                    base += f"  {status_icon} 步骤 {s['index']}: {s['action']} [{s['status']}]\n"
+                # 找到下一个需要处理的步骤
+                next_step = next(
+                    (s for s in tracker.steps if s["status"] in ("running", "pending")),
+                    None,
+                )
+                if next_step:
+                    idx = next_step["index"]
+                    if next_step["status"] == "running":
+                        base += (
+                            f"\n→ 步骤 {idx} 上次被中断，请继续完成它的工作，"
+                            f"完成后调用 update_plan_step(step_index={idx}, status='completed')。\n"
+                        )
+                    else:
+                        base += f"\n→ 从步骤 {idx} 开始，先调用 update_plan_step(step_index={idx}, status='running')。\n"
+
+        base += "</plan_guidance>"
+        return base
 
     # ── 内部方法 ──
 
