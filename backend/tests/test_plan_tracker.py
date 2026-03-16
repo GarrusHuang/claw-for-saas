@@ -190,13 +190,34 @@ class TestSequenceCheck:
         assert result["ok"]
         assert pt.steps[1]["status"] == "running"
 
-    def test_running_predecessor_blocks(self):
-        """前置步骤还在 running 时不能启动下一步。"""
+    def test_running_predecessor_auto_completed(self):
+        """前置步骤还在 running 时启动下一步 → 自动补完前一步。"""
         pt = PlanTracker([{"action": "s1"}, {"action": "s2"}], None)
         pt.update_step(0, "running")
         result = pt.update_step(1, "running")
-        assert result["ok"] is False
-        assert pt.steps[1]["status"] == "pending"
+        assert result["ok"]
+        assert pt.steps[0]["status"] == "completed"
+        assert pt.steps[0]["completed_at"] is not None
+        assert pt.steps[1]["status"] == "running"
+
+    def test_auto_complete_emits_events(self):
+        """自动补完时发射 step_completed 事件。"""
+        events = []
+
+        class FakeBus:
+            def emit(self, event_type, data):
+                events.append((event_type, data))
+
+        pt = PlanTracker([
+            {"action": "s1", "description": "Step 1"},
+            {"action": "s2", "description": "Step 2"},
+        ], FakeBus())
+
+        pt.update_step(0, "running")
+        pt.update_step(1, "running")  # 自动补完 step 0
+        completed_events = [e for e in events if e[0] == "step_completed"]
+        assert len(completed_events) == 1
+        assert completed_events[0][1]["step_index"] == 0
 
     def test_completed_status_no_sequence_check(self):
         """标记 completed 不做前置检查 (允许 AI 补标完成)。"""

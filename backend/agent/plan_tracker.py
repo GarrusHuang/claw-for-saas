@@ -36,6 +36,23 @@ class PlanTracker:
             })
         self._event_bus = event_bus
 
+    @classmethod
+    def restore(cls, saved_steps: list[dict], event_bus: EventBus | None = None) -> PlanTracker:
+        """从 session 持久化的 plan_data 恢复 PlanTracker 状态。"""
+        tracker = cls.__new__(cls)
+        tracker._steps = []
+        for i, s in enumerate(saved_steps):
+            tracker._steps.append({
+                "index": i,
+                "action": s.get("action", ""),
+                "description": s.get("description", ""),
+                "status": s.get("status", "pending"),
+                "started_at": s.get("started_at"),
+                "completed_at": s.get("completed_at"),
+            })
+        tracker._event_bus = event_bus
+        return tracker
+
     @property
     def steps(self) -> list[dict]:
         return list(self._steps)
@@ -65,7 +82,17 @@ class PlanTracker:
         now = time.time()
 
         if status == "running":
-            # 前置步骤完成检查 — 拒绝跳步
+            if step["status"] == "running":
+                return {"ok": True}  # 已经在运行，幂等
+
+            # 自动补完前置 running 步骤 — AI 启动下一步意味着前一步已做完
+            for i in range(step_index):
+                prev = self._steps[i]
+                if prev["status"] == "running":
+                    logger.info(f"Auto-completing step {i} (AI started step {step_index} without completing it)")
+                    self.update_step(i, "completed")
+
+            # 前置步骤完成检查 — 拒绝跳过 pending 步骤
             incomplete = [
                 i for i in range(step_index)
                 if self._steps[i]["status"] not in ("completed", "failed")
@@ -79,8 +106,6 @@ class PlanTracker:
                         f"(状态: {statuses})，请先按顺序完成这些步骤"
                     ),
                 }
-            if step["status"] == "running":
-                return {"ok": True}  # 已经在运行，幂等
             step["status"] = "running"
             step["started_at"] = now
             self._emit("step_started", {

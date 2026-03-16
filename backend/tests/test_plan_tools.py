@@ -77,9 +77,9 @@ class TestProposePlan:
         result = propose_plan(summary="Simple task", steps=[])
         assert result["status"] == "ok"
 
-    def test_message_mentions_update_plan_step(self):
+    def test_message_mentions_completed(self):
         result = propose_plan(summary="Test", steps=[{"action": "s1"}])
-        assert "update_plan_step" in result["message"]
+        assert "completed" in result["message"]
 
 
 class TestUpdatePlanStep:
