@@ -14,6 +14,8 @@ from agent.prompt import (
     ToolSummary,
     PROMPT_MODE_LAYERS,
 )
+from agent.plan_tracker import PlanTracker
+from core.context import current_plan_tracker
 
 
 # ── PromptLayer ──
@@ -218,3 +220,82 @@ class TestPromptModeLayers:
         assert PromptLayer.EXTRA in minimal
         assert PromptLayer.SKILLS not in minimal
         assert PromptLayer.MEMORY not in minimal
+
+
+# ── Plan state injection into prompt ──
+
+
+class TestPlanStateInjection:
+    """plan_guidance 从 ContextVar 读取已恢复的 PlanTracker 并注入状态。"""
+
+    def _build_with_tracker(self, tracker: PlanTracker | None) -> str:
+        token = current_plan_tracker.set(tracker)
+        try:
+            pb = PromptBuilder()
+            return pb.build_system_prompt()
+        finally:
+            current_plan_tracker.reset(token)
+
+    def test_no_tracker_no_injection(self):
+        """无 PlanTracker 时，plan_guidance 不含步骤状态。"""
+        prompt = self._build_with_tracker(None)
+        assert "<plan_guidance>" in prompt
+        assert "当前存在未完成的执行计划" not in prompt
+
+    def test_all_completed_no_injection(self):
+        """所有步骤已完成时，不注入续接指令。"""
+        saved = [
+            {"action": "查询数据", "status": "completed"},
+            {"action": "生成报告", "status": "completed"},
+        ]
+        tracker = PlanTracker.restore(saved)
+        prompt = self._build_with_tracker(tracker)
+        assert "当前存在未完成的执行计划" not in prompt
+
+    def test_pending_steps_inject_state(self):
+        """有 pending 步骤时，注入完整状态 + 续接指令。"""
+        saved = [
+            {"action": "查询数据", "status": "completed"},
+            {"action": "分析结果", "status": "pending"},
+            {"action": "生成报告", "status": "pending"},
+        ]
+        tracker = PlanTracker.restore(saved)
+        prompt = self._build_with_tracker(tracker)
+        assert "当前存在未完成的执行计划" in prompt
+        assert "update_plan_step" in prompt
+        assert "✅ 步骤 0: 查询数据 [completed]" in prompt
+        assert "⬚ 步骤 1: 分析结果 [pending]" in prompt
+        assert "⬚ 步骤 2: 生成报告 [pending]" in prompt
+        assert "从步骤 1 开始" in prompt
+        assert "status='running'" in prompt
+
+    def test_running_step_interrupted(self):
+        """有 running 步骤（被中断）时，提示继续完成。"""
+        saved = [
+            {"action": "查询数据", "status": "completed"},
+            {"action": "分析结果", "status": "running"},
+            {"action": "生成报告", "status": "pending"},
+        ]
+        tracker = PlanTracker.restore(saved)
+        prompt = self._build_with_tracker(tracker)
+        assert "当前存在未完成的执行计划" in prompt
+        assert "🔄 步骤 1: 分析结果 [running]" in prompt
+        assert "步骤 1 上次被中断" in prompt
+        assert "status='completed'" in prompt
+
+    def test_failed_step_shows_icon(self):
+        """failed 步骤显示 ❌ 图标。"""
+        saved = [
+            {"action": "查询数据", "status": "failed"},
+            {"action": "分析结果", "status": "pending"},
+        ]
+        tracker = PlanTracker.restore(saved)
+        prompt = self._build_with_tracker(tracker)
+        assert "❌ 步骤 0: 查询数据 [failed]" in prompt
+        assert "从步骤 1 开始" in prompt
+
+    def test_empty_steps_no_injection(self):
+        """空步骤列表不注入。"""
+        tracker = PlanTracker.restore([])
+        prompt = self._build_with_tracker(tracker)
+        assert "当前存在未完成的执行计划" not in prompt
