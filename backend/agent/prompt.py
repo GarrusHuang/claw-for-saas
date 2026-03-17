@@ -333,9 +333,18 @@ class PromptBuilder:
 
     @staticmethod
     def _build_skills(ctx: PromptContext) -> str:
-        if ctx.skill_knowledge:
-            return f"\n<skills>\n{ctx.skill_knowledge}\n</skills>"
-        return ""
+        if not ctx.skill_knowledge:
+            return ""
+        return (
+            "\n<skills>\n"
+            "回复前先扫描下方可用技能列表。\n"
+            "- 如果某个技能明确适用 → 调用 read_skill(skill_name) 读取完整内容，然后按指引执行\n"
+            "- 如果多个可能适用 → 选最具体的一个\n"
+            "- 如果没有明确适用的 → 不要读取任何技能\n"
+            "约束: 不要一次读取多个技能，只在选定后读取。\n\n"
+            f"{ctx.skill_knowledge}\n"
+            "</skills>"
+        )
 
     @staticmethod
     def _build_memory(ctx: PromptContext) -> str:

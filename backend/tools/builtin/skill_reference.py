@@ -43,3 +43,32 @@ async def read_reference(skill_name: str, reference_name: str) -> dict:
         "content": f"Reference '{reference_name}' not found in skill '{skill_name}'.",
         "loaded": False,
     }
+
+
+@skill_reference_registry.tool(
+    description="Read the full content of a skill by name. "
+                "Use when you need detailed knowledge from a specific skill.",
+    read_only=True,
+)
+async def read_skill(skill_name: str) -> dict:
+    """读取指定 Skill 的完整内容。"""
+    try:
+        from skills.loader import SkillLoader
+        from core.context import current_skill_loader
+        loader = current_skill_loader.get(None)
+        if not loader:
+            loader = SkillLoader()
+        body = loader.get_skill_body(skill_name)
+        if body:
+            return {
+                "skill_name": skill_name,
+                "content": body,
+                "loaded": True,
+            }
+    except Exception:
+        pass
+    return {
+        "skill_name": skill_name,
+        "content": f"Skill '{skill_name}' not found.",
+        "loaded": False,
+    }

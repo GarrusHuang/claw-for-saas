@@ -33,7 +33,7 @@ class TestBuildSharedRegistry:
 
     def test_tool_count(self):
         reg = build_shared_registry()
-        assert len(reg.get_tool_names()) == 6  # 5 calculator + 1 skill_reference
+        assert len(reg.get_tool_names()) == 7  # 5 calculator + 2 skill_reference (read_reference + read_skill)
 
 
 class TestBuildCapabilityRegistry:

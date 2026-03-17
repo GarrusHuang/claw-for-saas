@@ -135,46 +135,13 @@ class AgentGateway:
         """
         对话结束后自动保存会话摘要到记忆 (OpenClaw Session Memory Hook 模式)。
 
-        不做特定模式匹配，直接保存用户消息 + 回复摘要到 conversations.md。
-        下次会话时 build_memory_prompt() 会将其注入 <memory> 标签，
-        LLM 自然地从历史对话中获取用户偏好、上下文等信息。
+        只保存有价值的跨会话信息（用户偏好、修正反馈），
+        不保存普通对话摘要 — 那是 session 级别的上下文，
+        由 SessionManager 管理，不应污染 memory prompt。
         """
-        if not self.memory_store:
-            return
-
-        try:
-            from datetime import datetime
-
-            # 保存用户消息 + 回复摘要
-            user_summary = message[:200].replace("\n", " ").strip()
-            answer_summary = (answer or "")[:200].replace("\n", " ").strip()
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-            entry = f"\n### {ts}\n- 用户: {user_summary}\n- 回复: {answer_summary}\n"
-
-            self.memory_store.write_file(
-                scope="user", filename="conversations.md",
-                content=entry, mode="append",
-                tenant_id=tenant_id, user_id=user_id,
-            )
-
-            # 超过条数限制时裁剪，保留最近的
-            conv_content = self.memory_store.read_file(
-                scope="user", filename="conversations.md",
-                tenant_id=tenant_id, user_id=user_id,
-            )
-            sections = conv_content.split("\n### ")
-            if len(sections) > self._MAX_CONVERSATION_ENTRIES:
-                kept = sections[-self._MAX_CONVERSATION_ENTRIES:]
-                trimmed = "### " + "\n### ".join(kept)
-                self.memory_store.write_file(
-                    scope="user", filename="conversations.md",
-                    content=trimmed, mode="rewrite",
-                    tenant_id=tenant_id, user_id=user_id,
-                )
-                logger.info(f"Trimmed conversations.md for user {user_id}")
-
-        except Exception as e:
-            logger.warning(f"Auto-save memory failed: {e}")
+        # 当前不自动保存对话摘要到 memory。
+        # 用户偏好/修正通过 save_memory 工具由 Agent 主动保存。
+        pass
 
     async def chat(
         self,
@@ -365,7 +332,7 @@ class AgentGateway:
 
             try:
                 # 加载领域知识
-                skill_knowledge, loaded_skill_names = self.skill_loader.load_for_pipeline(
+                skill_knowledge, loaded_skill_names = self.skill_loader.build_skill_index(
                     scenario=scenario,
                     agent_name="universal",
                     business_type=bt,

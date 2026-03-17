@@ -50,8 +50,9 @@ export function dispatchPipelineEvent(
           store.agentIteration?.max || 15,
         );
         const tools = data.tools as string[] | undefined;
+        const toolDetails = data.tool_details as Array<{ name: string; args: Record<string, string> }> | undefined;
         if (tools && tools.length > 0) {
-          store.setCallingTools(tools);
+          store.setCallingTools(tools, toolDetails);
         }
       } else if (status === 'completed' || status === 'max_iterations_reached') {
         store.setAgentIterationInfo(
@@ -380,6 +381,17 @@ export function applyPipelineSnapshot(snapshot: PipelineSnapshot): void {
   // 恢复 agent 最终回复（如果有）
   if (snapshot.agent_message) {
     updates.agentMessage = snapshot.agent_message;
+  }
+
+  // 恢复 file artifacts
+  if (snapshot.file_artifacts && snapshot.file_artifacts.length > 0) {
+    updates.fileArtifacts = snapshot.file_artifacts.map((a) => ({
+      path: a.path,
+      filename: a.filename,
+      sizeBytes: a.size_bytes,
+      contentType: a.content_type,
+      sessionId: a.session_id,
+    }));
   }
 
   // 恢复错误状态

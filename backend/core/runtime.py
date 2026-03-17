@@ -351,11 +351,20 @@ class AgenticRuntime:
                         error="agent_repetition_detected",
                     )
 
-                self._emit("agent_progress", {
-                    "status": "calling_tools",
-                    "iteration": iteration + 1,
-                    "tools": [tc.name for tc in parsed.tool_calls],
-                })
+                # 如果流式中已经逐个通知了工具名 (pending)，不重复发 calling_tools
+                # 如果是非流式或没有提前通知过，则在此发出
+                if not self._stream_tools_notified:
+                    self._emit("agent_progress", {
+                        "status": "calling_tools",
+                        "iteration": iteration + 1,
+                        "tools": [tc.name for tc in parsed.tool_calls],
+                        "tool_details": [
+                            {"name": tc.name,
+                             "args": self._summarize_args(tc.arguments)}
+                            for tc in parsed.tool_calls
+                        ],
+                    })
+                    await asyncio.sleep(0)
 
                 observations = await self._execute_tool_calls(parsed.tool_calls, iteration)
 
@@ -435,6 +444,7 @@ class AgenticRuntime:
         # 累积缓冲
         content_parts: list[str] = []
         tool_calls_buf: dict[int, dict] = {}  # index → {id, name, arguments_parts}
+        self._stream_tools_notified = False  # 流式中是否已发过 calling_tools
         finish_reason = None
         usage_data: dict = {}
 
@@ -586,7 +596,10 @@ class AgenticRuntime:
                 # ── 工具调用 (流式累积) ──
                 tc_deltas = delta.get("tool_calls", [])
                 if tc_deltas:
-                    has_tool_calls = True
+                    if not has_tool_calls:
+                        has_tool_calls = True
+                        # 流式文本结束，flush 残余文本
+                        await _flush_text(force=True)
                     for tc_delta in tc_deltas:
                         idx = tc_delta.get("index", 0)
                         if idx not in tool_calls_buf:
@@ -594,6 +607,7 @@ class AgenticRuntime:
                                 "id": tc_delta.get("id", f"call_{idx}"),
                                 "name": "",
                                 "arguments_parts": [],
+                                "_notified": False,
                             }
                         buf = tool_calls_buf[idx]
                         if tc_delta.get("id"):
@@ -603,6 +617,17 @@ class AgenticRuntime:
                             buf["name"] = func["name"]
                         if func.get("arguments"):
                             buf["arguments_parts"].append(func["arguments"])
+
+                        # 一旦拿到工具名，立即通知前端显示 pending 状态
+                        if buf["name"] and not buf["_notified"]:
+                            buf["_notified"] = True
+                            self._stream_tools_notified = True
+                            self._emit("agent_progress", {
+                                "status": "calling_tools",
+                                "iteration": iteration + 1,
+                                "tools": [buf["name"]],
+                                "tool_details": [{"name": buf["name"], "args": {}}],
+                            })
 
             # 刷新剩余文本
             await _flush_text(force=True)
@@ -1520,25 +1545,28 @@ class AgenticRuntime:
     def _count_tool_calls(self) -> int:
         return sum(1 for s in self._steps if s.step_type == StepType.TOOL_CALL)
 
+    _HIGH_LIMIT_KEYS = frozenset({"content", "command"})
+
     @staticmethod
     def _summarize_args(args: dict | None) -> dict[str, str]:
-        """截断长参数值 (>200 字符) 用于 SSE 可视化。"""
+        """截断长参数值用于 SSE 可视化。content/command 使用 50000 限制，其他 2000。"""
         if not args:
             return {}
         summary: dict[str, str] = {}
         for k, v in args.items():
             s = str(v)
-            summary[k] = s[:200] + "..." if len(s) > 200 else s
+            limit = 50_000 if k in AgenticRuntime._HIGH_LIMIT_KEYS else 2000
+            summary[k] = s[:limit] + "..." if len(s) > limit else s
         return summary
 
     @staticmethod
     def _summarize_result(result: ToolResult) -> str:
-        """截断结果文本 (>300 字符) 用于 SSE 可视化。"""
+        """截断结果文本 (>5000 字符) 用于 SSE 可视化。"""
         if not result.success:
             text = result.error or "unknown error"
         else:
             text = str(result.data) if result.data is not None else ""
-        return text[:300] + "..." if len(text) > 300 else text
+        return text[:5000] + "..." if len(text) > 5000 else text
 
     @staticmethod
     def _tool_call_signature(tool_calls: list[ParsedToolCall]) -> str:

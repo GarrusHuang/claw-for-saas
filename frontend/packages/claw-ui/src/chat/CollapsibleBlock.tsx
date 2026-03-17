@@ -24,10 +24,13 @@ export default function CollapsibleBlock({
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v); } }}
+        style={{ display: 'flex', alignItems: 'center', gap: 4 }}
       >
-        <span className="collapsible-chevron">{open ? '▾' : '▸'}</span>
         {icon && <span className="collapsible-icon">{icon}</span>}
-        <span className="collapsible-label">{summary}</span>
+        <span className="collapsible-label" style={{ flex: 1 }}>{summary}</span>
+        <span className="collapsible-chevron" style={{ color: '#999', fontSize: 12, flexShrink: 0 }}>
+          {open ? '\u2304' : '\u203A'}
+        </span>
       </div>
       {open && <div className="collapsible-body">{children}</div>}
     </div>
