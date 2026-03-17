@@ -61,6 +61,8 @@ export interface ChatMessage {
   timeline?: ChatTimelineEntry[];
   /** 用户消息附带的文件 */
   files?: ChatMessageFile[];
+  /** Agent 生成的文件制品 */
+  fileArtifacts?: Array<{ path: string; filename: string; sizeBytes: number; contentType: string; sessionId: string }>;
 }
 
 // ── loadSession 子函数 ──
@@ -128,7 +130,19 @@ function buildMessagesFromHistory(
           timestamp: Date.now() - (filtered.length - i) * 1000,
         };
         const tl = timelineMap.get(assistantIdx);
-        if (tl && tl.length > 0) msg.timeline = tl;
+        if (tl && tl.length > 0) {
+          msg.timeline = tl;
+          // 从 write_source_file 工具调用重建 fileArtifacts
+          const artifacts = tl
+            .filter(e => e.type === 'tool' && e.tool_name === 'write_source_file' && e.success)
+            .map(e => {
+              const args = e.args_summary || {};
+              const path = args.path || args.file_path || '';
+              return { path, filename: path.split('/').pop() || path, sizeBytes: 0, contentType: 'application/octet-stream', sessionId };
+            })
+            .filter(a => a.path);
+          if (artifacts.length > 0) msg.fileArtifacts = artifacts;
+        }
         loaded.push(msg);
         assistantIdx++;
       }
@@ -200,6 +214,8 @@ function restoreStoreState(detail: SessionDetail, sessionId: string): void {
       usePipelineStore.setState({ toolExecutions: histTools });
     }
   }
+
+  // File artifacts: 已在 buildMessagesFromHistory 中按消息重建，不再放 store
 
   // Running session: 设 status
   if (useSessionStatusStore.getState().runningIds.has(sessionId)) {
@@ -568,17 +584,16 @@ export function useAIChat() {
         }
       }
 
-      // 将当前 pipeline 的 timeline 附加到最后一条 assistant 消息
-      const { timelineEntries } = usePipelineStore.getState();
-      if (timelineEntries && timelineEntries.length > 0) {
+      // 将当前 pipeline 的 timeline + fileArtifacts 附加到最后一条 assistant 消息
+      const { timelineEntries, fileArtifacts: storeArtifacts } = usePipelineStore.getState();
+      if ((timelineEntries && timelineEntries.length > 0) || storeArtifacts.length > 0) {
         setMessages((prev) => {
           const copy = [...prev];
-          // 找到最后一条 assistant 消息
           for (let i = copy.length - 1; i >= 0; i--) {
             if (copy[i].role === 'assistant') {
-              copy[i] = {
-                ...copy[i],
-                timeline: timelineEntries.map((e) => ({
+              const updates: Partial<ChatMessage> = {};
+              if (timelineEntries && timelineEntries.length > 0) {
+                updates.timeline = timelineEntries.map((e) => ({
                   type: e.type,
                   content: e.content,
                   iteration: e.iteration,
@@ -589,13 +604,21 @@ export function useAIChat() {
                   args_summary: e.toolExecution?.argsSummary as Record<string, string> | undefined,
                   result_summary: e.toolExecution?.resultSummary,
                   ts: e.timestamp,
-                })),
-              };
+                }));
+              }
+              if (storeArtifacts.length > 0) {
+                updates.fileArtifacts = storeArtifacts.map((a) => ({ ...a }));
+              }
+              copy[i] = { ...copy[i], ...updates };
               break;
             }
           }
           return copy;
         });
+        // artifacts 已附加到消息，清空 store 避免堆积
+        if (storeArtifacts.length > 0) {
+          usePipelineStore.setState({ fileArtifacts: [] });
+        }
       }
 
       // 智能缩小: 填单场景 (有字段值) → 缩到侧边让表单可见

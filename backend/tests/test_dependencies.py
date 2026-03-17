@@ -56,13 +56,13 @@ def test_get_llm_client():
 
 
 def test_get_shared_registry():
-    """get_shared_registry returns a ToolRegistry with 6 tools."""
+    """get_shared_registry returns a ToolRegistry with 7 tools."""
     from dependencies import get_shared_registry
     from core.tool_registry import ToolRegistry
 
     result = get_shared_registry()
     assert isinstance(result, ToolRegistry)
-    assert len(result) == 6
+    assert len(result) == 7
 
 
 def test_get_skill_loader():

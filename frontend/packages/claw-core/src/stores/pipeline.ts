@@ -135,7 +135,7 @@ interface PipelineState {
   appendThinkingText: (text: string, iteration?: number) => void;
   appendTextToTimeline: (text: string, iteration: number) => void;
   addToolExecution: (data: ToolExecution) => void;
-  setCallingTools: (tools: string[]) => void;
+  setCallingTools: (tools: string[], toolDetails?: Array<{ name: string; args: Record<string, string> }>) => void;
   setAgentIterationInfo: (current: number, max: number) => void;
   completePipeline: (status: string, durationMs: number) => void;
   setError: (error: string) => void;
@@ -229,6 +229,8 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       planSteps: state.planSteps,
       // 保留历史 toolExecutions，右栏知识库/制品依赖它跨轮次显示
       toolExecutions: state.toolExecutions,
+      // 保留 fileArtifacts，避免新消息时清空已生成的文件
+      fileArtifacts: state.fileArtifacts,
     })),
 
   startPipeline: (scenario, steps) =>
@@ -244,6 +246,8 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       planSteps: state.planSteps,
       // 保留历史 toolExecutions，右栏知识库/制品依赖它跨轮次显示
       toolExecutions: state.toolExecutions,
+      // 保留 fileArtifacts，避免新消息时清空已生成的文件
+      fileArtifacts: state.fileArtifacts,
       startedAt: Date.now(),
       steps: steps.map((name) => ({
         name,
@@ -360,9 +364,10 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       };
     }),
 
-  setCallingTools: (tools) =>
+  setCallingTools: (tools, toolDetails?) =>
     set((state) => {
-      // 为每个工具插入 pending 状态的 timeline 条目
+      // 为每个工具插入 pending 状态的 timeline 条目，携带 argsSummary
+      const detailMap = new Map((toolDetails || []).map((d) => [d.name, d.args]));
       const newEntries = tools.map((toolName) => ({
         id: `pending-${toolName}-${Date.now()}`,
         type: 'tool' as const,
@@ -374,6 +379,7 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           latencyMs: 0,
           timestamp: Date.now(),
           pending: true,
+          argsSummary: detailMap.get(toolName),
         },
       }));
       return {

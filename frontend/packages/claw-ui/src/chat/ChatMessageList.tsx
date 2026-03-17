@@ -4,7 +4,6 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   BulbOutlined,
-  ToolOutlined,
   StopOutlined,
   FileImageOutlined,
   EyeOutlined,
@@ -21,10 +20,20 @@ import CollapsibleBlock from './CollapsibleBlock';
 import FileArtifactCard from '../preview/FileArtifactCard';
 import UniversalFilePreviewModal from '../preview/FilePreviewModal';
 import FileCard from './FileCard';
+import { getToolLabel } from './toolLabels';
+import HighlightedCode from '../shared/HighlightedCode';
 
 import type { ChatMessage, ChatMessageFile, ChatTimelineEntry, FileArtifact } from '@claw/core';
 
 const { Text } = Typography;
+
+/** 简单检测 result_summary 内容的语言 (用于语法高亮) */
+function tryDetectLang(text: string): string {
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
+  if (trimmed.startsWith('<')) return 'xml';
+  return 'json'; // 大多数工具结果是 dict/JSON 格式
+}
 
 
 interface ChatMessageListProps {
@@ -36,46 +45,68 @@ interface ChatMessageListProps {
 
 // ── 单个工具执行行 ──
 function ToolExecutionItem({ te }: { te: ToolExecution }) {
+  const label = getToolLabel(te.toolName);
+  const [showResult, setShowResult] = useState(false);
+  const hasDetails = !!(te.argsSummary && Object.keys(te.argsSummary).length > 0) || !!te.resultSummary;
   return (
-    <div style={{ padding: '3px 0', fontSize: 11, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-      <span style={{ flexShrink: 0, marginTop: 1 }}>
-        {te.pending ? (
-          <LoadingOutlined style={{ color: '#722ed1', fontSize: 11 }} />
-        ) : te.blocked ? (
-          <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
-        ) : te.success ? (
-          <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
-        ) : (
-          <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
-        )}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ fontWeight: 500, color: '#333' }}>{te.toolName}</span>
-        {te.pending ? (
-          <span style={{ color: '#722ed1', marginLeft: 4 }}>执行中...</span>
-        ) : (
-          <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latencyMs)}ms)</span>
-        )}
-        {te.argsSummary && Object.keys(te.argsSummary).length > 0 && (
-          <div style={{ color: '#888', fontSize: 10 }}>
-            {'→ '}
-            {Object.entries(te.argsSummary)
-              .map(([k, v]) => `${k}=${v}`)
-              .join(', ')}
-          </div>
-        )}
-        {te.resultSummary && (
-          <div style={{ color: '#666', fontSize: 10 }}>
-            {'← '}{te.resultSummary}
-          </div>
-        )}
+    <div style={{ padding: '4px 0' }}>
+      {/* 工具名行 — 图标 + 中文名 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+        <span style={{ flexShrink: 0 }}>
+          {te.pending ? (
+            <LoadingOutlined style={{ color: '#722ed1', fontSize: 13 }} />
+          ) : te.blocked ? (
+            <StopOutlined style={{ color: '#faad14', fontSize: 13 }} />
+          ) : te.success ? (
+            <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 13 }} />
+          ) : (
+            <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
+          )}
+        </span>
+        <span style={{ fontWeight: 500, color: '#333' }}>{label}</span>
+        {te.pending && <span style={{ color: '#722ed1', fontSize: 11 }}>执行中...</span>}
       </div>
+      {/* Result 区域 — 左竖线 + 可点击展开 */}
+      {!te.pending && (
+        <div style={{ marginLeft: 7, paddingLeft: 14, borderLeft: '2px solid #e8e8e8', marginTop: 2 }}>
+          <span
+            role={hasDetails ? 'button' : undefined}
+            tabIndex={hasDetails ? 0 : undefined}
+            onClick={hasDetails ? () => setShowResult((v) => !v) : undefined}
+            onKeyDown={hasDetails ? (e) => { if (e.key === 'Enter' || e.key === ' ') setShowResult((v) => !v); } : undefined}
+            style={{
+              display: 'inline-block', fontSize: 11, color: '#999',
+              background: '#f5f5f5', borderRadius: 4, padding: '1px 6px',
+              cursor: hasDetails ? 'pointer' : 'default',
+              userSelect: 'none',
+            }}
+          >
+            Result
+            {hasDetails && <span style={{ marginLeft: 3, fontSize: 10 }}>{showResult ? '▾' : '▸'}</span>}
+          </span>
+          {te.latencyMs > 0 && (
+            <span style={{ color: '#bbb', fontSize: 11, marginLeft: 6 }}>{Math.round(te.latencyMs)}ms</span>
+          )}
+          {showResult && (
+            <div style={{ marginTop: 4 }}>
+              {te.argsSummary && Object.keys(te.argsSummary).length > 0 && (
+                <div style={{ marginBottom: te.resultSummary ? 6 : 0 }}>
+                  <HighlightedCode code={JSON.stringify(te.argsSummary, null, 2)} language="json" maxHeight="200px" />
+                </div>
+              )}
+              {te.resultSummary && (
+                <HighlightedCode code={te.resultSummary} language={tryDetectLang(te.resultSummary)} maxHeight="300px" />
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 // ── 按迭代分组 — 对标 Claude Code: thinking→折叠块, text→正文, tools→折叠块 ──
-const HIDDEN_TOOLS = ['propose_plan', 'update_plan_step'];
+const HIDDEN_TOOLS: string[] = [];
 
 interface IterGroup {
   id: string;
@@ -156,18 +187,26 @@ function groupPersistedByIteration(entries: ChatTimelineEntry[]): PersistedIterG
   return groups;
 }
 
-/** 工具折叠块标签: "tool1, tool2 ×2" */
-function buildToolLabel(toolNames: string[], isActive?: boolean): string {
+/** 工具折叠块摘要 — 动态状态前缀 + 中文工具名 + 计数 */
+function buildToolSummary(
+  toolNames: string[],
+  opts: { hasPending?: boolean; hasFailed?: boolean },
+): string {
   if (toolNames.length === 0) return '工具调用';
   const counts = new Map<string, number>();
-  for (const n of toolNames) counts.set(n, (counts.get(n) || 0) + 1);
+  for (const n of toolNames) {
+    const label = getToolLabel(n);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
   const tp: string[] = [];
-  for (const [name, count] of counts) tp.push(count > 1 ? `${name} ×${count}` : name);
-  let label: string;
-  if (tp.length <= 3) label = tp.join(', ');
-  else label = `${tp.slice(0, 2).join(', ')} 等 ${toolNames.length} 个工具`;
-  if (isActive) label += '...';
-  return label;
+  for (const [label, count] of counts) tp.push(count > 1 ? `${label} \u00d7${count}` : label);
+  let text: string;
+  if (tp.length <= 3) text = tp.join(', ');
+  else text = `${tp.slice(0, 2).join(', ')} 等 ${toolNames.length} 个工具`;
+
+  if (opts.hasFailed) return `${text} (失败)`;
+  if (opts.hasPending) return `${text}...`;
+  return text;
 }
 
 /** 检查 timeline 是否包含 text 条目 (有则抑制 message body 避免重复) */
@@ -216,26 +255,28 @@ function AgentTimeline() {
                 <Markdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{g.text!}</Markdown>
               </div>
             )}
-            {/* tools → 折叠块 */}
+            {/* tools → 折叠块 (所有工具统一渲染) */}
             {hasTools && (() => {
               const hasPending = g.tools.some((t) => t.pending);
+              const hasFailed = g.tools.some((t) => !t.pending && !t.success);
+              const allDone = !hasPending && !(isActive && isLastGroup);
+              const statusEmoji = hasFailed ? '❌' : hasPending || (isActive && isLastGroup) ? '🔄' : '✅';
               return (
-              <div style={{ marginBottom: 12 }}>
-                <CollapsibleBlock
-                  icon={
-                    hasPending
-                      ? <LoadingOutlined style={{ color: '#722ed1', fontSize: 12 }} />
-                      : isActive && isLastGroup
-                        ? <ToolOutlined style={{ color: '#722ed1', fontSize: 12 }} />
-                        : <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
-                  }
-                  summary={buildToolLabel(g.tools.map((t) => t.toolName), hasPending || (isActive && isLastGroup))}
-                >
-                  {g.tools.map((te) => (
-                    <ToolExecutionItem key={te.id} te={te} />
-                  ))}
-                </CollapsibleBlock>
-              </div>
+                <div style={{ marginBottom: 12 }}>
+                  <CollapsibleBlock
+                    summary={`${statusEmoji} ${buildToolSummary(g.tools.map((t) => t.toolName), { hasPending: hasPending || (isActive && isLastGroup), hasFailed })}`}
+                  >
+                    {g.tools.map((te) => (
+                      <ToolExecutionItem key={te.id} te={te} />
+                    ))}
+                    {allDone && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
+                        <CheckCircleOutlined style={{ fontSize: 13 }} />
+                        <span style={{ fontWeight: 500 }}>Done</span>
+                      </div>
+                    )}
+                  </CollapsibleBlock>
+                </div>
               );
             })()}
           </React.Fragment>
@@ -248,6 +289,61 @@ function AgentTimeline() {
 // ── 持久化时间线 ──
 // showText=false(默认): 只渲染 thinking + tools，正文由 MessageItem 负责
 // showText=true: 也渲染 text entries (当 msg.content 为空时，text 是唯一内容来源)
+/** 持久化工具条目 — 点击 Result 展开详情 */
+function PersistedToolItem({ te }: { te: ChatTimelineEntry }) {
+  const label = getToolLabel(te.tool_name || '');
+  const [showResult, setShowResult] = useState(false);
+  const hasDetails = !!(te.args_summary && Object.keys(te.args_summary).length > 0) || !!te.result_summary;
+  return (
+    <div style={{ padding: '4px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+        <span style={{ flexShrink: 0 }}>
+          {te.blocked ? (
+            <StopOutlined style={{ color: '#faad14', fontSize: 13 }} />
+          ) : te.success ? (
+            <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 13 }} />
+          ) : (
+            <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
+          )}
+        </span>
+        <span style={{ fontWeight: 500, color: '#333' }}>{label}</span>
+      </div>
+      <div style={{ marginLeft: 7, paddingLeft: 14, borderLeft: '2px solid #e8e8e8', marginTop: 2 }}>
+        <span
+          role={hasDetails ? 'button' : undefined}
+          tabIndex={hasDetails ? 0 : undefined}
+          onClick={hasDetails ? () => setShowResult((v) => !v) : undefined}
+          onKeyDown={hasDetails ? (e) => { if (e.key === 'Enter' || e.key === ' ') setShowResult((v) => !v); } : undefined}
+          style={{
+            display: 'inline-block', fontSize: 11, color: '#999',
+            background: '#f5f5f5', borderRadius: 4, padding: '1px 6px',
+            cursor: hasDetails ? 'pointer' : 'default',
+            userSelect: 'none',
+          }}
+        >
+          Result
+          {hasDetails && <span style={{ marginLeft: 3, fontSize: 10 }}>{showResult ? '▾' : '▸'}</span>}
+        </span>
+        {te.latency_ms != null && te.latency_ms > 0 && (
+          <span style={{ color: '#bbb', fontSize: 11, marginLeft: 6 }}>{Math.round(te.latency_ms)}ms</span>
+        )}
+        {showResult && (
+          <div style={{ marginTop: 4 }}>
+            {te.args_summary && Object.keys(te.args_summary).length > 0 && (
+              <div style={{ marginBottom: te.result_summary ? 6 : 0 }}>
+                <HighlightedCode code={JSON.stringify(te.args_summary, null, 2)} language="json" maxHeight="200px" />
+              </div>
+            )}
+            {te.result_summary && (
+              <HighlightedCode code={te.result_summary} language={tryDetectLang(te.result_summary)} maxHeight="300px" />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PersistedTimeline({ entries, showText = false }: { entries: ChatTimelineEntry[]; showText?: boolean }) {
   if (!entries || entries.length === 0) return null;
 
@@ -279,45 +375,25 @@ function PersistedTimeline({ entries, showText = false }: { entries: ChatTimelin
                 <Markdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{g.text!}</Markdown>
               </div>
             )}
-            {hasTools && (
-              <div style={{ marginBottom: 12 }}>
-                <CollapsibleBlock
-                  icon={<CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />}
-                  summary={buildToolLabel(g.tools.map((t) => t.tool_name || ''))}
-                >
-                  {g.tools.map((te, ti) => (
-                    <div key={ti} style={{ padding: '3px 0', fontSize: 11, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                      <span style={{ flexShrink: 0, marginTop: 1 }}>
-                        {te.blocked ? (
-                          <StopOutlined style={{ color: '#faad14', fontSize: 11 }} />
-                        ) : te.success ? (
-                          <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
-                        ) : (
-                          <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 11 }} />
-                        )}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontWeight: 500, color: '#333' }}>{te.tool_name}</span>
-                        {te.latency_ms != null && (
-                          <span style={{ color: '#999', marginLeft: 4 }}>({Math.round(te.latency_ms)}ms)</span>
-                        )}
-                        {te.args_summary && Object.keys(te.args_summary).length > 0 && (
-                          <div style={{ color: '#888', fontSize: 10 }}>
-                            {'→ '}
-                            {Object.entries(te.args_summary).map(([k, v]) => `${k}=${v}`).join(', ')}
-                          </div>
-                        )}
-                        {te.result_summary && (
-                          <div style={{ color: '#666', fontSize: 10 }}>
-                            {'← '}{te.result_summary}
-                          </div>
-                        )}
-                      </div>
+            {hasTools && (() => {
+              const hasFailed = g.tools.some((t) => !t.success);
+              const statusEmoji = hasFailed ? '❌' : '✅';
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <CollapsibleBlock
+                    summary={`${statusEmoji} ${buildToolSummary(g.tools.map((t) => t.tool_name || ''), { hasFailed })}`}
+                  >
+                    {g.tools.map((te, ti) => (
+                      <PersistedToolItem key={ti} te={te} />
+                    ))}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
+                      <CheckCircleOutlined style={{ fontSize: 13 }} />
+                      <span style={{ fontWeight: 500 }}>Done</span>
                     </div>
-                  ))}
-                </CollapsibleBlock>
-              </div>
-            )}
+                  </CollapsibleBlock>
+                </div>
+              );
+            })()}
           </React.Fragment>
         );
       })}
@@ -659,6 +735,14 @@ export default function ChatMessageList({
               {mode.type === 'persisted' && <PersistedTimeline entries={mode.entries} showText={true} />}
               {mode.type === 'live' && <AgentTimeline />}
               {!hasTimelineText && <MessageItem msg={msg} />}
+              {/* 该消息关联的文件制品 — 内联显示 */}
+              {msg.fileArtifacts && msg.fileArtifacts.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  {msg.fileArtifacts.map((artifact, i) => (
+                    <FileArtifactCard key={`${artifact.path}-${i}`} artifact={artifact} />
+                  ))}
+                </div>
+              )}
             </React.Fragment>
           );
         })}
@@ -666,8 +750,8 @@ export default function ChatMessageList({
         {/* 无 assistant 响应时 (pipeline 进行中)，实时时间线显示在消息末尾 */}
         {lastUserIdx === messages.length - 1 && <AgentTimeline />}
 
-        {/* Phase 6: Agent 生成的文件 */}
-        {fileArtifacts.length > 0 && (
+        {/* 实时生成的文件 — 仅 pipeline 运行中显示 (完成后会附加到消息上) */}
+        {pipelineStatus === 'running' && fileArtifacts.length > 0 && (
           <div style={{ marginBottom: 12 }}>
             {fileArtifacts.map((artifact, i) => (
               <FileArtifactCard key={`${artifact.path}-${i}`} artifact={artifact} />

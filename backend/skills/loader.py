@@ -362,6 +362,66 @@ class SkillLoader:
             )
         return combined, loaded_names
 
+    def get_skill_body(self, skill_name: str) -> str:
+        """Public API: 获取 Skill 完整正文 (供 read_skill 工具使用)。"""
+        return self._load_body(skill_name)
+
+    def build_skill_index(
+        self,
+        scenario: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        business_type: Optional[str] = None,
+    ) -> tuple[str, list[str]]:
+        """
+        根据 pipeline 上下文匹配 Skill，返回仅名称+描述的索引。
+
+        供 prompt 注入: AI 通过 read_skill 工具按需读取完整内容。
+        """
+        matched_names: list[str] = []
+
+        for name, meta in self._registry.items():
+            skill_type = meta.get("type", "capability")
+
+            if skill_type == "scenario" and scenario and name == scenario:
+                matched_names.append(name)
+                continue
+            if skill_type == "capability":
+                applies_to = meta.get("applies_to", [])
+                if not applies_to or (agent_name and agent_name in applies_to):
+                    matched_names.append(name)
+                    continue
+            if skill_type == "domain" and business_type:
+                business_types = meta.get("business_types", [])
+                applies_to = meta.get("applies_to", [])
+                if business_type in business_types:
+                    if not applies_to or (agent_name and agent_name in applies_to):
+                        matched_names.append(name)
+                    elif not agent_name:
+                        matched_names.append(name)
+
+        # 展开依赖
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for name in matched_names:
+            for resolved in self._resolve_depends(name):
+                if resolved not in seen:
+                    seen.add(resolved)
+                    ordered.append(resolved)
+
+        if not ordered:
+            return "", []
+
+        # 构建索引文本
+        lines = ["可用技能:"]
+        for name in ordered:
+            meta = self._registry.get(name, {})
+            desc = meta.get("description", "")
+            lines.append(f"- {name}: {desc}")
+        lines.append("")
+        lines.append("需要使用某个技能时，调用 read_skill(skill_name) 获取详细内容。")
+
+        return "\n".join(lines), ordered
+
     def read_reference(self, skill_name: str, ref_path: str) -> str:
         """L3 按需加载：读取 Skill 参考资料文件。"""
         meta = self._registry.get(skill_name)
