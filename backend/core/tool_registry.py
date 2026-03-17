@@ -299,14 +299,21 @@ class ToolRegistry:
                 f"  - {p}: {props.get(p, {}).get('description', props.get(p, {}).get('type', 'string'))}"
                 for p in required
             ]
-            return ToolResult(
-                success=False,
-                error=(
-                    f"Missing required arguments for {name}: {', '.join(missing)}. "
-                    f"You must provide all required parameters:\n"
-                    + "\n".join(param_hints)
-                ),
+            error_msg = (
+                f"Missing required arguments for {name}: {', '.join(missing)}. "
+                f"You must provide all required parameters:\n"
+                + "\n".join(param_hints)
             )
+            # 大文件截断导致参数丢失 — 强制 LLM 分段写入
+            if name == "write_source_file" and "content" in missing:
+                error_msg += (
+                    "\n\n【原因】内容太长导致参数被截断。"
+                    "禁止压缩或简化内容。必须分段写入: "
+                    "第一段 write_source_file(path, content=前2500字符, mode='create'), "
+                    "后续段 write_source_file(path, content=下一段2500字符, mode='patch')。"
+                    "每段不超过 2500 字符，保持内容完整。"
+                )
+            return ToolResult(success=False, error=error_msg)
 
         try:
             logger.info(f"Executing tool: {name}", extra={"arguments": arguments})

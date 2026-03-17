@@ -305,22 +305,6 @@ class TestCommandExecution:
         result = sandbox.run_command("sleep 10", ws, timeout=1)
         assert result.get("timed_out") is True
 
-    def test_command_blacklist_blocks_rm_rf(self, sandbox):
-        ws = sandbox.get_workspace("T1", "U1", "sess1")
-        result = sandbox.run_command("rm -rf /", ws)
-        assert result.get("blocked") is True
-        assert "危险" in result["stderr"]
-
-    def test_command_blacklist_blocks_sudo(self, sandbox):
-        ws = sandbox.get_workspace("T1", "U1", "sess1")
-        result = sandbox.run_command("sudo ls", ws)
-        assert result.get("blocked") is True
-
-    def test_command_blacklist_blocks_shutdown(self, sandbox):
-        ws = sandbox.get_workspace("T1", "U1", "sess1")
-        result = sandbox.run_command("shutdown -h now", ws)
-        assert result.get("blocked") is True
-
     def test_command_output_truncation(self, sandbox):
         ws = sandbox.get_workspace("T1", "U1", "sess1")
         # Generate output > 10KB
@@ -334,12 +318,8 @@ class TestCommandExecution:
         result = sandbox.run_command("false", ws)
         assert result["exit_code"] != 0
 
-    def test_is_command_blocked(self, sandbox):
-        assert sandbox._is_command_blocked("rm -rf /") is not None
-        assert sandbox._is_command_blocked("sudo apt install") is not None
-        assert sandbox._is_command_blocked("ls -la") is None
-        assert sandbox._is_command_blocked("python3 script.py") is None
-
+    # 沙箱内不设命令黑名单 — workspace 隔离已提供足够保护
+    # 业务层安全检查由 hooks.py code_safety_hook 负责
 
 class TestDockerSandbox:
     """Tests for Docker sandbox configuration."""

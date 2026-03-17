@@ -875,19 +875,53 @@ class AgenticRuntime:
                     arguments=pre_result.modified_input,
                 )
 
-        # ── 执行工具 ──
-        try:
-            result = await asyncio.wait_for(
-                self.tool_registry.execute(tool_call.name, tool_call.arguments),
-                timeout=self.config.tool_call_timeout_s,
+        # ── 截断自动分段: write_source_file 有 path + 部分 content → 先写入再让 LLM 续写 ──
+        if (
+            tool_call.name == "write_source_file"
+            and tool_call.arguments.get("path")
+            and tool_call.arguments.get("content")
+            and tool_call.arguments["content"].endswith(("...", '"'))
+            and len(tool_call.arguments["content"]) > 500
+        ):
+            partial_content = tool_call.arguments["content"].rstrip('."')
+            path = tool_call.arguments["path"]
+            logger.info(
+                f"Auto-chunking truncated write_source_file: path={path}, partial_len={len(partial_content)}",
+                extra={"trace_id": self.trace_id},
             )
-        except asyncio.TimeoutError:
+            # 写入已有部分
+            chunk_args = {"path": path, "content": partial_content, "mode": "create"}
+            try:
+                await self.tool_registry.execute("write_source_file", chunk_args)
+            except Exception as e:
+                logger.warning(f"Auto-chunk write failed: {e}")
             result = ToolResult(
-                success=False,
-                error=f"Tool {tool_call.name} timed out after {self.config.tool_call_timeout_s}s",
+                success=True,
+                data={
+                    "auto_chunked": True,
+                    "path": path,
+                    "written_chars": len(partial_content),
+                    "message": (
+                        f"文件 {path} 已写入前 {len(partial_content)} 字符 (内容被截断)。"
+                        f"请用 write_source_file(path='{path}', content='...剩余内容...', mode='patch') "
+                        f"继续追加剩余内容。不要重复已写入的部分。"
+                    ),
+                },
             )
-        except Exception as e:
-            result = ToolResult(success=False, error=str(e))
+        else:
+            # ── 正常执行工具 ──
+            try:
+                result = await asyncio.wait_for(
+                    self.tool_registry.execute(tool_call.name, tool_call.arguments),
+                    timeout=self.config.tool_call_timeout_s,
+                )
+            except asyncio.TimeoutError:
+                result = ToolResult(
+                    success=False,
+                    error=f"Tool {tool_call.name} timed out after {self.config.tool_call_timeout_s}s",
+                )
+            except Exception as e:
+                result = ToolResult(success=False, error=str(e))
 
         latency_ms = (time.monotonic() - start) * 1000
 

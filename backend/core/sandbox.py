@@ -242,25 +242,8 @@ class SandboxManager:
 
     # ── 6b. 命令执行沙箱 ──
 
-    # 命令黑名单 — 无论 Docker 与否都快速拒绝
-    _COMMAND_BLACKLIST = [
-        "rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){", "fork",
-        "sudo", "chmod 777", "shutdown", "reboot", "halt", "poweroff",
-        "wget", "curl",  # 网络下载在沙箱内禁止 (Agent 有 browser 工具)
-    ]
-
-    def _is_command_blocked(self, command: str) -> str | None:
-        """
-        快速命令黑名单检查。
-
-        Returns:
-            None 如果允许, 否则返回拒绝原因。
-        """
-        cmd_lower = re.sub(r'\s+', ' ', command.lower().strip())
-        for pattern in self._COMMAND_BLACKLIST:
-            if pattern in cmd_lower:
-                return f"命令被安全策略阻止: 包含危险模式 '{pattern}'"
-        return None
+    # 沙箱内不设命令黑名单 — workspace 隔离 + 磁盘配额 + 网络白名单已提供足够保护。
+    # 业务层安全检查由 hooks.py code_safety_hook 负责（精确正则匹配）。
 
     def run_command(
         self,
@@ -277,11 +260,6 @@ class SandboxManager:
         Returns:
             {"exit_code": int, "stdout": str, "stderr": str, "duration_ms": float, ...}
         """
-        # 1. 黑名单快速拒绝
-        blocked = self._is_command_blocked(command)
-        if blocked:
-            return {"exit_code": -1, "stdout": "", "stderr": blocked, "blocked": True}
-
         timeout = min(
             max(1, timeout or self.config.command_timeout_s),
             self.config.command_max_timeout_s,
