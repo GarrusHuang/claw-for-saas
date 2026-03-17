@@ -7,6 +7,7 @@
  */
 
 import { usePipelineStore } from '../stores/pipeline.ts';
+import { saveSession } from '../stores/pipeline-cache.ts';
 import type { PipelineSnapshot } from './ai-api.ts';
 
 // ── 模块级开关：快照应用期间暂停实时事件分发 ──
@@ -182,11 +183,15 @@ export function dispatchPipelineEvent(
       store.addEvent({ type: eventType, data, timestamp: Date.now() });
       break;
 
-    case 'pipeline_complete':
+    case 'pipeline_complete': {
       store.completePipeline(data.status as string, (data.duration_ms as number) || 0);
       store.addConversationTurn('assistant', '处理完成');
       store.addEvent({ type: 'pipeline_complete', data, timestamp: Date.now() });
+      // 立即更新 sessionStorage 缓存，防止 F5 恢复时残留 running 状态
+      const sid = usePipelineStore.getState().sessionId;
+      if (sid) saveSession(sid);
       break;
+    }
 
     case 'heartbeat':
     case 'keepalive':

@@ -360,7 +360,13 @@ export function useAIChat() {
                   applyPipelineSnapshot(snapshot);
                 }
               })
-              .catch(() => {});
+              .catch(() => {
+                // 快照不存在 (404) → pipeline 已结束，清理 running 状态
+                if (usePipelineStore.getState().sessionId === sessionId) {
+                  usePipelineStore.getState().completePipeline('success', 0);
+                  useSessionStatusStore.getState().removeRunning(sessionId);
+                }
+              });
             clearSessionAction();
             return;
           }
@@ -383,7 +389,14 @@ export function useAIChat() {
                 applyPipelineSnapshot(snapshot);
               }
             })
-            .catch(() => {});
+            .catch(() => {
+              // 快照不存在 → pipeline 已结束
+              if (usePipelineStore.getState().sessionId === sessionId
+                  && usePipelineStore.getState().status === 'running') {
+                usePipelineStore.getState().completePipeline('success', 0);
+                useSessionStatusStore.getState().removeRunning(sessionId);
+              }
+            });
 
           autoStartedRef.current = 'loaded';
           prevAgentMessageRef.current = null;

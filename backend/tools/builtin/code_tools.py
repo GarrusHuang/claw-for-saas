@@ -143,6 +143,9 @@ def read_source_file(
         "写入/创建源代码文件。"
         "mode: create(仅创建新文件) | overwrite(覆盖已有文件) | patch(追加到文件末尾)。"
         "overwrite 模式会在写入前创建 .bak 备份。"
+        "【大文件分段写入 — 强制规则】内容超过 3000 字符时，禁止压缩/简化内容，必须分段写入: "
+        "第一段 mode=create (≤3000字符), 后续段 mode=patch 追加 (≤3000字符/段)。"
+        "保持完整内容，不要为了缩短而删减。"
     ),
     read_only=False,
 )
