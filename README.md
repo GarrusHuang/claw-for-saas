@@ -10,7 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-1881_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-1857_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
 [![License](https://img.shields.io/badge/License-Internal-lightgrey)](#license)
 
 </div>
@@ -33,12 +33,12 @@
 | 特性 | 说明 |
 |:-----|:-----|
 | **ReAct 循环引擎** | 最多 25 轮 Thought → Action → Observation 迭代，支持并行工具调用 |
-| **35 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆 · 技能 · 子 Agent · 定时任务 |
+| **36 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆 · 技能 · 子 Agent · 定时任务 |
 | **8 层提示词架构** | Identity → Soul → Safety → Tools → Skills → Memory → Runtime → Extra |
 | **三层 Markdown 记忆** | global / tenant / user 分层笔记，Agent 自主读写，跨会话持久化 |
 | **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
 | **流式 SSE** | POST-based SSE，15+ 事件类型，实时展示思考过程和工具执行 |
-| **运行时安全围栏** | 文件沙箱 · 命令黑名单 · 网络白名单 · 速率限制 · 数据锁定 · PII 检测 |
+| **运行时安全围栏** | 文件沙箱 · 命令安全检查 · 网络白名单 · 速率限制 · 数据锁定 · PII 检测 |
 | **MCP 标准工具接口** | 可选启用，6 个标准工具，支持 HTTP 转发到宿主系统 |
 | **定时调度 + Webhook** | Cron 定时任务 · 一次性任务 · Webhook HMAC 签名回调 |
 | **全格式文件预览** | DOCX · PDF · Excel · 图片 · HTML · 代码 · Markdown |
@@ -65,7 +65,7 @@
 │                                                              │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐                 │
 │  │ Gateway  │ → │ Runtime  │ → │  Tools   │                 │
-│  │  入口     │   │  ReAct   │   │  35 个   │                 │
+│  │  入口     │   │  ReAct   │   │  36 个   │                 │
 │  └──────────┘   └──────────┘   └──────────┘                 │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐                 │
 │  │ Prompt   │   │ Memory   │   │  Hooks   │                 │
@@ -135,7 +135,7 @@ claw-for-saas/
 │   ├── agent/              # Gateway + 编排 (prompt, session, hooks, subagent, quality_gate)
 │   ├── memory/             # 三层 Markdown 记忆 (global/tenant/user)
 │   ├── tools/
-│   │   ├── builtin/        # 29 个内置工具
+│   │   ├── builtin/        # 30 个内置工具
 │   │   └── mcp/            # MCP 标准工具接口
 │   ├── skills/builtin/     # 20 个内置 Skill
 │   ├── services/           # 文件 / 知识库 / 浏览器 / 用量统计
@@ -289,26 +289,26 @@ request_input      → Agent 请求用户输入
 ## 测试
 
 ```bash
-# 后端单元测试（1674 用例）
+# 后端单元测试（1671 用例）
 cd backend && python3 -m pytest tests/ -m "not llm" -v
 
-# 后端 + LLM 集成测试（1700 用例，需 LLM 服务在线）
+# 后端 + LLM 集成测试（1697 用例，需 LLM 服务在线）
 cd backend && python3 -m pytest tests/ -v
 
 # 前端单元测试（160 用例）
-cd frontend && npm test
+cd frontend && npm run test:unit
 
-# 前端 E2E（21 用例）
+# 前端 E2E（2 specs）
 cd frontend && npx playwright test
 ```
 
 | 层级 | 测试数 | 覆盖范围 |
 |:-----|:-------|:---------|
-| 后端 Unit | 1,674 | 59 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
+| 后端 Unit | 1,671 | 59 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
 | 后端 LLM 集成 | 26 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
 | 前端 Unit | 160 | claw-core (73) · claw-ui (81) · app (6) |
-| 前端 E2E | 21 | Playwright 关键用户流程 |
-| **合计** | **1,881** | |
+| 前端 E2E | 2 specs | Playwright 关键用户流程 |
+| **合计** | **1,857+** | |
 
 ---
 
@@ -329,7 +329,7 @@ cd frontend && npx playwright test
 |:-----|:-----|
 | [`backend/CLAUDE.md`](backend/CLAUDE.md) | 后端架构详解 — ReAct 循环、工具系统、Hook、安全 |
 | [`frontend/CLAUDE.md`](frontend/CLAUDE.md) | 前端架构详解 — 组件、状态管理、SSE 集成 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 20 Phase 开发路线图 (A1-A15 后端 + F1-F5 前端) |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 20 Phase 开发路线图 (A1-A18 后端 + F1-F9 前端) |
 
 ---
 
