@@ -209,6 +209,75 @@ def check_calculation_verified(event: HookEvent) -> tuple[bool, str, str]:
     return True, "", ""
 
 
+def check_memory_compliance(event: HookEvent) -> tuple[bool, str, str]:
+    """
+    检查 Agent 回复是否违反记忆中的用户显式偏好。
+
+    可选检查 — 默认不启用 (不在 QualityGate 默认 checks 中)。
+    SaaS 集成方可通过 QualityGate(checks=[check_memory_compliance]) 启用。
+
+    逻辑: 从 ContextVar 读取当前记忆内容，
+    检查 final_answer 是否违反显式偏好 (关键词匹配)。
+
+    支持的偏好模式:
+    - "使用表格格式" / "用表格" → 回复应包含 "|" (Markdown 表格)
+    - "使用中文" / "用中文回复" → 回复不应全是 ASCII
+    - "不要" + 关键词 → 回复不应包含该关键词
+    """
+    context = event.context or {}
+    final_answer = context.get("final_answer", "")
+    if not final_answer:
+        return True, "", ""
+
+    # 从 ContextVar 读取记忆
+    try:
+        from core.context import current_memory_store
+        memory_store = current_memory_store.get(None)
+        if not memory_store:
+            return True, "", ""
+
+        from core.context import current_tenant_id, current_user_id as ctx_user_id
+        tenant_id = current_tenant_id.get("default")
+        user_id = ctx_user_id.get("anonymous")
+        memory_content = memory_store.build_memory_prompt(tenant_id, user_id)
+    except Exception:
+        return True, "", ""
+
+    if not memory_content:
+        return True, "", ""
+
+    issues: list[str] = []
+
+    # 偏好: 表格格式
+    table_keywords = ["使用表格格式", "用表格", "以表格形式", "表格输出"]
+    wants_table = any(kw in memory_content for kw in table_keywords)
+    if wants_table and "|" not in final_answer:
+        issues.append("记忆中要求使用表格格式，但回复中未包含表格")
+
+    # 偏好: 中文回复
+    chinese_keywords = ["使用中文", "用中文回复", "中文回答"]
+    wants_chinese = any(kw in memory_content for kw in chinese_keywords)
+    if wants_chinese and final_answer.isascii() and len(final_answer) > 20:
+        issues.append("记忆中要求使用中文回复，但回复全为英文")
+
+    # 偏好: "不要" 禁止模式
+    import re
+    deny_patterns = re.findall(r"不要(?:使用|用)?(.{2,10}?)(?:[，。,.\s]|$)", memory_content)
+    for denied in deny_patterns:
+        denied = denied.strip()
+        if denied and denied in final_answer:
+            issues.append(f"记忆中要求不要使用「{denied}」，但回复中包含该内容")
+
+    if issues:
+        correction = (
+            "请根据用户偏好修改回复:\n"
+            + "\n".join(f"- {issue}" for issue in issues)
+        )
+        return False, "; ".join(issues), correction
+
+    return True, "", ""
+
+
 # ── Quality Gate Hook ──
 
 # 用于追踪自迭代次数 (per-session)
