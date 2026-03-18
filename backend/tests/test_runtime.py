@@ -122,11 +122,11 @@ def test_runtime_config_defaults():
     assert config.tool_call_timeout_s == 30.0
     assert config.parallel_tool_calls is True
     assert config.temperature is None
-    assert config.max_tool_result_chars == 3000
+    assert config.max_tool_result_chars == 0  # 0 = dynamic calculation
     assert config.context_budget_tokens == 0  # A4: 默认动态计算
     assert config.model_context_window == 32000
     assert config.context_budget_ratio == 0.8
-    assert config.compress_threshold_ratio == 0.85
+    assert config.compress_threshold_ratio == 0.70
     assert config.context_budget_min == 16000
     # 动态预算: 32000 * 0.8 = 25600
     assert config.get_effective_budget() == 25600

@@ -153,3 +153,64 @@ def recall_memory(
     except Exception as e:
         logger.error(f"recall_memory error: {e}")
         return {"error": str(e)}
+
+
+@memory_capability_registry.tool(
+    description=(
+        "按关键词搜索记忆。"
+        "当 <memory> 标签中的概览不够详细时，用此工具按关键词搜索全部记忆文件。"
+        "比 recall_memory 更精准 — 只返回包含关键词的段落，减少 token 消耗。"
+    ),
+    read_only=True,
+)
+def search_memory(
+    query: str,                # 搜索关键词 (支持多个词，空格分隔，OR 匹配)
+    scope: str = "user",       # "user" | "tenant" | "global" | "all"
+) -> dict:
+    """按关键词搜索记忆笔记，返回匹配的段落。"""
+    store = current_memory_store.get(None)
+    if not store:
+        return {"error": "MarkdownMemoryStore 未初始化"}
+
+    tenant_id = current_tenant_id.get("default")
+    user_id = current_user_id.get("anonymous")
+
+    keywords = [k.strip().lower() for k in query.split() if k.strip()]
+    if not keywords:
+        return {"error": "请提供搜索关键词"}
+
+    try:
+        scopes = ["global", "tenant", "user"] if scope == "all" else [scope]
+        matches: list[dict] = []
+
+        for s in scopes:
+            files = store.list_files(s, tenant_id=tenant_id, user_id=user_id)
+            for fname in files:
+                content = store.read_file(s, fname, tenant_id=tenant_id, user_id=user_id)
+                if not content:
+                    continue
+                # 按段落搜索 (## 分割或双换行分割)
+                paragraphs = content.split("\n## ")
+                for i, para in enumerate(paragraphs):
+                    para_lower = para.lower()
+                    if any(kw in para_lower for kw in keywords):
+                        prefix = "## " if i > 0 else ""
+                        matches.append({
+                            "scope": s,
+                            "file": fname,
+                            "content": (prefix + para)[:500],
+                        })
+
+        if not matches:
+            return {"query": query, "matches": [], "message": "未找到匹配的记忆"}
+
+        # 限制返回数量
+        return {
+            "query": query,
+            "matches": matches[:10],
+            "total": len(matches),
+        }
+
+    except Exception as e:
+        logger.error(f"search_memory error: {e}")
+        return {"error": str(e)}

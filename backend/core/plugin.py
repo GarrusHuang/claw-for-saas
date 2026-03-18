@@ -114,12 +114,18 @@ class PluginContext:
         )
         self._prompt_builder.register_section(section)
 
-    def register_skill(self, content: str) -> None:
+    def register_skill(self, content: str, name: str = "") -> None:
         """注册一个 Skill (Markdown 内容)。"""
         if self._skill_loader is None:
             logger.warning("No skill loader available, skill registration skipped")
             return
-        logger.info(f"Plugin skill registered ({len(content)} chars)")
+        try:
+            skill_name = name or f"plugin_skill_{id(content) % 10000}"
+            self._skill_loader.register_inline_skill(skill_name, content)
+            logger.info(f"Plugin skill registered: {skill_name} ({len(content)} chars)")
+        except AttributeError:
+            # SkillLoader 没有 register_inline_skill 方法时 fallback
+            logger.info(f"Plugin skill noted ({len(content)} chars) — inline registration not supported")
 
 
 class ClawPlugin(ABC):

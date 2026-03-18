@@ -24,6 +24,7 @@ export type NotificationHandler = (event: { type: string; data: Record<string, u
 export function useNotifications(onNotification: NotificationHandler, enabled = true): void {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const reconnectAttempt = useRef(0);
   const handlerRef = useRef(onNotification);
   handlerRef.current = onNotification;
 
@@ -51,6 +52,9 @@ export function useNotifications(onNotification: NotificationHandler, enabled = 
       wsRef.current = ws;
 
       ws.onopen = () => {
+        // 重连成功，重置计数
+        reconnectAttempt.current = 0;
+
         // 首次连接 or 重连：拉取运行中的 session 列表恢复蓝点
         fetchRunningSessions()
           .then((ids) => {
@@ -143,16 +147,20 @@ export function useNotifications(onNotification: NotificationHandler, enabled = 
 
       ws.onclose = () => {
         wsRef.current = null;
-        // 5 秒后重连
-        reconnectTimer.current = setTimeout(connect, 5_000);
+        // 指数退避重连: 5s → 10s → 20s → 60s (上限)
+        const delay = Math.min(5_000 * Math.pow(2, reconnectAttempt.current), 60_000);
+        reconnectAttempt.current += 1;
+        reconnectTimer.current = setTimeout(connect, delay);
       };
 
       ws.onerror = () => {
         // onerror 后会触发 onclose，由 onclose 处理重连
       };
     } catch {
-      // 连接失败，5 秒后重试
-      reconnectTimer.current = setTimeout(connect, 5_000);
+      // 连接失败，指数退避重试
+      const delay = Math.min(5_000 * Math.pow(2, reconnectAttempt.current), 60_000);
+      reconnectAttempt.current += 1;
+      reconnectTimer.current = setTimeout(connect, delay);
     }
   }, [enabled]);
 

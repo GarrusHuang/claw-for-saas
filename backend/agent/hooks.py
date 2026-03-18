@@ -116,6 +116,10 @@ def known_values_guard(event: HookEvent) -> HookResult:
 
     通过 contextvars 中的 current_known_field_ids 检查
     (由 Gateway 在请求入口设置)。
+
+    注: 当前 known_field_ids 始终为空集合 — 需要 MCP 集成后
+    由 Gateway 从 get_protected_values() 响应填充。
+    在此之前本 hook 是 no-op 但保留框架以备 MCP 激活。
     """
     from core.context import current_known_field_ids
 
@@ -227,4 +231,17 @@ def build_default_hooks() -> HookRegistry:
     registry.register("pre_tool_use", data_lock_hook)
     # Phase 27: 编码工具安全 Hook (no matcher — checks tool_name internally)
     registry.register("pre_tool_use", code_safety_hook)
+
+    # 声明式规则引擎: 加载 data/hook_rules/*.json 中用户定义的规则
+    try:
+        from agent.hook_rules import HookRuleEngine
+        import os
+        rules_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "hook_rules")
+        engine = HookRuleEngine(rules_dir)
+        rule_count = engine.register_all(registry)
+        if rule_count:
+            logger.info(f"Loaded {rule_count} declarative hook rules from {rules_dir}")
+    except Exception as e:
+        logger.debug(f"Hook rule engine loading skipped: {e}")
+
     return registry

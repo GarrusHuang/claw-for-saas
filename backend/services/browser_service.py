@@ -24,6 +24,27 @@ class BrowserService:
     def __init__(self):
         self._browser = None
         self._playwright = None
+        self._available: bool | None = None  # 缓存检测结果
+
+    def is_available(self) -> bool:
+        """检测 Playwright 浏览器二进制是否可用。"""
+        if self._available is not None:
+            return self._available
+        try:
+            import shutil
+            # playwright 安装后 chromium 在 ~/.cache/ms-playwright/ 或类似路径
+            # 最可靠的检测方式是尝试 import + 检查 executable
+            from playwright._impl._driver import compute_driver_executable
+            driver = compute_driver_executable()
+            self._available = bool(driver and shutil.which(driver) or __import__('os').path.isfile(driver))
+        except Exception:
+            try:
+                # fallback: 检测 playwright 包是否已安装
+                import playwright
+                self._available = True
+            except ImportError:
+                self._available = False
+        return self._available
 
     async def ensure_browser(self):
         """懒初始化 Playwright Chromium 实例。"""

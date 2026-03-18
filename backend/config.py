@@ -47,6 +47,10 @@ class Settings(BaseSettings):
         default=False,
         description="Enable thinking mode (chat_template_kwargs.enable_thinking)",
     )
+    llm_fallback_model: str = Field(
+        default="",
+        description="Fallback model when primary model is unavailable (empty=no fallback)",
+    )
 
     # ─── Agent Runtime ───
     agent_max_iterations: int = Field(
@@ -62,8 +66,8 @@ class Settings(BaseSettings):
         description="Enable parallel read-only tool calls",
     )
     agent_max_tool_result_chars: int = Field(
-        default=3000,
-        description="Max chars per tool result (0=unlimited)",
+        default=0,
+        description="Max chars per tool result (0=dynamic: 30%% of context window, min 3000)",
     )
     # ─── A4: Context Management ───
     agent_model_context_window: int = Field(
@@ -75,8 +79,8 @@ class Settings(BaseSettings):
         description="Context budget as ratio of model window (reserve 20% for output)",
     )
     agent_compress_threshold_ratio: float = Field(
-        default=0.85,
-        description="Trigger compression at this fraction of budget (early trigger)",
+        default=0.70,
+        description="Trigger compression at this fraction of budget (early trigger for multi-stage)",
     )
     agent_context_budget_tokens: int = Field(
         default=0,
@@ -198,7 +202,15 @@ class Settings(BaseSettings):
         description="A7: Max chars for a single Skill body",
     )
 
-    # ─── Memory (A8: Markdown 分层笔记) ───
+    # ─── Memory (A8: Markdown 分层笔记 + 自动提取) ───
+    memory_auto_extract_enabled: bool = Field(
+        default=True,
+        description="Enable auto-extraction of user preferences/corrections after each conversation",
+    )
+    memory_auto_extract_max_tokens: int = Field(
+        default=300,
+        description="Max tokens for auto-extract LLM call",
+    )
     memory_storage_dir: str = Field(
         default="data/memory",
         description="Memory persistence directory (三级: global/tenant/user)",

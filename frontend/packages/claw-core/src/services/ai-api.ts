@@ -25,6 +25,29 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+/** 标记是否正在刷新 token，防止多个 401 同时触发刷新 */
+let _refreshing: Promise<boolean> | null = null;
+
+async function _tryRefreshToken(): Promise<boolean> {
+  try {
+    const { useAuthStore } = await import('../stores/auth.ts');
+    const state = useAuthStore.getState();
+    // 如果有 refresh 逻辑 (通过 getAuthToken 动态获取)
+    const config = getAIConfig();
+    if (config.getAuthToken) {
+      const newToken = await config.getAuthToken();
+      if (newToken && newToken !== state.token) {
+        return true; // getAuthToken 已返回新 token
+      }
+    }
+    // 无法刷新 → 登出
+    state.logout();
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const authHeaders = await getAuthHeaders();
   const { headers: optionHeaders, ...restOptions } = options || {};
@@ -38,6 +61,31 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     ...restOptions,
     headers: mergedHeaders,
   });
+
+  // 401 拦截: 尝试刷新 token 后重试一次
+  if (res.status === 401) {
+    if (!_refreshing) {
+      _refreshing = _tryRefreshToken().finally(() => { _refreshing = null; });
+    }
+    const refreshed = await _refreshing;
+    if (refreshed) {
+      // 用新 token 重试
+      const newHeaders = await getAuthHeaders();
+      const retryRes = await fetch(`${getBaseUrl()}${path}`, {
+        ...restOptions,
+        headers: { ...newHeaders, ...(optionHeaders instanceof Headers
+          ? Object.fromEntries(optionHeaders.entries())
+          : optionHeaders as Record<string, string> | undefined) },
+      });
+      if (retryRes.ok) {
+        if (retryRes.status === 204) return {} as T;
+        return retryRes.json() as Promise<T>;
+      }
+    }
+    const text = await res.text().catch(() => '');
+    throw new Error(`API 401: ${text || 'Unauthorized'}`);
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`API ${res.status}: ${text || res.statusText}`);

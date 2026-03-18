@@ -50,26 +50,35 @@ def smart_truncate(text: str, max_chars: int) -> str:
     if max_chars < _MIN_TRUNCATE_CHARS:
         return text[:max_chars] + "...[truncated]"
 
-    marker_template = "\n...[truncated {} chars]...\n"
-
     # 检测尾部是否包含重要内容
+    # 注: 不再把 }/] 单独作为信号 — 几乎所有 JSON 响应尾部都有闭合标签，
+    # 这会导致 has_important_tail 几乎永远为 True。
+    # 改为只检测明确的错误/摘要关键词。
     tail_500 = text[-500:] if len(text) > 500 else text
     has_important_tail = any(sig in tail_500 for sig in (
         '"error"', '"Error"', '"status"', '"total"', '"summary"',
         "Exception", "Traceback", "错误", "失败", "总计",
-        "}", "]",  # JSON 闭合标签
     ))
 
+    # 先估算 marker 长度，纳入预算计算
+    truncated_estimate = len(text) - max_chars
+    marker_template = "\n...[truncated {} chars]...\n"
+    marker = marker_template.format(truncated_estimate)
+    marker_len = len(marker)
+
     if has_important_tail:
-        # 30% 尾部, 70% 头部
-        tail_budget = int(max_chars * 0.3)
-        head_budget = max_chars - tail_budget - 40  # 40 for marker
+        # 30% 尾部, 70% 头部 (扣除 marker 预算)
+        usable = max_chars - marker_len
+        tail_budget = int(usable * 0.3)
+        head_budget = usable - tail_budget
     else:
-        # 全部给头部
-        head_budget = max_chars - 40
+        # 全部给头部 (扣除 marker 预算)
+        head_budget = max_chars - marker_len
         tail_budget = 0
 
     head_budget = max(head_budget, 200)
+
+    # 重算实际截断字符数 (marker 文本可能微调)
     truncated_count = len(text) - head_budget - tail_budget
     marker = marker_template.format(truncated_count)
 

@@ -81,13 +81,20 @@ def build_mcp_registry() -> ToolRegistry:
     return mcp_registry
 
 
-def build_full_registry() -> ToolRegistry:
+def build_full_registry(mcp_enabled: bool = False) -> ToolRegistry:
     """
-    Build full tool registry (shared + capability + plan + mcp).
+    Build full tool registry (shared + capability + plan + conditionally mcp).
     Single unified registry — no more AUTO/EXECUTE split.
+
+    Args:
+        mcp_enabled: Only register MCP tools when True (avoids exposing
+                     6 stub tools that return default/fallback data).
     """
     shared = build_shared_registry()
     capability = build_capability_registry()
     plan = build_plan_registry()
-    mcp = build_mcp_registry()
-    return shared.merge(capability).merge(plan).merge(mcp)
+    merged = shared.merge(capability).merge(plan)
+    if mcp_enabled:
+        mcp = build_mcp_registry()
+        merged = merged.merge(mcp)
+    return merged

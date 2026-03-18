@@ -32,11 +32,11 @@ class TestPasswordHashing:
         assert verify_password("wrong", hashed) is False
 
     def test_hash_format(self):
+        """bcrypt hash starts with $2b$ prefix."""
         hashed = hash_password("test")
-        parts = hashed.split(":")
-        assert len(parts) == 2
-        assert len(parts[0]) == 32  # salt is 16 bytes hex = 32 chars
-        assert len(parts[1]) == 64  # sha256 hex = 64 chars
+        assert hashed.startswith("$2b$"), f"Expected bcrypt format, got: {hashed[:20]}"
+        # bcrypt hash is 60 characters total
+        assert len(hashed) == 60
 
     def test_different_hashes_for_same_password(self):
         h1 = hash_password("same")

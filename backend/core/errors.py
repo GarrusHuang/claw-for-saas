@@ -34,6 +34,8 @@ class ErrorCategory(str, Enum):
     NETWORK = "network"                    # 网络连接失败
     INTERNAL = "internal"                  # 内部错误
     VALIDATION = "validation"              # 输入验证失败
+    MODEL_UNAVAILABLE = "model_unavailable"  # 模型不可用 (需降级)
+    BILLING = "billing"                    # 计费错误
 
 
 # 哪些错误类型可自动恢复
@@ -57,6 +59,8 @@ _SUGGESTED_ACTIONS = {
     ErrorCategory.NETWORK: "网络连接失败，请检查连接后重试",
     ErrorCategory.INTERNAL: "内部错误，请联系管理员",
     ErrorCategory.VALIDATION: "请求参数错误，请检查输入",
+    ErrorCategory.MODEL_UNAVAILABLE: "当前模型不可用，正在切换备用模型",
+    ErrorCategory.BILLING: "计费错误，请检查账户状态",
 }
 
 
@@ -154,5 +158,14 @@ def classify_error(
     network_keywords = ["connection", "connect", "timeout", "网络"]
     if any(kw in msg_lower for kw in network_keywords):
         return ErrorCategory.NETWORK
+
+    model_unavailable_keywords = ["model not found", "model_not_found", "no such model",
+                                   "model is currently overloaded", "decommissioned"]
+    if any(kw in msg_lower for kw in model_unavailable_keywords):
+        return ErrorCategory.MODEL_UNAVAILABLE
+
+    billing_keywords = ["billing", "quota exceeded", "insufficient_quota", "payment"]
+    if any(kw in msg_lower for kw in billing_keywords):
+        return ErrorCategory.BILLING
 
     return ErrorCategory.INTERNAL

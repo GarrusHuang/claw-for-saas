@@ -55,6 +55,13 @@ async def lifespan(app: FastAPI):
     if plugin_count:
         logger.info(f"Loaded {plugin_count} plugins")
 
+    # Cleanup orphan session locks (from previous crashes)
+    from dependencies import get_session_manager
+    sm = get_session_manager()
+    orphan_count = sm.cleanup_orphan_locks()
+    if orphan_count:
+        logger.info(f"Cleaned {orphan_count} orphan session locks")
+
     # Start scheduler (A9)
     from dependencies import get_scheduler, get_settings
     s = get_settings()
@@ -67,11 +74,14 @@ async def lifespan(app: FastAPI):
     file_cleanup_task = None
     if s.file_retention_days > 0:
         async def _file_cleanup_loop():
-            """每 6 小时清理一次过期的用户上传文件。"""
+            """启动立即执行一次，之后每 6 小时清理过期的用户上传文件。"""
             from dependencies import get_file_service
+            first_run = True
             while True:
                 try:
-                    await asyncio.sleep(6 * 3600)  # 6 小时
+                    if not first_run:
+                        await asyncio.sleep(6 * 3600)  # 6 小时
+                    first_run = False
                     svc = get_file_service()
                     deleted = svc.cleanup_expired(s.file_retention_days)
                     if deleted:
@@ -80,6 +90,9 @@ async def lifespan(app: FastAPI):
                     break
                 except Exception as e:
                     logger.warning(f"File cleanup error: {e}")
+                    if first_run:
+                        first_run = False  # 防止首次失败后无限重试
+                    await asyncio.sleep(60)  # 出错等 60s 再继续
 
         file_cleanup_task = asyncio.create_task(_file_cleanup_loop())
         logger.info(f"File cleanup enabled: retention={s.file_retention_days} days, interval=6h")

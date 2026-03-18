@@ -50,9 +50,9 @@ class ToolCallParser:
     3. 都没有 → 视为 final_answer
     """
 
-    # Hermes XML 格式正则
-    _TOOL_CALL_PATTERN = re.compile(
-        r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
+    # Hermes XML — 提取 <tool_call>...</tool_call> 之间的原始内容
+    _TOOL_CALL_TAG_PATTERN = re.compile(
+        r"<tool_call>\s*(.*?)\s*</tool_call>",
         re.DOTALL,
     )
     # thinking 标签 (<think>...</think>)
@@ -102,7 +102,9 @@ class ToolCallParser:
             parsed_calls = self._parse_hermes_xml(content)
             if parsed_calls:
                 # 提取非 tool_call 的文本作为 reasoning
-                clean_content = self._TOOL_CALL_PATTERN.sub("", content).strip()
+                clean_content = re.sub(
+                    r"<tool_call>.*?</tool_call>", "", content, flags=re.DOTALL
+                ).strip()
                 return ParsedResponse(
                     is_final_answer=False,
                     content=clean_content,
@@ -275,14 +277,55 @@ class ToolCallParser:
 
         return None
 
+    @staticmethod
+    def _extract_balanced_json(text: str) -> str | None:
+        """
+        从文本中提取第一个平衡大括号的 JSON 对象。
+
+        解决 {.*?} 正则在嵌套 JSON (如 arguments 包含嵌套 dict) 时
+        截断的问题。
+        """
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                if in_string:
+                    escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        return None
+
     def _parse_hermes_xml(self, content: str) -> list[ParsedToolCall]:
         """解析 Hermes XML <tool_call>JSON</tool_call> 格式。"""
         parsed = []
-        matches = self._TOOL_CALL_PATTERN.findall(content)
+        matches = self._TOOL_CALL_TAG_PATTERN.findall(content)
 
         for match in matches:
             try:
-                data = json.loads(match)
+                # 使用平衡大括号提取，避免嵌套 JSON 截断
+                json_str = self._extract_balanced_json(match)
+                if not json_str:
+                    logger.warning(f"No balanced JSON found in tool_call: {match[:100]}")
+                    continue
+                data = json.loads(json_str)
                 name = data.get("name", "")
                 arguments = data.get("arguments", data.get("parameters", {}))
                 if name:
@@ -292,7 +335,7 @@ class ToolCallParser:
                         arguments=arguments,
                     ))
             except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse Hermes XML tool call: {e}, raw: {match}")
+                logger.warning(f"Failed to parse Hermes XML tool call: {e}, raw: {match[:100]}")
                 continue
 
         return parsed

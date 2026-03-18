@@ -159,6 +159,11 @@ def get_browser_service():
     if _browser_service is None:
         from services.browser_service import BrowserService
         _browser_service = BrowserService()
+        if not _browser_service.is_available():
+            logger.warning(
+                "Playwright browser not available — browser tools (open_url, page_screenshot, "
+                "page_extract_text) will return errors. Run 'playwright install chromium' to fix."
+            )
     return _browser_service
 
 
@@ -237,9 +242,11 @@ def get_plugin_registry():
     s = get_settings()
 
     # 构建插件上下文 (四维扩展点)
+    from agent.hooks import build_default_hooks as _build_plugin_hooks
     plugin_tool_registry = ToolRegistry()
     ctx = PluginContext(
         tool_registry=plugin_tool_registry,
+        hook_registry=_build_plugin_hooks(),
         prompt_builder=get_prompt_builder(),
         skill_loader=get_skill_loader(),
     )
@@ -298,18 +305,22 @@ def build_gateway():
     plugin_registry = get_plugin_registry()
     plugin_tools: ToolRegistry | None = getattr(plugin_registry, "_plugin_tool_registry", None)
 
-    tool_registry = build_full_registry()
+    s = get_settings()
+    tool_registry = build_full_registry(mcp_enabled=s.mcp_enabled)
 
     if plugin_tools and len(plugin_tools) > 0:
         tool_registry = tool_registry.merge(plugin_tools)
 
     session_manager = get_session_manager()
 
+    hooks = build_default_hooks()
+
     subagent_runner = SubagentRunner(
         llm_client=llm_client,
         shared_registry=shared_registry,
         capability_registry=capability_registry,
         prompt_builder=prompt_builder,
+        hooks=hooks,
     )
 
     return AgentGateway(
@@ -321,6 +332,6 @@ def build_gateway():
         subagent_runner=subagent_runner,
         memory_store=get_memory_store(),
         mcp_provider=get_mcp_provider(),
-        hooks=build_default_hooks(),
+        hooks=hooks,
         runtime_config=get_runtime_config(),
     )

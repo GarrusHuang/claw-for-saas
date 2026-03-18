@@ -64,11 +64,11 @@ class RuntimeConfig:
     tool_call_timeout_s: float = 30.0
     parallel_tool_calls: bool = True
     temperature: float | None = None  # 覆盖 LLM 默认值
-    max_tool_result_chars: int = 3000  # 单个工具结果最大字符数 (0=不限制)
+    max_tool_result_chars: int = 0     # 单个工具结果最大字符数 (0=动态计算)
     context_budget_tokens: int = 0     # 0 = 动态计算 (A4: 4c)
     model_context_window: int = 32000  # 模型上下文窗口
     context_budget_ratio: float = 0.8  # 预算占窗口比例
-    compress_threshold_ratio: float = 0.85  # 压缩触发阈值
+    compress_threshold_ratio: float = 0.70  # 压缩触发阈值 (前移以留多阶段操作空间)
     context_budget_min: int = 16000    # 最低预算硬下限
     stream: bool = True                # 是否流式输出
 
@@ -79,6 +79,21 @@ class RuntimeConfig:
         ratio = max(0.1, min(1.0, self.context_budget_ratio))
         budget = int(self.model_context_window * ratio)
         return max(budget, self.context_budget_min)
+
+    def get_effective_tool_result_chars(self) -> int:
+        """
+        计算实际工具结果字符上限。
+
+        0 → 动态: 30% 上下文窗口 (chars ≈ tokens × 4), 最低 3000
+        > 0 → 使用显式配置值
+
+        对标 OpenClaw MAX_TOOL_RESULT_CONTEXT_SHARE = 0.3
+        """
+        if self.max_tool_result_chars > 0:
+            return self.max_tool_result_chars
+        # ~4 chars per token, 30% of context window
+        dynamic = int(self.model_context_window * 4 * 0.3)
+        return max(dynamic, 3000)
 
 
 @dataclass
@@ -153,6 +168,8 @@ class AgenticRuntime:
             "stages": {1: 0, 2: 0, 3: 0},
             "overflow_retries": 0,
         }
+        # ── 压缩 checkpoint: 压缩前消息快照 ──
+        self._compaction_checkpoint: list[dict] | None = None
         # ── 中止标志: 客户端断开时停止循环 ──
         self._abort_requested = False
         # ── 重复检测: 防止 Agent 陷入工具调用死循环 ──
@@ -222,23 +239,54 @@ class AgenticRuntime:
             # ─── 0. 上下文预算检查 + 中间压缩 ───
             messages = await self._compact_messages(messages)
 
-            # ─── 1. 调用 LLM (流式) ───
-            try:
-                llm_response = await self._streaming_llm_call(
-                    messages=messages,
-                    iteration=iteration,
-                )
-            except Exception as e:
-                logger.error(f"LLM call failed at iteration {iteration + 1}: {e}")
+            # ─── 1. 调用 LLM (流式) + 瞬时错误重试 ───
+            llm_response = None
+            llm_error = None
+            for attempt in range(3):  # 最多 2 次重试 (共 3 次尝试)
+                try:
+                    llm_response = await self._streaming_llm_call(
+                        messages=messages,
+                        iteration=iteration,
+                    )
+                    break
+                except Exception as e:
+                    llm_error = e
+                    if attempt < 2:
+                        # 检查是否为可重试的瞬时错误
+                        from core.errors import classify_error, ErrorCategory
+                        category = classify_error(error_msg=str(e), exception=e)
+                        retriable = category in (
+                            ErrorCategory.RATE_LIMIT, ErrorCategory.OVERLOADED,
+                            ErrorCategory.NETWORK,
+                        )
+                        if retriable:
+                            wait = 2 ** attempt  # 1s, 2s
+                            logger.warning(
+                                f"LLM call failed (attempt {attempt + 1}/3, "
+                                f"category={category.value}), retrying in {wait}s: {e}"
+                            )
+                            self._emit("agent_progress", {
+                                "status": "llm_retry",
+                                "attempt": attempt + 1,
+                                "category": category.value,
+                                "wait_s": wait,
+                            })
+                            await asyncio.sleep(wait)
+                            continue
+                    # Non-retriable or max attempts exhausted
+                    break
+
+            if llm_response is None:
+                logger.error(f"LLM call failed at iteration {iteration + 1}: {llm_error}")
                 self._steps.append(RuntimeStep(
                     step_type=StepType.ERROR,
-                    content=str(e),
+                    content=str(llm_error),
                     iteration=iteration,
                 ))
                 return self._build_result(
-                    final_answer=f"[LLM Error] {e}",
+                    final_answer=f"[LLM Error] {llm_error}",
                     iterations=iteration + 1,
-                    error=str(e),
+                    error=str(llm_error),
                 )
 
             # 更新 token 用量
@@ -375,7 +423,7 @@ class AgenticRuntime:
 
                 # 追加每个工具的结果 (A4-4a: 按比例分配总预算)
                 per_tool_budgets = self._allocate_tool_budgets(
-                    observations, self.config.max_tool_result_chars,
+                    observations, self.config.get_effective_tool_result_chars(),
                 )
                 for tc, obs, budget in zip(parsed.tool_calls, observations, per_tool_budgets):
                     messages.append({
@@ -1009,6 +1057,9 @@ class AgenticRuntime:
         original_count = len(messages)
         stage_used = 0
 
+        # 保存压缩前快照 (checkpoint) — 用于异常回退
+        self._compaction_checkpoint = [msg.copy() for msg in messages]
+
         # 分类压缩触发原因
         reason = self._classify_compaction_reason(messages, original_estimated, budget)
 
@@ -1043,7 +1094,21 @@ class AgenticRuntime:
         messages = self._stage3_metadata_mode(messages)
         messages = self._repair_tool_pairs(messages)
         estimated = estimate_messages_tokens(messages, tools=tools_schema)
-        stage_used = 3
+        if estimated <= budget:
+            stage_used = 3
+            self._emit_compaction_event(
+                stage_used, original_count, len(messages),
+                original_estimated, estimated, reason=reason,
+            )
+            return messages
+
+        # ── 阶段 4: 逐条删最旧非系统消息 (最终兜底) ──
+        # 对标 Codex: 逐条删最旧直到 fit
+        # 保留 system[0] + 最后 2 条消息
+        messages = self._stage4_drop_oldest(messages, budget, tools_schema)
+        estimated = estimate_messages_tokens(messages, tools=tools_schema)
+        stage_used = 4
+        self._compact_stats["stages"][4] = self._compact_stats["stages"].get(4, 0) + 1
 
         self._emit_compaction_event(
             stage_used, original_count, len(messages),
@@ -1262,6 +1327,47 @@ class AgenticRuntime:
             "content": f"[{compacted_count} earlier messages compacted to save context. Continue from here.]",
         }
         return head + [summary] + tail
+
+    def _stage4_drop_oldest(
+        self,
+        messages: list[dict],
+        budget: int,
+        tools_schema: list[dict] | None,
+    ) -> list[dict]:
+        """
+        阶段 4: 逐条删最旧非系统消息直到 fit。
+
+        对标 Codex 逐条删最旧 fallback。
+        保留 system[0] + 最后 2 条消息。
+        """
+        # 分离 system, middle, tail
+        system = [messages[0]] if messages and messages[0].get("role") == "system" else []
+        tail_count = min(2, len(messages) - len(system))
+        tail = messages[-tail_count:] if tail_count > 0 else []
+        middle = messages[len(system):-tail_count] if tail_count > 0 else messages[len(system):]
+
+        dropped = 0
+        while middle:
+            candidate = system + middle + tail
+            candidate = self._repair_tool_pairs(candidate)
+            estimated = estimate_messages_tokens(candidate, tools=tools_schema)
+            if estimated <= budget:
+                logger.info(
+                    f"Stage4: dropped {dropped} oldest messages to fit budget",
+                    extra={"trace_id": self.trace_id},
+                )
+                return candidate
+            # Drop the oldest non-system message
+            middle.pop(0)
+            dropped += 1
+
+        # Even after dropping everything, return system + tail
+        result = system + tail
+        logger.warning(
+            f"Stage4: dropped ALL middle messages ({dropped}), only system+tail remain",
+            extra={"trace_id": self.trace_id},
+        )
+        return self._repair_tool_pairs(result)
 
     @staticmethod
     def _repair_tool_pairs(messages: list[dict]) -> list[dict]:

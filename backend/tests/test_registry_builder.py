@@ -116,6 +116,7 @@ class TestBuildMCPRegistry:
 
 class TestBuildFullRegistry:
     def test_contains_all_tools(self):
+        """Default (mcp_enabled=False): shared + capability + plan, no MCP."""
         reg = build_full_registry()
         names = reg.get_tool_names()
         # Shared
@@ -126,7 +127,16 @@ class TestBuildFullRegistry:
         assert "save_memory" in names
         # Plan
         assert "propose_plan" in names
-        # MCP
+        # MCP tools should NOT be present by default
+        assert "get_form_schema" not in names
+        assert "submit_form_data" not in names
+        assert "query_data" not in names
+
+    def test_contains_all_tools_with_mcp(self):
+        """mcp_enabled=True: includes MCP tools."""
+        reg = build_full_registry(mcp_enabled=True)
+        names = reg.get_tool_names()
+        assert "arithmetic" in names
         assert "get_form_schema" in names
         assert "submit_form_data" in names
         assert "query_data" in names
@@ -137,7 +147,8 @@ class TestBuildFullRegistry:
         assert len(names) == len(set(names))
 
     def test_includes_all_six_mcp_tools(self):
-        reg = build_full_registry()
+        """MCP tools only included when mcp_enabled=True."""
+        reg = build_full_registry(mcp_enabled=True)
         names = reg.get_tool_names()
         mcp_tools = [
             "get_form_schema", "get_business_rules", "get_candidate_types",

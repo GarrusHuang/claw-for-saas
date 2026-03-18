@@ -21,11 +21,16 @@ browser_capability_registry = ToolRegistry()
 
 
 def _get_browser_service():
-    """从 contextvars 获取 BrowserService。"""
+    """从 contextvars 获取 BrowserService，并检查可用性。"""
     from core.context import current_browser_service
     service = current_browser_service.get()
     if service is None:
         raise RuntimeError("BrowserService not available (not injected)")
+    if not service.is_available():
+        raise RuntimeError(
+            "浏览器工具不可用 — Playwright 浏览器未安装。"
+            "请联系管理员运行 'playwright install chromium'。"
+        )
     return service
 
 

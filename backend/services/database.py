@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import bcrypt
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,14 +62,22 @@ class ApiKeyRecord:
 
 
 def hash_password(password: str) -> str:
-    """Hash password with SHA-256 + salt."""
-    salt = secrets.token_hex(16)
-    hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return f"{salt}:{hashed}"
+    """Hash password with bcrypt (resistant to brute-force attacks)."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
 
 
-def verify_password(password: str, password_hash: str) -> bool:
-    """Verify password against stored hash."""
+def _is_legacy_sha256(password_hash: str) -> bool:
+    """Check if a hash is the old SHA-256 + salt format (hex:hex)."""
+    parts = password_hash.split(":", 1)
+    if len(parts) != 2:
+        return False
+    salt, hashed = parts
+    # SHA-256 hex: 64 chars, salt: 32 chars
+    return len(salt) == 32 and len(hashed) == 64 and all(c in "0123456789abcdef" for c in salt)
+
+
+def _verify_legacy_sha256(password: str, password_hash: str) -> bool:
+    """Verify against old SHA-256 + salt format."""
     parts = password_hash.split(":", 1)
     if len(parts) != 2:
         return False
@@ -76,9 +86,33 @@ def verify_password(password: str, password_hash: str) -> bool:
     return secrets.compare_digest(computed, stored_hash)
 
 
+def verify_password(password: str, password_hash: str) -> bool:
+    """
+    Verify password against stored hash.
+
+    Supports both bcrypt (new) and SHA-256+salt (legacy).
+    Legacy hashes are auto-upgraded on next successful login via
+    DatabaseService.authenticate_user().
+    """
+    if _is_legacy_sha256(password_hash):
+        return _verify_legacy_sha256(password, password_hash)
+    # bcrypt hash (starts with $2b$ or $2a$)
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+
+
 def hash_api_key(key: str) -> str:
     """Hash API key with SHA-256."""
     return hashlib.sha256(key.encode()).hexdigest()
+
+
+# Schema 版本 — 新增迁移时在此追加 (version, sql) 元组
+_CURRENT_SCHEMA_VERSION = 1
+_MIGRATIONS: list[tuple[int, str]] = [
+    # (1, "ALTER TABLE users ADD COLUMN last_login_at REAL;"),  # 示例: 未来迁移
+]
 
 
 class DatabaseService:
@@ -88,6 +122,7 @@ class DatabaseService:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._run_migrations()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
@@ -178,6 +213,45 @@ class DatabaseService:
             """)
             conn.commit()
             logger.info(f"Database initialized: {self.db_path}")
+        finally:
+            conn.close()
+
+    def _run_migrations(self) -> None:
+        """运行未执行的 schema 迁移。"""
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            row = conn.execute("SELECT version FROM schema_version").fetchone()
+            if row is None:
+                conn.execute("INSERT INTO schema_version (version) VALUES (?)",
+                             (_CURRENT_SCHEMA_VERSION,))
+                conn.commit()
+                return  # 首次初始化，无需迁移
+
+            current = row["version"]
+            applied = 0
+            for ver, sql in _MIGRATIONS:
+                if ver > current:
+                    try:
+                        conn.executescript(sql)
+                        applied += 1
+                    except Exception as e:
+                        logger.error(f"Migration v{ver} failed: {e}")
+                        raise
+
+            if applied:
+                conn.execute("UPDATE schema_version SET version = ?",
+                             (_CURRENT_SCHEMA_VERSION,))
+                conn.commit()
+                logger.info(f"Applied {applied} database migrations (now v{_CURRENT_SCHEMA_VERSION})")
+            elif current < _CURRENT_SCHEMA_VERSION:
+                conn.execute("UPDATE schema_version SET version = ?",
+                             (_CURRENT_SCHEMA_VERSION,))
+                conn.commit()
         finally:
             conn.close()
 
@@ -411,7 +485,12 @@ class DatabaseService:
             conn.close()
 
     def authenticate_user(self, tenant_id: str, username: str, password: str) -> UserRecord | None:
-        """验证用户名密码，返回用户记录或 None。"""
+        """
+        验证用户名密码，返回用户记录或 None。
+
+        自动升级: 如果验证通过但密码使用旧的 SHA-256 格式，
+        自动升级为 bcrypt 哈希 (transparent rehash)。
+        """
         user = self.get_user_by_username(tenant_id, username)
         if not user:
             return None
@@ -419,6 +498,25 @@ class DatabaseService:
             return None
         if not verify_password(password, user.password_hash):
             return None
+
+        # Auto-upgrade legacy SHA-256 hash to bcrypt
+        if _is_legacy_sha256(user.password_hash):
+            try:
+                new_hash = hash_password(password)
+                conn = self._get_conn()
+                try:
+                    conn.execute(
+                        "UPDATE users SET password_hash = ? WHERE tenant_id = ? AND user_id = ?",
+                        (new_hash, tenant_id, user.user_id),
+                    )
+                    conn.commit()
+                    user.password_hash = new_hash
+                    logger.info(f"Auto-upgraded password hash for user {username} (tenant={tenant_id})")
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning(f"Failed to auto-upgrade password hash: {e}")
+
         return user
 
     # ── API Key CRUD ──

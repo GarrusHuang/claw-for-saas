@@ -205,6 +205,9 @@ class TestQualityGateHook:
         assert result.action == "allow"
 
     def test_fail_blocks_with_correction(self):
+        """QualityGate default checks is [] (empty) — hook always allows.
+        To test block behavior, patch QualityGate to include form check."""
+        from unittest.mock import patch
         event = _make_event(
             context={
                 "business_type": "create_invoice",
@@ -212,7 +215,13 @@ class TestQualityGateHook:
             },
             runtime_steps=[],
         )
-        result = quality_gate_hook(event)
+        with patch("agent.quality_gate.QualityGate") as MockGate:
+            MockGate.return_value = QualityGate(checks=[
+                check_form_completeness,
+                check_audit_consistency,
+                check_calculation_verified,
+            ])
+            result = quality_gate_hook(event)
         assert result.action == "block"
         assert "质量检查" in result.message
 

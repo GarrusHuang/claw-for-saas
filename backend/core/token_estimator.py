@@ -72,7 +72,10 @@ def estimate_tokens(text: str) -> int:
     cjk_tokens = cjk_count / 1.3
     ascii_tokens = ascii_count / 4.0
 
-    return max(1, int(cjk_tokens + ascii_tokens + 0.5))
+    raw = cjk_tokens + ascii_tokens
+    # 1.2x safety margin — 对标 OpenClaw 的 20% 余量，
+    # 避免因启发式估算偏低导致实际 token 数超出预算
+    return max(1, int(raw * 1.2 + 0.5))
 
 
 def estimate_tokens_conservative(text: str) -> int:

@@ -124,7 +124,7 @@ class AgentGateway:
             os.close(fd)
             raise SessionBusyError(session_id)
 
-    def _auto_save_memory(
+    async def _auto_save_memory(
         self,
         *,
         tenant_id: str,
@@ -133,15 +133,116 @@ class AgentGateway:
         answer: str,
     ) -> None:
         """
-        对话结束后自动保存会话摘要到记忆 (OpenClaw Session Memory Hook 模式)。
+        对话结束后自动提取跨会话记忆 (对标 Codex Session Memory Hook Phase1)。
 
-        只保存有价值的跨会话信息（用户偏好、修正反馈），
-        不保存普通对话摘要 — 那是 session 级别的上下文，
-        由 SessionManager 管理，不应污染 memory prompt。
+        提取范围:
+        - 用户偏好 ("我喜欢...", "请用...格式")
+        - 纠正反馈 ("不要...", "应该...")
+        - 关键决策 ("我们决定用...", "最终选择...")
+        - 角色信息 ("我是...", "我负责...")
+
+        不提取:
+        - 对话摘要 (session 级上下文)
+        - 临时数据 (一次性任务细节)
+        - 已在记忆中存在的内容
+
+        错误静默 — 提取失败不影响主流程。
         """
-        # 当前不自动保存对话摘要到 memory。
-        # 用户偏好/修正通过 save_memory 工具由 Agent 主动保存。
-        pass
+        from config import settings
+        if not settings.memory_auto_extract_enabled:
+            return
+        if not self.memory_store or not self.llm_client:
+            return
+
+        # Guard: 消息太短，不值得提取
+        if len(message) < 20 and len(answer) < 50:
+            return
+
+        try:
+            # 读取现有记忆 (用于去重)
+            existing_memory = ""
+            try:
+                existing_memory = self.memory_store.build_memory_prompt(
+                    tenant_id=tenant_id, user_id=user_id
+                )
+            except Exception:
+                pass
+
+            extract_prompt = (
+                "分析以下对话，提取值得跨会话记住的信息。\n\n"
+                "## No-op Gate (最重要)\n"
+                "问自己: 「未来 Agent 是否真的会因为这条记忆而行为不同？」\n"
+                "如果答案是否，不要提取。大多数对话不需要提取任何内容。\n\n"
+                "## 提取类型\n"
+                "### 1. 用户偏好 (显式 + 隐式)\n"
+                "- 显式: 用户直接说「我喜欢...」「请用...格式」「不要...」\n"
+                "- 隐式: 用户反复选择某种方案、多次修改同一类输出格式\n"
+                "- 标记: `[偏好]`\n\n"
+                "### 2. 纠正反馈 (Failure Shield)\n"
+                "- 用户纠正了 Agent 的行为: 「不是这样的」「应该用...」\n"
+                "- 某种方法行不通的教训: 「用 X 方法不行，因为...」\n"
+                "- 标记: `[纠正]`\n\n"
+                "### 3. 关键决策 (Decision Trigger)\n"
+                "- 用户做出的重要技术/业务决策: 「我们决定用 SQLite」\n"
+                "- 架构选型、工具选择、流程确定\n"
+                "- 标记: `[决策]`\n\n"
+                "### 4. 角色信息\n"
+                "- 用户身份、职责、专业领域: 「我是前端开发」「我负责...」\n"
+                "- 标记: `[角色]`\n\n"
+                "## Task Outcome Triage\n"
+                "- 任务成功 → 只提取偏好/纠正/决策 (不提取任务本身)\n"
+                "- 任务失败 → 额外提取失败教训 (防止重蹈覆辙)\n"
+                "- 部分成功 → 提取哪些有效、哪些无效\n\n"
+                "## 绝对不提取\n"
+                "- 对话的具体内容摘要\n"
+                "- 临时的、一次性的任务细节 (文件名、具体数值)\n"
+                "- 已经在 <existing_memory> 中存在的信息 (去重!)\n"
+                "- Agent 的能力描述或通用知识\n\n"
+                "## 输出格式\n"
+                "如果有值得记忆的信息，每条一行:\n"
+                "`- [类型] 具体内容`\n"
+                "如果没有值得提取的内容，只输出 `NONE`。\n\n"
+                f"<existing_memory>\n{existing_memory[:2000]}\n</existing_memory>\n\n"
+                f"<conversation>\n"
+                f"用户: {message[:1000]}\n"
+                f"Agent: {answer[:1000]}\n"
+                f"</conversation>"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.llm_client.chat_completion(
+                    messages=[
+                        {"role": "system", "content": "你是记忆提取助手。只提取跨会话有价值的信息。"},
+                        {"role": "user", "content": extract_prompt},
+                    ],
+                    max_tokens=settings.memory_auto_extract_max_tokens,
+                    temperature=0.3,
+                ),
+                timeout=15.0,
+            )
+
+            if not llm_resp.content or llm_resp.content.strip().upper() == "NONE":
+                return
+
+            extracted = llm_resp.content.strip()
+
+            # 保存到 auto-learning.md (独立文件，不与 Agent 手动管理的文件冲突)
+            import time as _time
+            date_str = _time.strftime("%Y-%m-%d %H:%M")
+            entry = f"\n## {date_str}\n{extracted}\n"
+            self.memory_store.append_memory(
+                scope="user",
+                tenant_id=tenant_id,
+                user_id=user_id,
+                filename="auto-learning.md",
+                content=entry,
+            )
+            logger.info(f"Auto-extracted memory for {tenant_id}/{user_id}: {len(extracted)} chars")
+
+        except asyncio.TimeoutError:
+            logger.debug("Auto memory extraction timed out")
+        except Exception as e:
+            logger.debug(f"Auto memory extraction failed (silent): {e}")
 
     async def chat(
         self,
@@ -512,8 +613,8 @@ class AgentGateway:
 
         # ── 9b/10/10c/11: memory/compact/agent_message/thinking/hooks — 仅正常完成 ──
         if result and not cancelled and not runtime_error:
-            # 9b. 自动保存记忆 (OpenClaw 模式: 不依赖 LLM 调用)
-            self._auto_save_memory(
+            # 9b. 自动保存记忆 (对标 Codex Session Memory Hook)
+            await self._auto_save_memory(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 message=message,
