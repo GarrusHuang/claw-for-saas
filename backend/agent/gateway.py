@@ -417,7 +417,7 @@ class AgentGateway:
             # A7: 加载租户级和用户级 Skill (追加到 registry)
             try:
                 import os
-                from skills.loader import SKILLS_DIR, TENANT_DIR, USER_DIR
+                from skills.loader import TENANT_DIR, USER_DIR
                 tenant_skill_dir = os.path.join(TENANT_DIR, tenant_id)
                 user_skill_dir = os.path.join(USER_DIR, f"{tenant_id}_{user_id}")
                 if os.path.isdir(tenant_skill_dir):

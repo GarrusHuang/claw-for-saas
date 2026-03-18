@@ -21,7 +21,16 @@ logger = logging.getLogger(__name__)
 
 # backend/ 根目录
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKILLS_DIR = os.path.join(BACKEND_ROOT, "skills")
+
+def _resolve_skills_dir() -> str:
+    """从配置读取 skills_dir，失败时 fallback 到默认值。"""
+    try:
+        from config import settings
+        return os.path.join(BACKEND_ROOT, settings.skills_dir)
+    except Exception:
+        return os.path.join(BACKEND_ROOT, "skills")
+
+SKILLS_DIR = _resolve_skills_dir()
 
 # A7: 标准子目录
 BUILTIN_DIR = os.path.join(SKILLS_DIR, "builtin")

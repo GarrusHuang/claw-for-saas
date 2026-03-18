@@ -52,26 +52,20 @@ class TestAuthProtection:
         assert resp.status_code == 200
 
     def test_login_rate_limit(self, auth_client):
-        """连续错误登录应触发限速。"""
+        """连续错误登录应触发限速 (账户级 5 次/5min)。"""
         from api.auth import _login_attempts
         _login_attempts.clear()
 
-        # 发送 6 次错误登录 (账户级限制 5 次/5min)
-        for i in range(6):
+        got_429 = False
+        # 发送 7 次错误登录 — 第 6 次应被限速
+        for i in range(7):
             resp = auth_client.post("/api/auth/login", json={
-                "username": "nonexistent",
+                "username": "ratelimit_test",
                 "password": "wrong",
                 "tenant_id": "default",
             })
             if resp.status_code == 429:
-                assert i >= 5  # 第 6 次应被限速
-                return
+                got_429 = True
+                break
 
-        # 如果没有触发 429 (前 5 次都是 401)，第 6 次应该是 429
-        resp = auth_client.post("/api/auth/login", json={
-            "username": "nonexistent",
-            "password": "wrong",
-            "tenant_id": "default",
-        })
-        # 注意：前 5 次失败登录也计入，所以第 6 或 7 次应是 429
-        assert resp.status_code in (401, 429)
+        assert got_429, "Expected 429 rate limit after 5+ failed login attempts"

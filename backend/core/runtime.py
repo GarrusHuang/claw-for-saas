@@ -28,7 +28,7 @@ from typing import Any, Optional
 
 from .event_bus import EventBus
 from .llm_client import LLMGatewayClient, LLMResponse, TokenUsage
-from .token_estimator import estimate_messages_tokens, estimate_tokens_conservative
+from .token_estimator import estimate_messages_tokens
 from .tool_protocol import ParsedToolCall, ToolCallParser
 from .tool_registry import ToolRegistry, ToolResult
 

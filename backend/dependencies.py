@@ -97,6 +97,8 @@ def get_runtime_config() -> RuntimeConfig:
         max_iterations=s.agent_max_iterations,
         max_tokens_per_turn=s.llm_default_max_tokens,
         max_tool_result_chars=s.agent_max_tool_result_chars,
+        tool_call_timeout_s=s.agent_tool_timeout_s,
+        parallel_tool_calls=s.agent_parallel_tool_calls,
         context_budget_tokens=s.agent_context_budget_tokens,
         model_context_window=s.agent_model_context_window,
         context_budget_ratio=s.agent_context_budget_ratio,
