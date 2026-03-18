@@ -229,6 +229,19 @@ class SandboxManager:
                 if host in ("localhost", "0.0.0.0", "[::]"):
                     return f"禁止访问本地地址: {host}"
 
+                # DNS 解析检查 — 防止 SSRF 通过域名指向内网 IP
+                import socket
+                try:
+                    addrs = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                    for family, _, _, _, sockaddr in addrs:
+                        resolved_ip = ipaddress.ip_address(sockaddr[0])
+                        for net in _PRIVATE_NETWORKS:
+                            if resolved_ip in net:
+                                return f"域名 {host} 解析到内网地址 {sockaddr[0]}, 禁止访问"
+                except socket.gaierror:
+                    # DNS 解析失败不阻止 — 可能是合法的外部域名暂时不可达
+                    pass
+
         # 如果配置了白名单，只允许白名单内的 URL
         whitelist = self.config.network_whitelist
         if whitelist:

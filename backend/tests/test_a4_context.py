@@ -53,11 +53,14 @@ class TestSmartTruncate:
         assert "truncated" in result
         assert "error" in result  # tail preserved
 
-    def test_head_tail_truncation_with_json_close(self):
-        """JSON closing brace triggers tail preservation."""
+    def test_head_only_for_plain_json_close(self):
+        """Plain JSON closing brace alone does NOT trigger tail preservation.
+        (Fixed: } / ] detection was too broad — almost all JSON has closing braces.)"""
         text = '{"data": "' + "x" * 5000 + '"}'
         result = smart_truncate(text, 3000)
-        assert "}" in result
+        assert "truncated" in result
+        # Tail preservation is NOT triggered by bare }/] anymore
+        # Only error/status/summary keywords trigger it
 
     def test_head_only_when_no_important_tail(self):
         """No important tail → all budget to head."""

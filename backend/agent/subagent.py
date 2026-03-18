@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from core.llm_client import LLMGatewayClient
 from core.runtime import AgenticRuntime, RuntimeConfig
@@ -47,6 +47,7 @@ class SubagentRunner:
     - 使用主 Agent 动态生成的 prompt 作为角色定义
     - 支持工具白名单过滤
     - 支持超时控制
+    - 继承父级安全 hooks (pre_tool_use / post_tool_use)
     """
 
     def __init__(
@@ -55,11 +56,13 @@ class SubagentRunner:
         shared_registry: ToolRegistry,
         capability_registry: ToolRegistry,
         prompt_builder: PromptBuilder | None = None,
+        hooks: Any | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.shared_registry = shared_registry
         self.capability_registry = capability_registry
         self.prompt_builder = prompt_builder
+        self.hooks = hooks  # 继承父级安全 hooks
 
     async def run_subagent(
         self,
@@ -96,6 +99,7 @@ class SubagentRunner:
             tool_registry=tool_registry,
             tool_parser=ToolCallParser(),
             config=config,
+            hooks=self.hooks,  # 继承父级安全 hooks (pre_tool_use / post_tool_use)
         )
 
         try:

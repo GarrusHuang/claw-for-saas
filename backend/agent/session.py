@@ -63,9 +63,16 @@ class SessionManager:
         return session_id
 
     def load_messages(
-        self, tenant_id: str, user_id: str, session_id: str
+        self, tenant_id: str, user_id: str, session_id: str,
+        limit: int = 0, offset: int = 0,
     ) -> list[dict]:
-        """加载会话历史消息 (过滤元数据行)。"""
+        """
+        加载会话历史消息 (过滤元数据行)。
+
+        Args:
+            limit: 最多返回消息数 (0=全部)
+            offset: 跳过前 N 条消息 (从最旧开始)
+        """
         session_file = self._session_dir(tenant_id, user_id) / f"{session_id}.jsonl"
         if not session_file.exists():
             return []
@@ -87,7 +94,37 @@ class SessionManager:
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSONL line in {session_file}")
                     continue
+
+        # 分页
+        if offset > 0:
+            messages = messages[offset:]
+        if limit > 0:
+            messages = messages[:limit]
+
         return messages
+
+    def cleanup_orphan_locks(self, max_age_s: float = 3600) -> int:
+        """
+        清理孤儿 .lock 文件。
+
+        超过 max_age_s 秒未修改的 .lock 文件会被删除。
+        通常在启动时调用一次。
+
+        Returns:
+            删除的 lock 文件数量
+        """
+        now = time.time()
+        cleaned = 0
+        for lock_file in self.base_dir.rglob("*.lock"):
+            try:
+                if now - lock_file.stat().st_mtime > max_age_s:
+                    lock_file.unlink()
+                    cleaned += 1
+            except OSError:
+                pass
+        if cleaned:
+            logger.info(f"Cleaned {cleaned} orphan session lock files")
+        return cleaned
 
     def append_message(
         self, tenant_id: str, user_id: str, session_id: str, message: dict

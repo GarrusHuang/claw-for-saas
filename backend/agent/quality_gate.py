@@ -46,14 +46,12 @@ class QualityGate:
         self,
         checks: list[Callable[[HookEvent], tuple[bool, str, str]]] | None = None,
     ) -> None:
-        self.checks = checks or [
-            check_form_completeness,
-            check_audit_consistency,
-            # check_calculation_verified 已移除:
-            # 该规则过于激进 — LLM 从文档中读取数值并做简单比较是合理的，
-            # 强制要求 calculator 工具验证会导致 QG 重试循环，
-            # 进而造成前端流式文本重复显示。
-        ]
+        # 默认空检查列表 — SaaS 集成方通过传入自定义 checks 激活。
+        # 内置的 check_form_completeness / check_audit_consistency 仍可用，
+        # 但不再默认启用，因为它们依赖 HRP 特定的 business_context 字段
+        # (form_fields, check_audit_rule, submit_all_audit_results)，
+        # 通用 SaaS 场景中这些字段不存在会导致检查空转。
+        self.checks = checks if checks is not None else []
 
     def evaluate(self, event: HookEvent) -> QualityCheckResult:
         """

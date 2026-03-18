@@ -9,13 +9,33 @@
 from __future__ import annotations
 
 import logging
+import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from core.auth import AuthUser, get_current_user, issue_session_token
 
 logger = logging.getLogger(__name__)
+
+# ── 登录限速 (IP 级 + 账户级) ──
+_login_attempts: dict[str, list[float]] = {}  # key → [timestamp, ...]
+_LOGIN_WINDOW_S = 300  # 5 分钟窗口
+_LOGIN_MAX_PER_IP = 20  # 每 IP 最多 20 次/5min
+_LOGIN_MAX_PER_ACCOUNT = 5  # 每账户最多 5 次/5min
+
+
+def _check_login_rate(key: str, max_attempts: int) -> bool:
+    """检查限速，返回 True=允许，False=超限。"""
+    now = time.time()
+    cutoff = now - _LOGIN_WINDOW_S
+    attempts = _login_attempts.get(key, [])
+    attempts = [t for t in attempts if t > cutoff]
+    _login_attempts[key] = attempts
+    if len(attempts) >= max_attempts:
+        return False
+    attempts.append(now)
+    return True
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -36,7 +56,7 @@ class DevTokenRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
     """用户名密码登录，返回 JWT token。"""
     from config import settings
     from dependencies import get_database
@@ -46,6 +66,18 @@ async def login(req: LoginRequest):
 
     if not settings.auth_jwt_secret:
         raise HTTPException(status_code=500, detail="JWT secret not configured")
+
+    # 限速检查: IP 级
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_login_rate(f"ip:{client_ip}", _LOGIN_MAX_PER_IP):
+        logger.warning(f"Login rate limit exceeded for IP {client_ip}")
+        raise HTTPException(status_code=429, detail="Too many login attempts, please try again later")
+
+    # 限速检查: 账户级
+    account_key = f"acct:{req.tenant_id}:{req.username}"
+    if not _check_login_rate(account_key, _LOGIN_MAX_PER_ACCOUNT):
+        logger.warning(f"Login rate limit exceeded for account {req.username}")
+        raise HTTPException(status_code=429, detail="Too many login attempts for this account, please try again later")
 
     db = get_database()
     user = db.authenticate_user(req.tenant_id, req.username, req.password)

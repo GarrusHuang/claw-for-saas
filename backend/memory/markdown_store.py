@@ -190,6 +190,18 @@ class MarkdownMemoryStore:
             logger.error(f"Failed to delete {path}: {e}")
             return False
 
+    def append_memory(
+        self,
+        scope: str,
+        filename: str,
+        content: str,
+        tenant_id: str = "",
+        user_id: str = "",
+    ) -> bool:
+        """追加内容到记忆文件 (便捷方法，等同于 write_file mode='append')。"""
+        return self.write_file(scope, filename, content, mode="append",
+                               tenant_id=tenant_id, user_id=user_id)
+
     # ─── Prompt 注入 ──────────────────────────────────────────
 
     def build_memory_prompt(
@@ -246,6 +258,81 @@ class MarkdownMemoryStore:
             parts.append(f"<{tag}>\n{content}\n</{tag}>")
 
         return "\n".join(parts)
+
+    # ─── 记忆合并 (Phase 4B) ──────────────────────────────────
+
+    def needs_merge(
+        self,
+        tenant_id: str = "default",
+        user_id: str = "anonymous",
+    ) -> bool:
+        """检查 auto-learning.md 是否超过合并阈值 (50KB)。"""
+        path = self._resolve_file("user", "auto-learning.md", tenant_id, user_id)
+        if not path.exists():
+            return False
+        return path.stat().st_size > self.max_file_bytes
+
+    async def merge_auto_learning(
+        self,
+        tenant_id: str,
+        user_id: str,
+        llm_client: Any,
+    ) -> bool:
+        """
+        合并 auto-learning.md 为 memory_summary.md。
+
+        使用 LLM 去重、分类、压缩。合并后清空 auto-learning.md。
+        """
+        import asyncio
+
+        auto_content = self.read_file("user", "auto-learning.md", tenant_id, user_id)
+        if not auto_content.strip():
+            return False
+
+        existing_summary = self.read_file("user", "memory_summary.md", tenant_id, user_id)
+
+        merge_prompt = (
+            "请将以下 <auto_learning> 中的记忆条目与 <existing_summary> 合并，"
+            "生成一份结构化的记忆摘要。\n\n"
+            "规则:\n"
+            "1. 去重: 相同或相似的条目合并为一条\n"
+            "2. 分类: 按 [偏好] [纠正] [决策] [角色] 分组\n"
+            "3. 压缩: 每条简洁但保留关键信息\n"
+            "4. 删除过时信息 (如果新条目明确否定了旧条目)\n"
+            "5. 总长度控制在 3000 字以内\n\n"
+            f"<existing_summary>\n{existing_summary[:3000]}\n</existing_summary>\n\n"
+            f"<auto_learning>\n{auto_content[:5000]}\n</auto_learning>"
+        )
+
+        try:
+            resp = await asyncio.wait_for(
+                llm_client.chat_completion(
+                    messages=[
+                        {"role": "system", "content": "你是记忆合并助手。输出结构化的记忆摘要。"},
+                        {"role": "user", "content": merge_prompt},
+                    ],
+                    max_tokens=1000,
+                    temperature=0.3,
+                ),
+                timeout=30.0,
+            )
+            if resp.content and len(resp.content.strip()) > 20:
+                # 写入 memory_summary.md
+                self.write_file(
+                    "user", "memory_summary.md", resp.content.strip(),
+                    mode="rewrite", tenant_id=tenant_id, user_id=user_id,
+                )
+                # 清空 auto-learning.md
+                self.write_file(
+                    "user", "auto-learning.md", "",
+                    mode="rewrite", tenant_id=tenant_id, user_id=user_id,
+                )
+                logger.info(f"Merged auto-learning into memory_summary for {tenant_id}/{user_id}")
+                return True
+        except Exception as e:
+            logger.warning(f"Memory merge failed: {e}")
+
+        return False
 
     # ─── 统计 ────────────────────────────────────────────────
 

@@ -4,13 +4,13 @@
 
 **通用 AI Agent 运行时，可嵌入任意 SaaS 系统**
 
-基于 [OpenClaw](https://github.com/openclaw/openclaw) 设计模式 · ReAct 循环引擎 · 流式 SSE · 多层记忆 · 全链路 Hook
+基于 [OpenClaw](https://github.com/openclaw/openclaw) 设计模式 · ReAct 循环引擎 · 跨会话记忆 · 弹性重试 · 全链路 Hook
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-1857_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-1877_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
 [![License](https://img.shields.io/badge/License-Internal-lightgrey)](#license)
 
 </div>
@@ -23,7 +23,8 @@
 
 - **多轮自主推理** — ReAct 循环最多 25 轮迭代，Agent 自主规划、调用工具、验证结果
 - **即插即用** — 注册自定义工具只需一个装饰器，注入自定义 Soul 只需替换一个 Markdown 文件
-- **生产级可靠** — 三阶段上下文压缩、运行时沙箱、速率限制、SSRF 防护、PII 检测
+- **跨会话记忆** — LLM 自动提取用户偏好/纠正/决策，关键词搜索，合并索引
+- **生产级可靠** — 四阶段上下文压缩、LLM 弹性重试、bcrypt 安全、SSRF DNS 检查、登录限速
 - **零 vendor lock-in** — 兼容任意 OpenAI API 格式的 LLM（Ollama、vLLM、OpenAI、Azure、Anthropic…）
 
 ---
@@ -32,17 +33,18 @@
 
 | 特性 | 说明 |
 |:-----|:-----|
-| **ReAct 循环引擎** | 最多 25 轮 Thought → Action → Observation 迭代，支持并行工具调用 |
-| **36 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆 · 技能 · 子 Agent · 定时任务 |
+| **ReAct 循环引擎** | 最多 25 轮迭代，支持并行工具调用，LLM 瞬时错误自动重试 (3 次) |
+| **37 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆搜索 · 技能 · 子 Agent · 定时任务 |
 | **8 层提示词架构** | Identity → Soul → Safety → Tools → Skills → Memory → Runtime → Extra |
-| **三层 Markdown 记忆** | global / tenant / user 分层笔记，Agent 自主读写，跨会话持久化 |
+| **跨会话记忆** | LLM 自动提取偏好/纠正/决策 + 关键词搜索 + 合并索引 + 三层 Markdown 笔记 |
+| **四阶段上下文压缩** | 截断 → 摘要 → 元数据 → 逐条删 + 1.2x token 安全边距 + 动态工具结果上限 |
 | **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
-| **流式 SSE** | POST-based SSE，15+ 事件类型，实时展示思考过程和工具执行 |
-| **运行时安全围栏** | 文件沙箱 · 命令安全检查 · 网络白名单 · 速率限制 · 数据锁定 · PII 检测 |
-| **MCP 标准工具接口** | 可选启用，6 个标准工具，支持 HTTP 转发到宿主系统 |
+| **WebSocket 实时推送** | 15+ 事件类型，实时展示思考过程和工具执行，指数退避重连 |
+| **运行时安全围栏** | 文件沙箱 · bcrypt 密码 · SSRF DNS 检查 · 速率限制 · 登录限速 · PII 检测 |
+| **MCP 标准工具接口** | 条件注册（mcp_enabled=True），6 个标准工具，HTTP 转发到宿主 |
 | **定时调度 + Webhook** | Cron 定时任务 · 一次性任务 · Webhook HMAC 签名回调 |
 | **全格式文件预览** | DOCX · PDF · Excel · 图片 · HTML · 代码 · Markdown |
-| **用量统计** | SQLite 持久化，管理员看板 + 用户自助查询 |
+| **用量统计** | SQLite 持久化 + schema 迁移，管理员看板 + 用户自助查询 |
 | **多模态支持** | 可选启用图片/PDF 视觉理解（需模型支持） |
 
 ---
@@ -59,13 +61,13 @@
 │  └──────┬───────┘   └──────┬───────┘                         │
 │         └───────┬──────────┘                                 │
 │                 ▼                                            │
-│        POST /api/chat (SSE)                                  │
+│    POST /api/chat + WebSocket /api/ws/notifications           │
 ├──────────────────────────────────────────────────────────────┤
 │  Claw Backend                                                │
 │                                                              │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐                 │
 │  │ Gateway  │ → │ Runtime  │ → │  Tools   │                 │
-│  │  入口     │   │  ReAct   │   │  36 个   │                 │
+│  │  入口     │   │  ReAct   │   │  37 个   │                 │
 │  └──────────┘   └──────────┘   └──────────┘                 │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐                 │
 │  │ Prompt   │   │ Memory   │   │  Hooks   │                 │
@@ -135,7 +137,7 @@ claw-for-saas/
 │   ├── agent/              # Gateway + 编排 (prompt, session, hooks, subagent, quality_gate)
 │   ├── memory/             # 三层 Markdown 记忆 (global/tenant/user)
 │   ├── tools/
-│   │   ├── builtin/        # 30 个内置工具
+│   │   ├── builtin/        # 31 个内置工具 (含 search_memory)
 │   │   └── mcp/            # MCP 标准工具接口
 │   ├── skills/builtin/     # 20 个内置 Skill
 │   ├── services/           # 文件 / 知识库 / 浏览器 / 用量统计
@@ -279,6 +281,9 @@ request_input      → Agent 请求用户输入
 | `MCP_ENABLED` | `False` | 启用 MCP 标准工具 |
 | `SCHEDULER_ENABLED` | `True` | 启用定时调度 |
 | `LLM_SUPPORTS_VISION` | `False` | 启用多模态 |
+| `AGENT_MAX_TOOL_RESULT_CHARS` | `0` (动态) | 工具结果上限 (0=30% 上下文窗口) |
+| `LLM_FALLBACK_MODEL` | *(空)* | 备用模型 (主模型不可用时切换) |
+| `MEMORY_AUTO_EXTRACT_ENABLED` | `True` | 自动提取跨会话记忆 |
 | `SANDBOX_MAX_DISK_QUOTA_MB` | `500` | 单用户磁盘配额 |
 | `MAX_FILE_UPLOAD_MB` | `100` | 文件上传大小限制 |
 
@@ -289,13 +294,13 @@ request_input      → Agent 请求用户输入
 ## 测试
 
 ```bash
-# 后端单元测试（1671 用例）
+# 后端单元测试（1695 用例）
 cd backend && python3 -m pytest tests/ -m "not llm" -v
 
-# 后端 + LLM 集成测试（1697 用例，需 LLM 服务在线）
+# 后端 + LLM 集成测试（1724 用例，需 LLM 服务在线）
 cd backend && python3 -m pytest tests/ -v
 
-# 前端单元测试（160 用例）
+# 前端单元测试（153 用例）
 cd frontend && npm run test:unit
 
 # 前端 E2E（2 specs）
@@ -304,11 +309,11 @@ cd frontend && npx playwright test
 
 | 层级 | 测试数 | 覆盖范围 |
 |:-----|:-------|:---------|
-| 后端 Unit | 1,671 | 59 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
-| 后端 LLM 集成 | 26 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
-| 前端 Unit | 160 | claw-core (73) · claw-ui (81) · app (6) |
+| 后端 Unit | 1,695 | 64 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
+| 后端 LLM 集成 | 29 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
+| 前端 Unit | 153 | claw-core (66) · claw-ui (81) · app (6) |
 | 前端 E2E | 2 specs | Playwright 关键用户流程 |
-| **合计** | **1,857+** | |
+| **合计** | **1,877+** | |
 
 ---
 
@@ -328,8 +333,9 @@ cd frontend && npx playwright test
 | 文档 | 说明 |
 |:-----|:-----|
 | [`backend/CLAUDE.md`](backend/CLAUDE.md) | 后端架构详解 — ReAct 循环、工具系统、Hook、安全 |
-| [`frontend/CLAUDE.md`](frontend/CLAUDE.md) | 前端架构详解 — 组件、状态管理、SSE 集成 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 20 Phase 开发路线图 (A1-A18 后端 + F1-F9 前端) |
+| [`frontend/CLAUDE.md`](frontend/CLAUDE.md) | 前端架构详解 — 组件、状态管理、WebSocket 集成 |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 开发路线图 (A1-A19 后端 + F1-F9 前端) |
+| [`docs/FULL_AUDIT_2026-03-18.md`](docs/FULL_AUDIT_2026-03-18.md) | 全面审计报告 + 30 项修复记录 |
 
 ---
 
