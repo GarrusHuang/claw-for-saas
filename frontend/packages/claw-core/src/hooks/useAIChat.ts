@@ -23,7 +23,7 @@ import { usePipelineStore } from '../stores/pipeline.ts';
 import { usePipeline } from './usePipeline.ts';
 import { listSessions as apiListSessions, getSessionHistory, injectMessage, fetchPipelineSnapshot, bindFilesToSession } from '../services/ai-api.ts';
 import { applyPipelineSnapshot } from '../services/pipeline-dispatcher.ts';
-import { saveSession, restoreSession, saveMessages, restoreMessages, getCachedStatus } from '../stores/pipeline-cache.ts';
+import { saveSession, restoreSession, saveMessages, restoreMessages, getCachedStatus, cleanupExpiredSessions, scheduleSessionCleanup } from '../stores/pipeline-cache.ts';
 import { useSessionStatusStore } from '../stores/session-status.ts';
 import type { SessionInfo, SessionDetail } from '../services/ai-api.ts';
 import type { ScenarioConfig } from '../types/scenario.ts';
@@ -254,6 +254,11 @@ export function useAIChat() {
 
   /** 获取默认用户ID */
   const defaultUserId = getAIConfig().defaultUserId;
+
+  // ── 启动时清理过期 sessionStorage 缓存 ──
+  useEffect(() => {
+    cleanupExpiredSessions();
+  }, []);
 
   /** 添加消息 */
   const addMessage = useCallback(
@@ -643,6 +648,12 @@ export function useAIChat() {
         if (scenarioConfig) {
           getAIConfig().onScenarioComplete?.(scenarioConfig.key, 'completed');
         }
+      }
+
+      // 延迟清理已完成 session 的缓存（保留 5 分钟供 F5 恢复）
+      const completedSessionId = usePipelineStore.getState().sessionId;
+      if (completedSessionId) {
+        scheduleSessionCleanup(completedSessionId);
       }
 
     }

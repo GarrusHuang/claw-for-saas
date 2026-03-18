@@ -156,3 +156,48 @@ export function restoreMessages(sessionId: string): unknown[] | null {
 export function getCurrentSessionId(): string | null {
   return usePipelineStore.getState().sessionId;
 }
+
+/**
+ * 清理过期的 sessionStorage 缓存。
+ * 删除 status 为 completed/failed 且 completedAt 超过 24 小时的会话。
+ */
+export function cleanupExpiredSessions(): void {
+  const now = Date.now();
+  const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (!key || !key.startsWith(CACHE_PREFIX)) continue;
+
+      const snapshot = storageGet<PipelineStateSnapshot>(key);
+      if (!snapshot) continue;
+
+      const isTerminal = snapshot.status === 'completed' || snapshot.status === 'failed';
+      if (isTerminal && snapshot.completedAt && now - snapshot.completedAt > EXPIRY_MS) {
+        keysToRemove.push(key);
+        // Also remove matching messages cache
+        const sessionId = key.slice(CACHE_PREFIX.length);
+        keysToRemove.push(MSG_PREFIX + sessionId);
+      }
+    }
+    for (const key of keysToRemove) {
+      storageRemove(key);
+    }
+  } catch {
+    // ignore errors during cleanup
+  }
+}
+
+/**
+ * 延迟清理已完成的 session（保留 5 分钟供 F5 恢复）。
+ */
+export function scheduleSessionCleanup(sessionId: string): void {
+  setTimeout(() => {
+    const snapshot = storageGet<PipelineStateSnapshot>(CACHE_PREFIX + sessionId);
+    if (snapshot && (snapshot.status === 'completed' || snapshot.status === 'failed')) {
+      clearSession(sessionId);
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+}

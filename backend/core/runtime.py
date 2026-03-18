@@ -177,6 +177,11 @@ class AgenticRuntime:
         self._repetition_warned: bool = False
         # ── 工具结果缓存: 同一 run 内相同调用直接返回缓存 ──
         self._tool_result_cache: dict[str, ToolResult] = {}
+        # ── 5A: 外层 overflow 重试计数 (最多 2 次) ──
+        self._overflow_retries: int = 0
+        # ── 5C: 连续无意义输出计数 + checkpoint 回退标志 ──
+        self._consecutive_empty_count: int = 0
+        self._checkpoint_rolled_back: bool = False
 
     def request_abort(self) -> None:
         """Request the runtime to abort the ReAct loop at the next iteration."""
@@ -277,6 +282,26 @@ class AgenticRuntime:
                     break
 
             if llm_response is None:
+                # ── 5A: overflow 特判 → 强制压缩后重试当前迭代 ──
+                if llm_error is not None:
+                    from core.errors import classify_error, ErrorCategory
+                    category = classify_error(error_msg=str(llm_error), exception=llm_error)
+                    if category == ErrorCategory.CONTEXT_OVERFLOW and self._overflow_retries < 2:
+                        self._overflow_retries += 1
+                        logger.warning(
+                            f"Overflow detected at iteration {iteration + 1}, "
+                            f"forcing compaction (retry {self._overflow_retries}/2)"
+                        )
+                        original_len = len(messages)
+                        messages = await self._compact_messages(messages)
+                        if len(messages) < original_len:
+                            self._emit("agent_progress", {
+                                "status": "overflow_compacted",
+                                "iteration": iteration + 1,
+                                "retry": self._overflow_retries,
+                            })
+                            continue  # 重试当前迭代 (不消耗 iteration 计数)
+
                 logger.error(f"LLM call failed at iteration {iteration + 1}: {llm_error}")
                 self._steps.append(RuntimeStep(
                     step_type=StepType.ERROR,
@@ -323,6 +348,42 @@ class AgenticRuntime:
 
             # ─── 3. 判断是否为 final answer ───
             if parsed.is_final_answer:
+                # ── 5C: 无意义输出检测 + checkpoint 回退 ──
+                answer_text = (parsed.content or "").strip()
+                is_meaningless = len(answer_text) < 5 and not parsed.tool_calls
+                if is_meaningless:
+                    self._consecutive_empty_count += 1
+                    logger.warning(
+                        f"Meaningless output at iteration {iteration + 1} "
+                        f"(consecutive={self._consecutive_empty_count}): '{answer_text[:50]}'"
+                    )
+                    if (
+                        self._consecutive_empty_count >= 3
+                        and self._compaction_checkpoint
+                        and not self._checkpoint_rolled_back
+                    ):
+                        self._checkpoint_rolled_back = True
+                        messages = [msg.copy() for msg in self._compaction_checkpoint]
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "[系统提示] 上下文被压缩导致部分信息丢失。"
+                                "请基于当前可见的信息尽力回答用户的问题。"
+                                "如果无法完整回答，请说明哪些信息不足。"
+                            ),
+                        })
+                        logger.info(
+                            f"Checkpoint rollback at iteration {iteration + 1}, "
+                            f"restored {len(self._compaction_checkpoint)} messages"
+                        )
+                        self._emit("agent_progress", {
+                            "status": "checkpoint_rollback",
+                            "iteration": iteration + 1,
+                        })
+                        continue  # 使用 checkpoint 消息重试
+                else:
+                    self._consecutive_empty_count = 0
+
                 logger.info(
                     f"Final answer at iteration {iteration + 1}",
                     extra={"trace_id": self.trace_id},

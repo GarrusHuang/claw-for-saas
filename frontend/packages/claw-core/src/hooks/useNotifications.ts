@@ -53,7 +53,12 @@ export function useNotifications(onNotification: NotificationHandler, enabled = 
 
       ws.onopen = () => {
         // 重连成功，重置计数
+        const wasReconnect = reconnectAttempt.current > 0;
         reconnectAttempt.current = 0;
+
+        if (wasReconnect) {
+          handlerRef.current({ type: 'ws_reconnected', data: {} });
+        }
 
         // 首次连接 or 重连：拉取运行中的 session 列表恢复蓝点
         fetchRunningSessions()
@@ -147,6 +152,7 @@ export function useNotifications(onNotification: NotificationHandler, enabled = 
 
       ws.onclose = () => {
         wsRef.current = null;
+        handlerRef.current({ type: 'ws_disconnected', data: {} });
         // 指数退避重连: 5s → 10s → 20s → 60s (上限)
         const delay = Math.min(5_000 * Math.pow(2, reconnectAttempt.current), 60_000);
         reconnectAttempt.current += 1;
