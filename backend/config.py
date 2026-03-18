@@ -124,12 +124,6 @@ class Settings(BaseSettings):
         description="CORS allowed origins (comma-separated, '*' for all)",
     )
 
-    # ─── External API (optional, for MCP-style tool bridges) ───
-    external_api_base_url: str = Field(
-        default="",
-        description="External API base URL for custom tool bridges",
-    )
-
     # ─── Plugins ───
     plugins_dir: str = Field(
         default="plugins",
@@ -188,10 +182,6 @@ class Settings(BaseSettings):
     skills_dir: str = Field(
         default="skills",
         description="Skills directory path",
-    )
-    skill_max_l2_tokens: int = Field(
-        default=5000,
-        description="Max token estimate for single Skill L2 body",
     )
     skill_max_prompt_chars: int = Field(
         default=30000,

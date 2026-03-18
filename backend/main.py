@@ -39,7 +39,9 @@ from api.ws_routes import router as ws_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    setup_logging(level="INFO", format="console")
+    from dependencies import get_settings as _get_settings
+    _s = _get_settings()
+    setup_logging(level=_s.log_level, format=_s.log_format)
     logger = logging.getLogger(__name__)
     logger.info("Claw-for-SaaS backend starting...")
 
@@ -180,3 +182,13 @@ async def root():
         "version": "0.1.0",
         "docs": "/docs",
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host=_settings.app_host,
+        port=_settings.app_port,
+        reload=_settings.app_debug,
+    )
