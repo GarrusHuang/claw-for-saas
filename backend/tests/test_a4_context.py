@@ -18,7 +18,8 @@ import json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from core.tool_registry import ToolResult, smart_truncate
+from core.tool_registry import ToolResult
+from core.text_utils import smart_truncate
 from core.runtime import RuntimeConfig, AgenticRuntime
 from core.token_estimator import (
     estimate_tokens,
@@ -41,8 +42,10 @@ class TestSmartTruncate:
     def test_simple_truncation_small_budget(self):
         text = "a" * 5000
         result = smart_truncate(text, 100)
-        assert result.endswith("...[truncated]")
-        assert len(result) == 100 + len("...[truncated]")
+        assert "truncated" in result
+        assert "of 5000 chars" in result
+        assert "lines total]" in result
+        assert result.startswith("a" * 100)
 
     def test_head_tail_truncation_with_error(self):
         """When tail has error info, should preserve it."""
