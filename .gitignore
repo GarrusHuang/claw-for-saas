@@ -42,6 +42,9 @@ frontend/**/.vite/
 .DS_Store
 Thumbs.db
 
+# Deploy (contains server-specific config)
+deploy/
+
 # Test
 .coverage
 htmlcov/
