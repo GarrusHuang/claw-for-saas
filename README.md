@@ -328,13 +328,6 @@ cd frontend && npx playwright test
 
 ---
 
-## 开发文档
-
-| 文档 | 说明 |
-|:-----|:-----|
-| [`backend/CLAUDE.md`](backend/CLAUDE.md) | 后端架构详解 — ReAct 循环、工具系统、Hook、安全 |
-| [`frontend/CLAUDE.md`](frontend/CLAUDE.md) | 前端架构详解 — 组件、状态管理、WebSocket 集成 |
-
 ---
 
 ## License
