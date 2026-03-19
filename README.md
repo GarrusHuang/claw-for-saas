@@ -10,8 +10,8 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-1877_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
-[![License](https://img.shields.io/badge/License-Internal-lightgrey)](#license)
+[![Tests](https://img.shields.io/badge/Tests-1890_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache&logoColor=white)](LICENSE)
 
 </div>
 
@@ -99,8 +99,8 @@ pip install -r requirements.txt
 # 创建 .env 配置
 cat > .env << 'EOF'
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=qwen2.5:14b
-LLM_API_KEY=not-needed
+LLM_MODEL=your_model_name
+LLM_API_KEY=your_api_key
 EOF
 
 uvicorn main:app --reload --port 8000
@@ -294,10 +294,10 @@ request_input      → Agent 请求用户输入
 ## 测试
 
 ```bash
-# 后端单元测试（1695 用例）
+# 后端单元测试（1710 用例）
 cd backend && python3 -m pytest tests/ -m "not llm" -v
 
-# 后端 + LLM 集成测试（1724 用例，需 LLM 服务在线）
+# 后端 + LLM 集成测试（1739 用例，需 LLM 服务在线）
 cd backend && python3 -m pytest tests/ -v
 
 # 前端单元测试（153 用例）
@@ -309,11 +309,11 @@ cd frontend && npx playwright test
 
 | 层级 | 测试数 | 覆盖范围 |
 |:-----|:-------|:---------|
-| 后端 Unit | 1,695 | 64 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
+| 后端 Unit | 1,710 | 65 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
 | 后端 LLM 集成 | 29 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
 | 前端 Unit | 153 | claw-core (66) · claw-ui (81) · app (6) |
 | 前端 E2E | 2 specs | Playwright 关键用户流程 |
-| **合计** | **1,877+** | |
+| **合计** | **1,890+** | |
 
 ---
 
@@ -341,4 +341,4 @@ cd frontend && npx playwright test
 
 ## License
 
-Internal use only.
+[Apache License 2.0](LICENSE)
