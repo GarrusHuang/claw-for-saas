@@ -45,6 +45,9 @@ Thumbs.db
 # Deploy (contains server-specific config)
 deploy/
 
+# Internal docs (audit reports, code reviews)
+docs/
+
 # Test
 .coverage
 htmlcov/
