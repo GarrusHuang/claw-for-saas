@@ -88,7 +88,7 @@
 
 - Python 3.11+
 - Node.js 20+
-- 一个 OpenAI 兼容的 LLM 服务（推荐 [Ollama](https://ollama.com) 本地部署）
+- 一个 OpenAI 兼容的 LLM 服务
 
 ### 1. 启动后端
 
