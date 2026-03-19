@@ -45,8 +45,10 @@ Thumbs.db
 # Deploy (contains server-specific config)
 deploy/
 
-# Internal docs (audit reports, code reviews)
+# Internal docs
 docs/
+CLAUDE.md
+**/CLAUDE.md
 
 # Test
 .coverage
