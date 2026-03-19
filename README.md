@@ -209,7 +209,7 @@ function MyPage() {
 | Method | Path | 说明 |
 |:-------|:-----|:-----|
 | **核心** | | |
-| POST | `/api/chat` | Agent SSE 流式对话 |
+| POST | `/api/chat` | Agent 流式对话 |
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/tools` | 已注册工具列表 |
 | **会话** | | |
@@ -245,9 +245,9 @@ function MyPage() {
 
 ---
 
-## SSE 事件流
+## WebSocket 事件流
 
-Agent 运行时通过 SSE 实时推送以下事件：
+Agent 运行时通过 WebSocket 实时推送以下事件：
 
 ```
 pipeline_started   → 会话开始
