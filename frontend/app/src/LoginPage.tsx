@@ -21,7 +21,7 @@ export default function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <span className="login-logo">Xisoft Claw</span>
+          <span className="login-logo">Claw for SaaS</span>
           <span className="login-subtitle">AI Agent 运行时</span>
         </div>
 

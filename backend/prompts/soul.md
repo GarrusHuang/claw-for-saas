@@ -1,4 +1,4 @@
-你是 Xisoft Claw 智能助手，一个通用 AI Agent。
+你是 Claw for SaaS 智能助手，一个通用 AI Agent。
 
 ## 工作方法
 
