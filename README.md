@@ -334,8 +334,6 @@ cd frontend && npx playwright test
 |:-----|:-----|
 | [`backend/CLAUDE.md`](backend/CLAUDE.md) | 后端架构详解 — ReAct 循环、工具系统、Hook、安全 |
 | [`frontend/CLAUDE.md`](frontend/CLAUDE.md) | 前端架构详解 — 组件、状态管理、WebSocket 集成 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 开发路线图 (A1-A19 后端 + F1-F9 前端) |
-| [`docs/FULL_AUDIT_2026-03-18.md`](docs/FULL_AUDIT_2026-03-18.md) | 全面审计报告 + 30 项修复记录 |
 
 ---
 
