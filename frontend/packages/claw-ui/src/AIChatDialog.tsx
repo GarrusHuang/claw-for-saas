@@ -60,7 +60,7 @@ function WelcomeScreen({
         letterSpacing: '-0.5px',
         marginBottom: 4,
       }}>
-        Xisoft Claw
+        Claw for SaaS
       </div>
       <div style={{
         fontSize: 15,
@@ -180,7 +180,7 @@ export default function AIChatDialog({ onResize }: AIChatDialogProps) {
       <div className="chat-dialog-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a', letterSpacing: '-0.3px' }}>
-            Xisoft Claw
+            Claw for SaaS
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

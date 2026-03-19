@@ -109,7 +109,7 @@ describe('AIChatDialog', () => {
     it('shows WelcomeScreen when no messages', () => {
       render(<AIChatDialog />);
       // WelcomeScreen includes ChatInput and welcome text
-      expect(screen.getByText('Xisoft Claw', { selector: 'div' })).toBeInTheDocument();
+      expect(screen.getByText('Claw for SaaS', { selector: 'div' })).toBeInTheDocument();
     });
 
     it('shows ChatInput (in WelcomeScreen)', () => {
@@ -140,7 +140,7 @@ describe('AIChatDialog', () => {
       mockChatDialogState = 'fullscreen';
       render(<AIChatDialog />);
 
-      expect(screen.getAllByText('Xisoft Claw').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Claw for SaaS').length).toBeGreaterThan(0);
     });
 
     it('renders when chatDialogState is sidepanel', async () => {
@@ -149,7 +149,7 @@ describe('AIChatDialog', () => {
       const Dialog = mod.default;
 
       render(<Dialog />);
-      expect(screen.getAllByText('Xisoft Claw').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Claw for SaaS').length).toBeGreaterThan(0);
     });
 
     it('calls onResize with correct mode', async () => {
