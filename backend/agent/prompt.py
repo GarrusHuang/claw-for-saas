@@ -427,13 +427,44 @@ class PromptBuilder:
                 self._soul_cache = "You are an AI assistant powered by Claw."
         return self._soul_cache
 
-    def _format_runtime_context(self, user_id: str, session_id: str) -> str:
-        """格式化运行时上下文。"""
+    @staticmethod
+    def _format_runtime_context(user_id: str, session_id: str) -> str:
+        """格式化运行时上下文 (含 workspace_dir / timezone / platform)。"""
+        import platform as _platform
         now = time.strftime("%Y-%m-%d %H:%M:%S")
-        return (
-            f"\n<runtime>\n"
-            f"  <user_id>{user_id}</user_id>\n"
-            f"  <session_id>{session_id}</session_id>\n"
-            f"  <timestamp>{now}</timestamp>\n"
-            f"</runtime>"
-        )
+
+        # workspace_dir: 从 ContextVar 获取沙箱工作目录
+        from core.context import current_sandbox, current_tenant_id, current_user_id as ctx_user_id, current_session_id as ctx_session_id
+        workspace_dir = ""
+        sandbox = current_sandbox.get(None)
+        if sandbox:
+            tenant_id = current_tenant_id.get("default")
+            ws_user_id = ctx_user_id.get("anonymous")
+            ws_session_id = ctx_session_id.get("")
+            try:
+                workspace_dir = sandbox.get_workspace(tenant_id, ws_user_id, ws_session_id)
+            except Exception:
+                pass
+
+        # timezone: 从配置读取
+        try:
+            from config import Settings
+            timezone = Settings().scheduler_timezone
+        except Exception:
+            timezone = "Asia/Shanghai"
+
+        # platform
+        platform_info = _platform.system()
+
+        parts = [
+            "\n<runtime>",
+            f"  <user_id>{user_id}</user_id>",
+            f"  <session_id>{session_id}</session_id>",
+            f"  <timestamp>{now}</timestamp>",
+        ]
+        if workspace_dir:
+            parts.append(f"  <workspace_dir>{workspace_dir}</workspace_dir>")
+        parts.append(f"  <timezone>{timezone}</timezone>")
+        parts.append(f"  <platform>{platform_info}</platform>")
+        parts.append("</runtime>")
+        return "\n".join(parts)
