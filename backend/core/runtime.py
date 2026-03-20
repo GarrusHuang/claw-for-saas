@@ -24,6 +24,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
 from .event_bus import EventBus
@@ -1306,16 +1307,46 @@ class AgenticRuntime:
 
         return head + [{"role": "user", "content": summary_text}] + tail
 
+    # ── 压缩 prompt 缓存 ──
+    _compact_prompt_cache: str | None = None
+    _compact_prefix_cache: str | None = None
+
+    @classmethod
+    def _load_compact_prompt(cls) -> str:
+        """加载交接摘要压缩指令 (带缓存)。"""
+        if cls._compact_prompt_cache is None:
+            path = Path(__file__).parent.parent / "prompts" / "compact_prompt.md"
+            try:
+                cls._compact_prompt_cache = path.read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                logger.warning(f"compact_prompt.md not found: {path}")
+                cls._compact_prompt_cache = "请用简洁的中文总结以下对话历史的关键信息。"
+        return cls._compact_prompt_cache
+
+    @classmethod
+    def _load_compact_prefix(cls) -> str:
+        """加载摘要前缀 (带缓存)。"""
+        if cls._compact_prefix_cache is None:
+            path = Path(__file__).parent.parent / "prompts" / "compact_prefix.md"
+            try:
+                cls._compact_prefix_cache = path.read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                logger.warning(f"compact_prefix.md not found: {path}")
+                cls._compact_prefix_cache = "[以下是上下文压缩前的交接摘要。]"
+        return cls._compact_prefix_cache
+
     async def _generate_summary(
         self, middle: list[dict], preserved_prefix: str,
     ) -> str:
         """
-        A4 (4d): 用 LLM 生成中间消息摘要。
+        A4 (4d): 用 LLM 生成中间消息的交接摘要。
 
-        有 llm_client 时调 LLM 做精确摘要，超时/失败则 fallback 到启发式截取。
+        有 llm_client 时调 LLM 做结构化交接文档，超时/失败则 fallback 到启发式截取。
+        prompt 从 prompts/compact_prompt.md 加载，摘要前缀从 prompts/compact_prefix.md 加载。
         """
         # 先构建启发式 fallback
         heuristic_parts = []
+        user_messages = []
         for msg in middle:
             role = msg.get("role", "unknown")
             if role == "tool":
@@ -1333,26 +1364,31 @@ class AgenticRuntime:
             else:
                 content_preview = str(msg.get("content", ""))[:100]
                 heuristic_parts.append(f"[{role}: {content_preview}]")
+                if role == "user":
+                    user_messages.append(str(msg.get("content", ""))[:200])
 
         heuristic_text = "\n".join(heuristic_parts)
 
         # 尝试 LLM 摘要
         if self.llm_client is not None:
             try:
-                summary_prompt = (
-                    "请用简洁的中文总结以下对话历史的关键信息。"
-                    "保留: 执行了哪些操作、关键结果数值、重要决策。"
-                    "去掉: 重复内容、冗长的工具输出细节。"
-                    "输出纯文本摘要，200字以内。\n\n"
-                    + heuristic_text[:3000]
-                )
+                compact_prompt = self._load_compact_prompt()
+                compact_prefix = self._load_compact_prefix()
+
+                # 构建输入: 用户原始消息 + 对话历史摘要
+                input_parts = []
+                if user_messages:
+                    input_parts.append("用户消息:\n" + "\n".join(user_messages[:5]))
+                input_parts.append("对话历史:\n" + heuristic_text[:3000])
+                user_input = "\n\n".join(input_parts)
+
                 llm_resp = await asyncio.wait_for(
                     self.llm_client.chat_completion(
                         messages=[
-                            {"role": "system", "content": "你是对话历史压缩助手。输出简洁摘要。"},
-                            {"role": "user", "content": summary_prompt},
+                            {"role": "system", "content": compact_prompt},
+                            {"role": "user", "content": user_input},
                         ],
-                        max_tokens=300,
+                        max_tokens=500,
                         temperature=0.3,
                     ),
                     timeout=10.0,  # 摘要不能耗时太久
@@ -1361,7 +1397,7 @@ class AgenticRuntime:
                     logger.info("Stage2: LLM summary generated successfully")
                     return (
                         preserved_prefix
-                        + f"[Context Compacted — {len(middle)} messages summarized by LLM]\n"
+                        + compact_prefix + "\n"
                         + llm_resp.content.strip()
                     )
             except Exception as e:
