@@ -61,56 +61,31 @@ def read_uploaded_file(
 
         text = service.extract_text(tenant_id, user_id, file_id)
 
-        total_chars = len(text)
+        from core.text_utils import paginate_text
+        page = paginate_text(text, offset=offset, limit=limit,
+                             context_window=settings.agent_model_context_window)
 
-        # 动态页大小: 上下文窗口 * 0.2 * 4 (4字符≈1token)
-        # 范围: 50K - 512K
-        dynamic_page = int(settings.agent_model_context_window * 0.2 * 4)
-        page_size = max(50000, min(512000, dynamic_page))
-        # 如果用户显式传了 limit > 0，用用户的 limit
-        if limit > 0:
-            page_size = limit
-
-        # 分页: 如果文本超过 page_size 且未指定全量读取
-        if total_chars > page_size and limit != -1:
-            # 对齐到换行边界
-            end = min(offset + page_size, total_chars)
-            if end < total_chars:
-                newline_pos = text.rfind("\n", offset, end)
-                if newline_pos > offset:
-                    end = newline_pos + 1
-
-            page_text = text[offset:end]
-            has_more = end < total_chars
-
-            result = {
-                "file_id": file_id,
-                "filename": metadata.filename,
-                "content_type": metadata.content_type,
-                "size_bytes": metadata.size_bytes,
-                "text": page_text,
-                "pagination": {
-                    "offset": offset,
-                    "length": len(page_text),
-                    "total_chars": total_chars,
-                    "has_more": has_more,
-                    "next_offset": end if has_more else None,
-                },
-            }
-            if has_more:
-                result["hint"] = (
-                    f"文件共 {total_chars} 字符，当前显示 {offset}-{end}。"
-                    f"使用 offset={end} 继续读取下一段。"
-                )
-            return result
-
-        return {
+        result = {
             "file_id": file_id,
             "filename": metadata.filename,
             "content_type": metadata.content_type,
             "size_bytes": metadata.size_bytes,
-            "text": text[offset:] if offset > 0 else text,
+            "text": page.text,
         }
+        if page.has_more or page.offset > 0 or page.length < page.total_chars:
+            result["pagination"] = {
+                "offset": page.offset,
+                "length": page.length,
+                "total_chars": page.total_chars,
+                "has_more": page.has_more,
+                "next_offset": page.next_offset,
+            }
+            if page.has_more:
+                result["hint"] = (
+                    f"文件共 {page.total_chars} 字符，当前显示 {page.offset}-{page.next_offset}。"
+                    f"使用 offset={page.next_offset} 继续读取下一段。"
+                )
+        return result
     except FileNotFoundError:
         return {"error": f"File not found: {file_id}"}
     except Exception as e:
@@ -186,48 +161,30 @@ def read_knowledge_file(
         if not meta:
             return {"error": f"Knowledge file not found: {file_id}"}
 
-        total_chars = len(text)
+        from core.text_utils import paginate_text
+        page = paginate_text(text, offset=offset, limit=limit,
+                             context_window=settings.agent_model_context_window)
 
-        dynamic_page = int(settings.agent_model_context_window * 0.2 * 4)
-        page_size = max(50000, min(512000, dynamic_page))
-        if limit > 0:
-            page_size = limit
-
-        if total_chars > page_size and limit != -1:
-            end = min(offset + page_size, total_chars)
-            if end < total_chars:
-                newline_pos = text.rfind("\n", offset, end)
-                if newline_pos > offset:
-                    end = newline_pos + 1
-
-            page_text = text[offset:end]
-            has_more = end < total_chars
-            result = {
-                "file_id": file_id,
-                "filename": meta.filename,
-                "description": meta.description,
-                "text": page_text,
-                "pagination": {
-                    "offset": offset,
-                    "length": len(page_text),
-                    "total_chars": total_chars,
-                    "has_more": has_more,
-                    "next_offset": end if has_more else None,
-                },
-            }
-            if has_more:
-                result["hint"] = (
-                    f"文件共 {total_chars} 字符，当前显示 {offset}-{end}。"
-                    f"使用 offset={end} 继续读取下一段。"
-                )
-            return result
-
-        return {
+        result = {
             "file_id": file_id,
             "filename": meta.filename,
             "description": meta.description,
-            "text": text[offset:] if offset > 0 else text,
+            "text": page.text,
         }
+        if page.has_more or page.offset > 0 or page.length < page.total_chars:
+            result["pagination"] = {
+                "offset": page.offset,
+                "length": page.length,
+                "total_chars": page.total_chars,
+                "has_more": page.has_more,
+                "next_offset": page.next_offset,
+            }
+            if page.has_more:
+                result["hint"] = (
+                    f"文件共 {page.total_chars} 字符，当前显示 {page.offset}-{page.next_offset}。"
+                    f"使用 offset={page.next_offset} 继续读取下一段。"
+                )
+        return result
     except Exception as e:
         logger.error(f"read_knowledge_file error: {e}")
         return {"error": str(e)}

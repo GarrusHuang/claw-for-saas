@@ -2,9 +2,12 @@
 文本处理工具函数。
 
 smart_truncate: 智能 head+tail 截断，保留重要尾部信息。
+paginate_text: 通用文本分页 (动态页大小 + 换行边界对齐)。
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 # ─── 最低保留字符数 ───
 _MIN_TRUNCATE_CHARS = 2000
@@ -70,3 +73,82 @@ def smart_truncate(text: str, max_chars: int) -> str:
         return text[:head_budget] + marker + text[-tail_budget:]
     else:
         return text[:head_budget] + marker
+
+
+# ─── 通用文本分页 ───
+
+
+@dataclass
+class PaginationResult:
+    """分页结果。"""
+    text: str           # 当前页文本
+    offset: int         # 当前起始偏移
+    length: int         # 当前页长度
+    total_chars: int    # 原始总字符数
+    has_more: bool      # 是否有下一页
+    next_offset: int | None  # 下一页偏移
+
+
+def paginate_text(
+    text: str,
+    offset: int = 0,
+    limit: int = 0,
+    context_window: int = 32000,
+) -> PaginationResult:
+    """
+    通用文本分页。
+
+    - limit=0: 使用动态页大小 (context_window * 0.2 * 4, 范围 50K-512K)
+    - limit>0: 使用用户指定的页大小
+    - limit=-1: 不分页，返回从 offset 开始的全部文本
+    - 自动对齐换行边界
+    """
+    total_chars = len(text)
+
+    # limit=-1: 不分页
+    if limit == -1:
+        page = text[offset:] if offset > 0 else text
+        return PaginationResult(
+            text=page,
+            offset=offset,
+            length=len(page),
+            total_chars=total_chars,
+            has_more=False,
+            next_offset=None,
+        )
+
+    # 计算页大小
+    dynamic_page = int(context_window * 0.2 * 4)
+    page_size = max(50000, min(512000, dynamic_page))
+    if limit > 0:
+        page_size = limit
+
+    # 不需要分页
+    if total_chars <= page_size and offset == 0:
+        return PaginationResult(
+            text=text,
+            offset=0,
+            length=total_chars,
+            total_chars=total_chars,
+            has_more=False,
+            next_offset=None,
+        )
+
+    # 分页: 对齐到换行边界
+    end = min(offset + page_size, total_chars)
+    if end < total_chars:
+        newline_pos = text.rfind("\n", offset, end)
+        if newline_pos > offset:
+            end = newline_pos + 1
+
+    page = text[offset:end]
+    has_more = end < total_chars
+
+    return PaginationResult(
+        text=page,
+        offset=offset,
+        length=len(page),
+        total_chars=total_chars,
+        has_more=has_more,
+        next_offset=end if has_more else None,
+    )

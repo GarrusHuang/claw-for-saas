@@ -244,37 +244,10 @@ class AgentGateway:
         except Exception as e:
             logger.debug(f"Auto memory extraction failed (silent): {e}")
 
-    async def chat(
-        self,
-        *,
-        tenant_id: str = "default",
-        user_id: str = "U001",
-        session_id: str | None = None,
-        message: str,
-        business_type: str,
-        skill_names: list[str] | None = None,
-        event_bus: EventBus | None = None,
-        materials: list[dict] | None = None,
-    ) -> dict:
-        """
-        处理用户消息 — 单一入口。
-
-        Args:
-            tenant_id: 租户 ID
-            user_id: 用户 ID (隔离)
-            session_id: 可选, 续接会话
-            message: 用户消息
-            business_type: 业务类型 (reimbursement_create 等)
-            skill_names: 要加载的 Skills
-            event_bus: SSE 事件总线
-            materials: 上传的材料列表
-
-        Returns:
-            {"session_id": str, "answer": str, "iterations": int, ...}
-        """
-        start_time = time.time()
-
-        # ── 1. 设置 contextvars ──
+    def _setup_context_vars(
+        self, *, tenant_id: str, user_id: str, event_bus: EventBus | None,
+    ) -> None:
+        """注入所有 ContextVar 依赖。"""
         if event_bus:
             current_event_bus.set(event_bus)
         current_tenant_id.set(tenant_id)
@@ -328,6 +301,41 @@ class AgentGateway:
         except Exception:
             logger.debug("Scheduler injection skipped", exc_info=True)
 
+    async def chat(
+        self,
+        *,
+        tenant_id: str = "default",
+        user_id: str = "U001",
+        session_id: str | None = None,
+        message: str,
+        business_type: str,
+        skill_names: list[str] | None = None,
+        event_bus: EventBus | None = None,
+        materials: list[dict] | None = None,
+    ) -> dict:
+        """
+        处理用户消息 — 单一入口。
+
+        Args:
+            tenant_id: 租户 ID
+            user_id: 用户 ID (隔离)
+            session_id: 可选, 续接会话
+            message: 用户消息
+            business_type: 业务类型 (reimbursement_create 等)
+            skill_names: 要加载的 Skills
+            event_bus: SSE 事件总线
+            materials: 上传的材料列表
+
+        Returns:
+            {"session_id": str, "answer": str, "iterations": int, ...}
+        """
+        start_time = time.time()
+
+        # ── 1. 设置 contextvars ──
+        self._setup_context_vars(
+            tenant_id=tenant_id, user_id=user_id, event_bus=event_bus,
+        )
+
         # ── 2. 解析/创建会话 ──
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):
             logger.info(f"Resuming session: {session_id}")
@@ -378,41 +386,13 @@ class AgentGateway:
             except OSError:
                 pass
 
-    async def _chat_inner(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str,
-        session_id: str,
-        message: str,
-        business_type: str,
-        skill_names: list[str] | None,
-        event_bus: EventBus | None,
-        materials: list[dict] | None,
-        start_time: float,
-    ) -> dict:
-        """chat() 的核心逻辑，已在 session lock 保护下执行。"""
-        # 发射 session 事件
-        if event_bus:
-            event_bus.emit("pipeline_started", {
-                "session_id": session_id,
-                "business_type": business_type,
-            })
-
-        # ── 3. 加载会话历史 ──
-        history_messages = self.session_manager.load_messages(tenant_id, user_id, session_id)
-
-        # ── 3b. 恢复上一轮的 PlanTracker (跨请求续接) ──
-        saved_plan = self.session_manager.load_plan_steps(tenant_id, user_id, session_id)
-        if saved_plan:
-            from agent.plan_tracker import PlanTracker
-            restored_tracker = PlanTracker.restore(saved_plan, event_bus=event_bus)
-            current_plan_tracker.set(restored_tracker)
-            logger.info(f"Restored PlanTracker with {len(saved_plan)} steps for session {session_id}")
-
-        # ── 4. 加载 Skills (A7: 多源) ──
+    def _load_prompt_sources(
+        self, *, tenant_id: str, user_id: str, session_id: str,
+        business_type: str, event_bus: EventBus | None,
+    ) -> tuple[str, str, str]:
+        """加载 Skill + Memory + 知识库索引，返回 (skill_knowledge, memory_context, knowledge_index_text)。"""
+        # ── Skills (A7: 多源) ──
         skill_knowledge = ""
-
         if self.skill_loader:
             # A7: 加载租户级和用户级 Skill (追加到 registry)
             try:
@@ -432,7 +412,6 @@ class AgentGateway:
             bt = business_type.split("_")[0] if "_" in business_type else business_type
 
             try:
-                # 加载领域知识
                 skill_knowledge, loaded_skill_names = self.skill_loader.build_skill_index(
                     scenario=scenario,
                     agent_name="universal",
@@ -440,7 +419,6 @@ class AgentGateway:
                 )
                 if loaded_skill_names and event_bus:
                     event_bus.emit("skills_loaded", {"skills": loaded_skill_names, "count": len(loaded_skill_names)})
-                    # 立即持久化 (不等 pipeline 结束，F5 后也能从 API 恢复)
                     try:
                         self.session_manager.save_loaded_skills(
                             tenant_id, user_id, session_id, loaded_skill_names,
@@ -450,7 +428,7 @@ class AgentGateway:
             except Exception as e:
                 logger.warning(f"Skill loading failed: {e}")
 
-        # ── 5. 构建 Memory 上下文 (A8: Markdown 分层笔记) ──
+        # ── Memory (A8: Markdown 分层笔记) ──
         memory_context = ""
         if self.memory_store:
             try:
@@ -461,12 +439,11 @@ class AgentGateway:
             except Exception as e:
                 logger.warning(f"MarkdownMemoryStore error: {e}")
 
-        # ── 5b. 加载知识库索引 (_index.md，两阶段: 索引注入 prompt，按需通过工具读取全文) ──
+        # ── 知识库索引 (_index.md) ──
         knowledge_index_text = ""
         try:
             from dependencies import get_knowledge_service
             kb_service = get_knowledge_service()
-            # 读取 _index.md 文件（优先用户级，合并全局级）
             index_parts: list[str] = []
             for index_path in kb_service.get_index_paths(tenant_id, user_id):
                 if index_path.exists():
@@ -478,7 +455,16 @@ class AgentGateway:
         except Exception as e:
             logger.debug(f"Knowledge index loading skipped: {e}")
 
-        # ── 6. 构建系统提示 ──
+        return skill_knowledge, memory_context, knowledge_index_text
+
+    def _build_prompt_and_message(
+        self, *, tenant_id: str, user_id: str, session_id: str,
+        message: str, materials: list[dict] | None,
+        skill_knowledge: str, memory_context: str, knowledge_index_text: str,
+        start_time: float,
+    ) -> tuple[str, str | list]:
+        """构建 system prompt + user message，并持久化用户消息。返回 (system_prompt, user_message)。"""
+        # ── 系统提示 ──
         from agent.prompt import ToolSummary
         tool_summaries = [
             ToolSummary(
@@ -498,7 +484,7 @@ class AgentGateway:
             tool_summaries=tool_summaries,
         )
 
-        # ── 7. 构建用户消息 (A4-4i: 多模态支持) ──
+        # ── 用户消息 (A4-4i: 多模态支持) ──
         from config import settings
         text_summaries: list[str] = []
         image_blocks: list[dict] = []
@@ -510,7 +496,6 @@ class AgentGateway:
             content = m.get("content", "")
 
             if mat_type == "image" and content and settings.llm_supports_vision:
-                # A4-4i: 大图自动压缩 (>1024px 缩放, 控制 token 消耗)
                 from services.content_processor import process_image
                 import base64 as b64mod
                 try:
@@ -521,7 +506,6 @@ class AgentGateway:
                         "media_type": processed.image_media_type or "image/png",
                     })
                 except Exception:
-                    # fallback: 原样使用
                     media_type = mimetypes.guess_type(filename)[0] or "image/png"
                     image_blocks.append({"base64": content, "media_type": media_type})
                 text_summaries.append(f"[Image: {filename}]")
@@ -536,7 +520,7 @@ class AgentGateway:
             image_blocks=image_blocks or None,
         )
 
-        # ── 7b. 提前持久化用户消息 (运行中即可被 API 查到) ──
+        # ── 提前持久化用户消息 (运行中即可被 API 查到) ──
         user_msg: dict = {"role": "user", "content": message, "ts": start_time}
         if materials:
             file_refs = []
@@ -557,48 +541,16 @@ class AgentGateway:
             tenant_id, user_id, session_id, user_msg,
         )
 
-        # ── 8. 创建 AgenticRuntime 并执行 ──
-        runtime = AgenticRuntime(
-            llm_client=self.llm_client,
-            tool_registry=self.tool_registry,
-            tool_parser=ToolCallParser(),
-            config=self.runtime_config,
-            event_bus=event_bus,
-            trace_id=event_bus.trace_id if event_bus else "",
-            hooks=self.hooks,
-        )
+        return system_prompt, user_message
 
-        # 构建初始消息 (对话历史)
-        initial_messages = None
-        if history_messages:
-            initial_messages = history_messages
-
-        result: RuntimeResult | None = None
-        cancelled = False
-        runtime_error: Exception | None = None
-
-        try:
-            result = await runtime.run(
-                system_prompt=system_prompt,
-                user_message=user_message,
-                initial_messages=initial_messages,
-            )
-        except asyncio.CancelledError:
-            cancelled = True
-            logger.info(f"Pipeline cancelled for session {session_id}")
-        except Exception as e:
-            runtime_error = e
-            logger.error(f"AgenticRuntime failed: {e}")
-            if event_bus:
-                event_bus.emit("error", {
-                    "code": "RUNTIME_ERROR",
-                    "message": str(e),
-                    "recoverable": False,
-                })
-
-        # ── 以下所有 save 无论哪种终止都执行 ──
-
-        # ── 9. 持久化 assistant 回复 — 总是保存 ──
+    async def _persist_results(
+        self, *, tenant_id: str, user_id: str, session_id: str,
+        message: str, business_type: str,
+        result: RuntimeResult | None, cancelled: bool, runtime_error: Exception | None,
+        event_bus: EventBus | None, start_time: float,
+    ) -> dict:
+        """持久化结果 (消息/记忆/timeline/plan/用量/完成事件)。返回 response dict。"""
+        # ── 持久化 assistant 回复 — 总是保存 ──
         if cancelled:
             answer = self._extract_partial_answer(event_bus)
         elif runtime_error:
@@ -611,9 +563,8 @@ class AgentGateway:
             {"role": "assistant", "content": answer, "ts": time.time()},
         )
 
-        # ── 9b/10/10c/11: memory/compact/agent_message/thinking/hooks — 仅正常完成 ──
+        # ── memory/compact/agent_message/thinking/hooks — 仅正常完成 ──
         if result and not cancelled and not runtime_error:
-            # 9b. 自动保存记忆 (对标 Codex Session Memory Hook)
             await self._auto_save_memory(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -629,19 +580,19 @@ class AgentGateway:
                 except Exception as e:
                     logger.warning(f"Session compaction failed: {e}")
 
-            # 10. 发射 Agent 文字回复
+            # 发射 Agent 文字回复
             if result.final_answer and event_bus:
                 event_bus.emit("agent_message", {
                     "content": result.final_answer,
                 })
 
-            # 发射 thinking 汇总 (如果有且前端开启了展示思考)
+            # 发射 thinking 汇总
             if result.thinking and event_bus:
                 event_bus.emit("thinking_complete", {
                     "content": result.thinking,
                 })
 
-            # 11. 触发 agent_stop hook
+            # 触发 agent_stop hook
             if self.hooks:
                 from agent.hooks import HookEvent
                 stop_event = HookEvent(
@@ -664,13 +615,11 @@ class AgentGateway:
                 except Exception as e:
                     logger.warning(f"agent_stop hook error: {e}")
 
-        # ── 12. PlanTracker 收尾 + 持久化 — 总是保存 ──
+        # ── PlanTracker 收尾 + 持久化 — 总是保存 ──
         tracker = current_plan_tracker.get(None)
         if tracker:
             if runtime_error:
                 tracker.fail_current()
-            # cancelled/success: 不改步骤状态 (auto-complete 在执行期间已处理)
-            # 持久化 plan steps 到会话文件
             try:
                 self.session_manager.save_plan_steps(
                     tenant_id, user_id, session_id, tracker.steps,
@@ -678,16 +627,13 @@ class AgentGateway:
             except Exception as e:
                 logger.debug(f"Failed to persist plan steps: {e}", exc_info=True)
 
-        # ── 12b. 持久化 timeline — 总是保存 (从 bus.history 提取，不依赖 result) ──
+        # ── 持久化 timeline — 总是保存 ──
         if event_bus:
             try:
-                # 从 EventBus history 提取 thinking + text_delta + tool_executed 事件
                 timeline_entries = []
-                # text_delta 是流式 chunk，按 iteration 累积为单条 text 条目
-                _text_accum: dict[int, str] = {}  # iteration → accumulated text
+                _text_accum: dict[int, str] = {}
                 for evt in event_bus.history:
                     if evt.event_type == "thinking":
-                        # 先 flush 之前迭代的 text_delta 累积
                         for it in sorted(_text_accum):
                             if _text_accum[it]:
                                 timeline_entries.append({
@@ -707,7 +653,6 @@ class AgentGateway:
                         it = evt.data.get("iteration", 0)
                         _text_accum[it] = _text_accum.get(it, "") + evt.data.get("content", "")
                     elif evt.event_type == "tool_executed":
-                        # flush 当前迭代的 text_delta 到 timeline (text 在 tool 之前)
                         for it in sorted(_text_accum):
                             if _text_accum[it]:
                                 timeline_entries.append({
@@ -727,7 +672,6 @@ class AgentGateway:
                             "result_summary": evt.data.get("result_summary", ""),
                             "ts": evt.timestamp,
                         })
-                # flush 剩余 text_delta (最终迭代的文本)
                 for it in sorted(_text_accum):
                     if _text_accum[it]:
                         timeline_entries.append({
@@ -737,7 +681,6 @@ class AgentGateway:
                             "ts": evt.timestamp if event_bus.history else 0,
                         })
                 if timeline_entries:
-                    # 计算 turn_index: 当前 assistant 消息在 messages 中的位置
                     messages = self.session_manager.load_messages(
                         tenant_id, user_id, session_id,
                     )
@@ -751,7 +694,7 @@ class AgentGateway:
             except Exception as e:
                 logger.debug(f"Failed to persist timeline: {e}", exc_info=True)
 
-        # ── 13. 发射完成事件 — 总是发射 ──
+        # ── 发射完成事件 — 总是发射 ──
         duration_ms = (time.time() - start_time) * 1000
         if event_bus:
             if cancelled:
@@ -775,7 +718,7 @@ class AgentGateway:
                 "summary": summary,
             })
 
-        # ── 14. 记录用量 (A10) — 仅正常完成 ──
+        # ── 记录用量 (A10) — 仅正常完成 ──
         if result and not cancelled and not runtime_error:
             try:
                 from dependencies import get_usage_service
@@ -809,3 +752,91 @@ class AgentGateway:
             "max_iterations_reached": result.max_iterations_reached if result else False,
             **({"error": str(runtime_error)} if runtime_error else {}),
         }
+
+    async def _chat_inner(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        message: str,
+        business_type: str,
+        skill_names: list[str] | None,
+        event_bus: EventBus | None,
+        materials: list[dict] | None,
+        start_time: float,
+    ) -> dict:
+        """chat() 的核心逻辑，已在 session lock 保护下执行。"""
+        # ── 1. 发射 pipeline_started ──
+        if event_bus:
+            event_bus.emit("pipeline_started", {
+                "session_id": session_id,
+                "business_type": business_type,
+            })
+
+        # ── 2. 加载会话历史 + PlanTracker ──
+        history_messages = self.session_manager.load_messages(tenant_id, user_id, session_id)
+
+        saved_plan = self.session_manager.load_plan_steps(tenant_id, user_id, session_id)
+        if saved_plan:
+            from agent.plan_tracker import PlanTracker
+            restored_tracker = PlanTracker.restore(saved_plan, event_bus=event_bus)
+            current_plan_tracker.set(restored_tracker)
+            logger.info(f"Restored PlanTracker with {len(saved_plan)} steps for session {session_id}")
+
+        # ── 3. 加载 Skill + Memory + 知识库 ──
+        skill_knowledge, memory_context, knowledge_index_text = self._load_prompt_sources(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            business_type=business_type, event_bus=event_bus,
+        )
+
+        # ── 4. 构建 Prompt + Message ──
+        system_prompt, user_message = self._build_prompt_and_message(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            message=message, materials=materials,
+            skill_knowledge=skill_knowledge, memory_context=memory_context,
+            knowledge_index_text=knowledge_index_text, start_time=start_time,
+        )
+
+        # ── 5. 执行 Runtime ──
+        runtime = AgenticRuntime(
+            llm_client=self.llm_client,
+            tool_registry=self.tool_registry,
+            tool_parser=ToolCallParser(),
+            config=self.runtime_config,
+            event_bus=event_bus,
+            trace_id=event_bus.trace_id if event_bus else "",
+            hooks=self.hooks,
+        )
+
+        initial_messages = history_messages if history_messages else None
+        result: RuntimeResult | None = None
+        cancelled = False
+        runtime_error: Exception | None = None
+
+        try:
+            result = await runtime.run(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                initial_messages=initial_messages,
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            logger.info(f"Pipeline cancelled for session {session_id}")
+        except Exception as e:
+            runtime_error = e
+            logger.error(f"AgenticRuntime failed: {e}")
+            if event_bus:
+                event_bus.emit("error", {
+                    "code": "RUNTIME_ERROR",
+                    "message": str(e),
+                    "recoverable": False,
+                })
+
+        # ── 6. 持久化 + 返回 ──
+        return await self._persist_results(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            message=message, business_type=business_type,
+            result=result, cancelled=cancelled, runtime_error=runtime_error,
+            event_bus=event_bus, start_time=start_time,
+        )
