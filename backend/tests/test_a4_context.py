@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from core.tool_registry import ToolResult
-from core.text_utils import smart_truncate
+from core.text_utils import smart_truncate, paginate_text, PaginationResult
 from core.runtime import RuntimeConfig, AgenticRuntime
 from core.token_estimator import (
     estimate_tokens,
@@ -701,7 +701,12 @@ class TestAllocateToolBudgets:
 # ═══ 4d: LLM Summary (Stage 2) ═══
 
 class TestLLMSummary:
-    """A4-4d: stage2 用 LLM 生成摘要。"""
+    """A4-4d: stage2 用 LLM 生成交接摘要。"""
+
+    def setup_method(self):
+        # 清除类级缓存，确保测试间隔离
+        AgenticRuntime._compact_prompt_cache = None
+        AgenticRuntime._compact_prefix_cache = None
 
     @pytest.mark.asyncio
     async def test_fallback_when_no_llm_client(self):
@@ -719,7 +724,8 @@ class TestLLMSummary:
         summary = await runtime._generate_summary(middle, "")
         assert "Context Compacted" in summary
         assert "calc" in summary
-        assert "summarized by LLM" not in summary  # heuristic, not LLM
+        # heuristic 不含交接摘要前缀
+        assert "交接摘要" not in summary
 
     @pytest.mark.asyncio
     async def test_fallback_when_llm_fails(self):
@@ -741,12 +747,12 @@ class TestLLMSummary:
 
     @pytest.mark.asyncio
     async def test_llm_summary_used_when_available(self):
-        """Mock LLM returning summary → should use it."""
+        """Mock LLM returning summary → should use compact_prefix."""
         from dataclasses import dataclass
 
         @dataclass
         class FakeResp:
-            content: str = "执行了 calc 工具，结果为 42。"
+            content: str = "## 任务目标\n用户请求计算。\n## 已完成的工作\n- calc 工具返回 42。"
 
         class MockLLM:
             async def chat_completion(self, **kwargs):
@@ -757,14 +763,85 @@ class TestLLMSummary:
             tool_registry=_mock_registry(),
         )
         middle = [
+            {"role": "user", "content": "请帮我计算一下"},
             {"role": "assistant", "content": "", "tool_calls": [
                 {"id": "c1", "type": "function", "function": {"name": "calc", "arguments": "{}"}},
             ]},
             {"role": "tool", "tool_call_id": "c1", "content": "42"},
         ]
         summary = await runtime._generate_summary(middle, "")
-        assert "summarized by LLM" in summary
+        # 应包含 compact_prefix.md 中的交接摘要标记
+        assert "交接摘要" in summary
         assert "42" in summary
+
+    @pytest.mark.asyncio
+    async def test_llm_receives_user_messages(self):
+        """LLM should receive user messages from middle for context."""
+        from dataclasses import dataclass
+
+        captured_kwargs = {}
+
+        @dataclass
+        class FakeResp:
+            content: str = "摘要内容"
+
+        class CaptureLLM:
+            async def chat_completion(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return FakeResp()
+
+        runtime = AgenticRuntime(
+            llm_client=CaptureLLM(),
+            tool_registry=_mock_registry(),
+        )
+        middle = [
+            {"role": "user", "content": "帮我查询订单 ORD-123"},
+            {"role": "assistant", "content": "好的，我来查询。"},
+        ]
+        await runtime._generate_summary(middle, "")
+        # 验证 user 消息被传给了 LLM
+        user_msg = captured_kwargs["messages"][1]["content"]
+        assert "ORD-123" in user_msg
+
+    @pytest.mark.asyncio
+    async def test_llm_summary_max_tokens_500(self):
+        """LLM summary should request max_tokens=500."""
+        from dataclasses import dataclass
+
+        captured_kwargs = {}
+
+        @dataclass
+        class FakeResp:
+            content: str = "摘要"
+
+        class CaptureLLM:
+            async def chat_completion(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return FakeResp()
+
+        runtime = AgenticRuntime(
+            llm_client=CaptureLLM(),
+            tool_registry=_mock_registry(),
+        )
+        middle = [{"role": "assistant", "content": "test"}]
+        await runtime._generate_summary(middle, "")
+        assert captured_kwargs["max_tokens"] == 500
+
+    def test_compact_prompt_cache(self):
+        """compact_prompt.md should be cached after first load."""
+        AgenticRuntime._compact_prompt_cache = None
+        prompt1 = AgenticRuntime._load_compact_prompt()
+        prompt2 = AgenticRuntime._load_compact_prompt()
+        assert prompt1 is prompt2
+        assert "交接摘要" in prompt1
+
+    def test_compact_prefix_cache(self):
+        """compact_prefix.md should be cached after first load."""
+        AgenticRuntime._compact_prefix_cache = None
+        prefix1 = AgenticRuntime._load_compact_prefix()
+        prefix2 = AgenticRuntime._load_compact_prefix()
+        assert prefix1 is prefix2
+        assert "交接摘要" in prefix1
 
 
 # ═══ 4i: Multimodal Content Processing ═══
@@ -1001,3 +1078,116 @@ class TestIdentifierPatternAdditional:
         ids = _extract_identifiers("日期: 2025年3月15日")
         dates = [i for i in ids if "2025" in i]
         assert len(dates) >= 1
+
+
+# ═══ 0.3: Runtime Context Enhancement ═══
+
+class TestRuntimeContext:
+    """0.3: _format_runtime_context 增加 workspace_dir / timezone / platform 字段。"""
+
+    def test_contains_timezone(self):
+        """Runtime context should include timezone."""
+        from agent.prompt import PromptBuilder
+        result = PromptBuilder._format_runtime_context("user1", "sess1")
+        assert "<timezone>" in result
+        assert "</timezone>" in result
+
+    def test_contains_platform(self):
+        """Runtime context should include platform."""
+        from agent.prompt import PromptBuilder
+        import platform as _platform
+        result = PromptBuilder._format_runtime_context("user1", "sess1")
+        assert "<platform>" in result
+        assert _platform.system() in result
+
+    def test_contains_basic_fields(self):
+        """Runtime context should still contain user_id, session_id, timestamp."""
+        from agent.prompt import PromptBuilder
+        result = PromptBuilder._format_runtime_context("test_user", "test_sess")
+        assert "<user_id>test_user</user_id>" in result
+        assert "<session_id>test_sess</session_id>" in result
+        assert "<timestamp>" in result
+
+    def test_workspace_dir_without_sandbox(self):
+        """Without sandbox ContextVar, workspace_dir should be absent."""
+        from agent.prompt import PromptBuilder
+        # current_sandbox defaults to None, so no workspace_dir
+        result = PromptBuilder._format_runtime_context("user1", "sess1")
+        assert "<workspace_dir>" not in result
+
+    def test_xml_structure(self):
+        """Runtime context should be valid XML-like structure."""
+        from agent.prompt import PromptBuilder
+        result = PromptBuilder._format_runtime_context("u1", "s1")
+        assert result.strip().startswith("<runtime>")
+        assert result.strip().endswith("</runtime>")
+
+
+# ═══ P.3: paginate_text ═══
+
+class TestPaginateText:
+    """Tests for the shared paginate_text() function."""
+
+    def test_short_text_no_pagination(self):
+        text = "hello world"
+        r = paginate_text(text)
+        assert r.text == text
+        assert r.has_more is False
+        assert r.next_offset is None
+        assert r.total_chars == len(text)
+
+    def test_limit_minus_one_returns_full_text(self):
+        text = "a" * 200000
+        r = paginate_text(text, limit=-1)
+        assert r.text == text
+        assert r.has_more is False
+
+    def test_limit_minus_one_with_offset(self):
+        text = "abcdefghij"
+        r = paginate_text(text, offset=5, limit=-1)
+        assert r.text == "fghij"
+        assert r.has_more is False
+
+    def test_pagination_splits_large_text(self):
+        # 使用 context_window=1000 → dynamic_page = 1000*0.2*4 = 800
+        # page_size = max(50000, min(512000, 800)) = 50000
+        # 所以用 60000 字符来触发分页
+        text = "line\n" * 15000  # 75000 chars
+        r = paginate_text(text, context_window=1000)
+        assert r.has_more is True
+        assert r.next_offset is not None
+        assert r.next_offset <= 50001  # page_size boundary
+        assert r.offset == 0
+
+    def test_pagination_second_page(self):
+        text = "line\n" * 15000
+        r1 = paginate_text(text, context_window=1000)
+        r2 = paginate_text(text, offset=r1.next_offset, context_window=1000)
+        assert r2.offset == r1.next_offset
+        assert r2.total_chars == len(text)
+
+    def test_newline_boundary_alignment(self):
+        # 构造文本: 在 page_size 附近有换行
+        # context_window=250000 → dynamic=200000 → page_size=200000
+        chunk = "x" * 199990 + "\n" + "y" * 100000
+        r = paginate_text(chunk, context_window=250000)
+        assert r.has_more is True
+        # 应该在换行处切割
+        assert r.text.endswith("\n")
+
+    def test_explicit_limit(self):
+        text = "abcde\nfghij\nklmno\npqrst\n"
+        r = paginate_text(text, limit=10)
+        assert r.has_more is True
+        # limit=10, 文本24字符, 应该分页
+        assert len(r.text) <= 11  # 10 + possible newline alignment
+
+    def test_explicit_limit_no_split_needed(self):
+        text = "short"
+        r = paginate_text(text, limit=100)
+        assert r.has_more is False
+        assert r.text == "short"
+
+    def test_result_is_dataclass(self):
+        r = paginate_text("test")
+        assert isinstance(r, PaginationResult)
