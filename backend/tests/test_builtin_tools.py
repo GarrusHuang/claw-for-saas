@@ -15,15 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-from core.context import (
-    current_event_bus,
-    current_sandbox,
-    current_tenant_id,
-    current_user_id,
-    current_session_id,
-    current_file_service,
-    current_browser_service,
-)
+from core.context import RequestContext, current_request
 
 
 # ──────────────────────────────────────────────
@@ -31,21 +23,10 @@ from core.context import (
 # ──────────────────────────────────────────────
 
 def _set_ctx(**kwargs):
-    """Set contextvars, return list of (var, token) for cleanup."""
-    tokens = []
-    mapping = {
-        "event_bus": current_event_bus,
-        "sandbox": current_sandbox,
-        "tenant_id": current_tenant_id,
-        "user_id": current_user_id,
-        "session_id": current_session_id,
-        "file_service": current_file_service,
-        "browser_service": current_browser_service,
-    }
-    for key, val in kwargs.items():
-        var = mapping[key]
-        tokens.append((var, var.set(val)))
-    return tokens
+    """Set RequestContext, return token for cleanup."""
+    ctx = RequestContext(**kwargs)
+    token = current_request.set(ctx)
+    return [(current_request, token)]
 
 
 def _reset_ctx(tokens):
@@ -589,7 +570,7 @@ class TestReadReference:
 # Subagent Tools
 # ══════════════════════════════════════════════
 
-from tools.builtin.subagent_tools import spawn_subagent, spawn_subagents, _subagent_runner
+from tools.builtin.subagent_tools import spawn_subagent, spawn_subagents
 
 
 class TestSpawnSubagent:
@@ -598,7 +579,7 @@ class TestSpawnSubagent:
         mock_runner = AsyncMock()
         mock_runner.run_subagent.return_value = "任务完成：数据已验证"
 
-        token = _subagent_runner.set(mock_runner)
+        tokens = _set_ctx(subagent_runner=mock_runner)
         try:
             r = await spawn_subagent(task="检查数据", prompt="你是验证专家")
             assert r == "任务完成：数据已验证"
@@ -606,16 +587,16 @@ class TestSpawnSubagent:
                 task="检查数据", prompt="你是验证专家", tools="", timeout_s=120
             )
         finally:
-            _subagent_runner.reset(token)
+            _reset_ctx(tokens)
 
     @pytest.mark.asyncio
     async def test_missing_runner(self):
-        token = _subagent_runner.set(None)
+        tokens = _set_ctx(subagent_runner=None)
         try:
             r = await spawn_subagent(task="test")
             assert "未初始化" in r
         finally:
-            _subagent_runner.reset(token)
+            _reset_ctx(tokens)
 
 
 class TestSpawnSubagents:
@@ -624,7 +605,7 @@ class TestSpawnSubagents:
         mock_runner = AsyncMock()
         mock_runner.run_subagent.side_effect = ["结果A", "结果B"]
 
-        token = _subagent_runner.set(mock_runner)
+        tokens = _set_ctx(subagent_runner=mock_runner)
         try:
             tasks_json = json.dumps([
                 {"task": "任务A", "prompt": "角色A"},
@@ -635,43 +616,43 @@ class TestSpawnSubagents:
             assert "结果B" in r
             assert mock_runner.run_subagent.call_count == 2
         finally:
-            _subagent_runner.reset(token)
+            _reset_ctx(tokens)
 
     @pytest.mark.asyncio
     async def test_empty_list(self):
-        token = _subagent_runner.set(MagicMock())
+        tokens = _set_ctx(subagent_runner=MagicMock())
         try:
             r = await spawn_subagents(tasks="[]")
             assert "非空" in r or "错误" in r
         finally:
-            _subagent_runner.reset(token)
+            _reset_ctx(tokens)
 
     @pytest.mark.asyncio
     async def test_invalid_json(self):
-        token = _subagent_runner.set(MagicMock())
+        tokens = _set_ctx(subagent_runner=MagicMock())
         try:
             r = await spawn_subagents(tasks="not json")
             assert "错误" in r
         finally:
-            _subagent_runner.reset(token)
+            _reset_ctx(tokens)
 
     @pytest.mark.asyncio
     async def test_missing_runner(self):
-        token = _subagent_runner.set(None)
+        tokens = _set_ctx(subagent_runner=None)
         try:
             r = await spawn_subagents(tasks='[{"task":"x"}]')
             assert "未初始化" in r
         finally:
-            _subagent_runner.reset(token)
+            _reset_ctx(tokens)
 
     @pytest.mark.asyncio
     async def test_string_items(self):
         mock_runner = AsyncMock()
         mock_runner.run_subagent.return_value = "done"
 
-        token = _subagent_runner.set(mock_runner)
+        tokens = _set_ctx(subagent_runner=mock_runner)
         try:
             r = await spawn_subagents(tasks='["do task A"]')
             assert "done" in r
         finally:
-            _subagent_runner.reset(token)
+            _reset_ctx(tokens)

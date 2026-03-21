@@ -14,18 +14,12 @@ A3 改造:
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import json
-from typing import Any
 
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 subagent_capability_registry = ToolRegistry()
-
-# SubagentRunner 注入 (由 Gateway 设置)
-_subagent_runner: contextvars.ContextVar[Any] = contextvars.ContextVar(
-    "_subagent_runner", default=None
-)
 
 
 @subagent_capability_registry.tool(
@@ -45,7 +39,7 @@ async def spawn_subagent(
     timeout_s: int = 120,  # 超时秒数
 ) -> str:
     """派遣子智能体执行子任务，返回子智能体的最终回答。"""
-    runner = _subagent_runner.get()
+    runner = get_request_context().subagent_runner
     if runner is None:
         return "错误: SubagentRunner 未初始化。"
 
@@ -72,7 +66,7 @@ async def spawn_subagents(
     timeout_s: int = 120,
 ) -> str:
     """批量并行派遣多个子智能体，返回汇总结果。"""
-    runner = _subagent_runner.get()
+    runner = get_request_context().subagent_runner
     if runner is None:
         return "错误: SubagentRunner 未初始化。"
 

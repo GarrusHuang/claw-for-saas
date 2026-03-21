@@ -139,9 +139,10 @@ def data_lock_hook(event: HookEvent) -> HookResult:
     检查写操作是否涉及被锁定的字段。
     readonly 级别阻止, audit 级别记录但放行。
     """
-    from core.context import current_data_lock
+    from core.context import current_request
 
-    registry = current_data_lock.get(None)
+    ctx = current_request.get()
+    registry = ctx.data_lock if ctx else None
     if registry is None:
         return HookResult(action="allow")
 

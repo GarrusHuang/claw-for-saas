@@ -15,7 +15,7 @@ from agent.prompt import (
     PROMPT_MODE_LAYERS,
 )
 from agent.plan_tracker import PlanTracker
-from core.context import current_plan_tracker
+from core.context import RequestContext, current_request
 
 
 # ── PromptLayer ──
@@ -229,12 +229,13 @@ class TestPlanStateInjection:
     """plan_guidance 从 ContextVar 读取已恢复的 PlanTracker 并注入状态。"""
 
     def _build_with_tracker(self, tracker: PlanTracker | None) -> str:
-        token = current_plan_tracker.set(tracker)
+        ctx = RequestContext(plan_tracker=tracker)
+        token = current_request.set(ctx)
         try:
             pb = PromptBuilder()
             return pb.build_system_prompt()
         finally:
-            current_plan_tracker.reset(token)
+            current_request.reset(token)
 
     def test_no_tracker_no_injection(self):
         """无 PlanTracker 时，plan_guidance 不含步骤状态。"""

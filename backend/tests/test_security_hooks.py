@@ -215,66 +215,71 @@ class TestDataLockHook:
 
     def test_no_registry_allows(self):
         """Without DataLockRegistry injected, always allow."""
-        from core.context import current_data_lock
-        tok = current_data_lock.set(None)
+        from core.context import RequestContext, current_request
+        ctx = RequestContext(data_lock=None)
+        tok = current_request.set(ctx)
         try:
             result = data_lock_hook(self._event({"field_id": "salary", "value": "100"}))
             assert result.action == "allow"
         finally:
-            current_data_lock.reset(tok)
+            current_request.reset(tok)
 
     def test_readonly_field_blocked(self):
         """Readonly locked field is blocked."""
-        from core.context import current_data_lock
+        from core.context import RequestContext, current_request
         from core.data_lock import DataLockRegistry, DataLock, LockLevel
 
         registry = DataLockRegistry()
         registry.register(DataLock(key="salary", level=LockLevel.READONLY, reason="薪资不可改"))
-        tok = current_data_lock.set(registry)
+        ctx = RequestContext(data_lock=registry)
+        tok = current_request.set(ctx)
         try:
             result = data_lock_hook(self._event({"field_id": "salary", "value": "999999"}))
             assert result.action == "block"
             assert "salary" in result.message
         finally:
-            current_data_lock.reset(tok)
+            current_request.reset(tok)
 
     def test_audit_field_allowed(self):
         """Audit locked field is allowed (logged only)."""
-        from core.context import current_data_lock
+        from core.context import RequestContext, current_request
         from core.data_lock import DataLockRegistry, DataLock, LockLevel
 
         registry = DataLockRegistry()
         registry.register(DataLock(key="department", level=LockLevel.AUDIT, reason="审计"))
-        tok = current_data_lock.set(registry)
+        ctx = RequestContext(data_lock=registry)
+        tok = current_request.set(ctx)
         try:
             result = data_lock_hook(self._event({"field_id": "department", "value": "Engineering"}))
             assert result.action == "allow"
         finally:
-            current_data_lock.reset(tok)
+            current_request.reset(tok)
 
     def test_unlocked_field_allowed(self):
         """Unlocked field is always allowed."""
-        from core.context import current_data_lock
+        from core.context import RequestContext, current_request
         from core.data_lock import DataLockRegistry
 
         registry = DataLockRegistry()
-        tok = current_data_lock.set(registry)
+        ctx = RequestContext(data_lock=registry)
+        tok = current_request.set(ctx)
         try:
             result = data_lock_hook(self._event({"field_id": "email", "value": "a@b.com"}))
             assert result.action == "allow"
         finally:
-            current_data_lock.reset(tok)
+            current_request.reset(tok)
 
     def test_key_param_checked(self):
         """Also checks 'key' parameter (not just field_id)."""
-        from core.context import current_data_lock
+        from core.context import RequestContext, current_request
         from core.data_lock import DataLockRegistry, DataLock, LockLevel
 
         registry = DataLockRegistry()
         registry.register(DataLock(key="config_key", level=LockLevel.READONLY, reason="locked"))
-        tok = current_data_lock.set(registry)
+        ctx = RequestContext(data_lock=registry)
+        tok = current_request.set(ctx)
         try:
             result = data_lock_hook(self._event({"key": "config_key", "value": "new"}))
             assert result.action == "block"
         finally:
-            current_data_lock.reset(tok)
+            current_request.reset(tok)

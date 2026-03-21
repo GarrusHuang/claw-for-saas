@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from core.context import current_memory_store, current_tenant_id, current_user_id, current_event_bus
+from core.context import RequestContext, current_request
 from core.event_bus import EventBus
 from memory.markdown_store import MarkdownMemoryStore
 from tools.builtin.memory_tools import save_memory, recall_memory, memory_capability_registry
@@ -17,18 +17,13 @@ class TestSaveMemory:
     def _setup(self, tmp_path):
         self.store = MarkdownMemoryStore(base_dir=str(tmp_path / "memory"))
         self.bus = EventBus(trace_id="test")
-        self.tokens = [
-            current_memory_store.set(self.store),
-            current_tenant_id.set("T1"),
-            current_user_id.set("U1"),
-            current_event_bus.set(self.bus),
-        ]
+        ctx = RequestContext(
+            memory_store=self.store, tenant_id="T1", user_id="U1",
+            event_bus=self.bus,
+        )
+        self.token = current_request.set(ctx)
         yield
-        for tok in reversed(self.tokens):
-            try:
-                tok.var.reset(tok)
-            except Exception:
-                pass
+        current_request.reset(self.token)
         self.bus.close()
 
     def test_save_user_scope(self):
@@ -67,9 +62,13 @@ class TestSaveMemory:
         assert "error" in result
 
     def test_no_store_error(self):
-        current_memory_store.set(None)
-        result = save_memory(content="test")
-        assert "error" in result
+        ctx = RequestContext(memory_store=None)
+        token = current_request.set(ctx)
+        try:
+            result = save_memory(content="test")
+            assert "error" in result
+        finally:
+            current_request.reset(token)
 
     def test_emits_memory_saved_event(self):
         save_memory(content="test", scope="user", file="test.md")
@@ -82,20 +81,15 @@ class TestRecallMemory:
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
         self.store = MarkdownMemoryStore(base_dir=str(tmp_path / "memory"))
-        self.tokens = [
-            current_memory_store.set(self.store),
-            current_tenant_id.set("T1"),
-            current_user_id.set("U1"),
-        ]
+        ctx = RequestContext(
+            memory_store=self.store, tenant_id="T1", user_id="U1",
+        )
+        self.token = current_request.set(ctx)
         # Seed some data
         self.store.write_file("user", "notes.md", "user notes", "append", "T1", "U1")
         self.store.write_file("global", "rules.md", "global rules", "append")
         yield
-        for tok in reversed(self.tokens):
-            try:
-                tok.var.reset(tok)
-            except Exception:
-                pass
+        current_request.reset(self.token)
 
     def test_recall_user_file(self):
         result = recall_memory(scope="user", file="notes.md")
@@ -123,9 +117,13 @@ class TestRecallMemory:
         assert "error" in result
 
     def test_no_store_error(self):
-        current_memory_store.set(None)
-        result = recall_memory()
-        assert "error" in result
+        ctx = RequestContext(memory_store=None)
+        token = current_request.set(ctx)
+        try:
+            result = recall_memory()
+            assert "error" in result
+        finally:
+            current_request.reset(token)
 
 
 class TestMemoryToolRegistry:

@@ -393,11 +393,12 @@ class AgenticRuntime:
                 # ── Phase 11: Quality Gate (Stop Hook) ──
                 if self.hooks:
                     from agent.hooks import HookEvent
-                    from core.context import current_user_id, current_session_id
+                    from core.context import current_request
+                    _ctx = current_request.get()
                     stop_event = HookEvent(
                         event_type="agent_stop",
-                        session_id=current_session_id.get(""),
-                        user_id=current_user_id.get("anonymous"),
+                        session_id=_ctx.session_id if _ctx else "",
+                        user_id=_ctx.user_id if _ctx else "anonymous",
                         runtime_steps=[
                             {"tool": s.tool_name, "args": s.tool_args, "result": s.tool_result}
                             for s in self._steps if s.tool_name
@@ -884,8 +885,6 @@ class AgenticRuntime:
         iteration: int,
     ) -> ToolResult:
         """执行单个工具调用（带超时 + Hook 集成 + 只读缓存）。"""
-        from core.context import current_user_id, current_session_id
-
         # ── 只读工具结果缓存: 相同调用不重复执行 ──
         is_read_only = self.tool_registry.is_read_only(tool_call.name)
         if is_read_only:
@@ -930,6 +929,8 @@ class AgenticRuntime:
                 return cache_result
 
         start = time.monotonic()
+        from core.context import current_request
+        _ctx = current_request.get()
 
         # ── PRE hook: 工具调用前检查 ──
         if self.hooks:
@@ -938,8 +939,8 @@ class AgenticRuntime:
                 event_type="pre_tool_use",
                 tool_name=tool_call.name,
                 tool_input=tool_call.arguments,
-                session_id=current_session_id.get(""),
-                user_id=current_user_id.get("anonymous"),
+                session_id=_ctx.session_id if _ctx else "",
+                user_id=_ctx.user_id if _ctx else "anonymous",
             )
             try:
                 pre_result = await self.hooks.fire(pre_event)
@@ -971,8 +972,7 @@ class AgenticRuntime:
                     "result_summary": f"Hook blocked: {pre_result.message}"[:300],
                 })
                 # Plan step tracking
-                from core.context import current_plan_tracker
-                tracker = current_plan_tracker.get(None)
+                tracker = _ctx.plan_tracker if _ctx else None
                 if tracker:
                     tracker.fail_current()
                 logger.info(f"Tool blocked by hook: {tool_call.name} — {pre_result.message}")
@@ -1048,8 +1048,8 @@ class AgenticRuntime:
                 tool_name=tool_call.name,
                 tool_input=tool_call.arguments,
                 tool_output=result.to_json()[:500],
-                session_id=current_session_id.get(""),
-                user_id=current_user_id.get("anonymous"),
+                session_id=_ctx.session_id if _ctx else "",
+                user_id=_ctx.user_id if _ctx else "anonymous",
             )
             try:
                 await self.hooks.fire(post_event)

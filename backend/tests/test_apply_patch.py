@@ -389,26 +389,29 @@ class TestApplyPatchTool:
             +WORLD
             *** End Patch
         """)
-        with patch("tools.builtin.apply_patch.current_sandbox") as mock_sandbox_var, \
-             patch("tools.builtin.apply_patch.current_event_bus") as mock_bus_var, \
-             patch("tools.builtin.apply_patch.current_session_id") as mock_sid:
-            mock_sandbox_var.get.return_value = None
-            mock_bus_var.get.return_value = None
-            mock_sid.get.return_value = ""
-
+        from core.context import RequestContext, current_request
+        ctx = RequestContext(sandbox=None, event_bus=None)
+        token = current_request.set(ctx)
+        try:
             with patch.dict(os.environ, {"CODE_ALLOWED_PATHS": str(tmp_path)}):
                 from tools.builtin.apply_patch import apply_patch as apply_patch_tool
                 result = apply_patch_tool(patch=patch_text)
+        finally:
+            current_request.reset(token)
 
         assert result["success"] is True
         assert "test.txt" in result["modified"]
         assert (tmp_path / "test.txt").read_text() == "hello\nWORLD\n"
 
     def test_tool_parse_error(self):
-        with patch("tools.builtin.apply_patch.current_sandbox") as mock_sandbox_var:
-            mock_sandbox_var.get.return_value = None
+        from core.context import RequestContext, current_request
+        ctx = RequestContext(sandbox=None)
+        token = current_request.set(ctx)
+        try:
             from tools.builtin.apply_patch import apply_patch as apply_patch_tool
             result = apply_patch_tool(patch="bad input")
+        finally:
+            current_request.reset(token)
         assert "error" in result
         assert "解析失败" in result["error"]
 
@@ -419,11 +422,15 @@ class TestApplyPatchTool:
             +hacked
             *** End Patch
         """)
-        with patch("tools.builtin.apply_patch.current_sandbox") as mock_sandbox_var:
-            mock_sandbox_var.get.return_value = None
+        from core.context import RequestContext, current_request
+        ctx = RequestContext(sandbox=None)
+        token = current_request.set(ctx)
+        try:
             with patch.dict(os.environ, {"CODE_ALLOWED_PATHS": str(tmp_path)}):
                 from tools.builtin.apply_patch import apply_patch as apply_patch_tool
                 result = apply_patch_tool(patch=patch_text)
+        finally:
+            current_request.reset(token)
         assert "error" in result
         assert "Absolute" in result["error"]
 
@@ -434,10 +441,14 @@ class TestApplyPatchTool:
             +hacked
             *** End Patch
         """)
-        with patch("tools.builtin.apply_patch.current_sandbox") as mock_sandbox_var:
-            mock_sandbox_var.get.return_value = None
+        from core.context import RequestContext, current_request
+        ctx = RequestContext(sandbox=None)
+        token = current_request.set(ctx)
+        try:
             with patch.dict(os.environ, {"CODE_ALLOWED_PATHS": str(tmp_path)}):
                 from tools.builtin.apply_patch import apply_patch as apply_patch_tool
                 result = apply_patch_tool(patch=patch_text)
+        finally:
+            current_request.reset(token)
         assert "error" in result
         assert "escapes" in result["error"]

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.context import current_scheduler, current_tenant_id, current_user_id
+from core.context import RequestContext, current_request
 from tools.builtin.schedule_tools import (
     create_schedule, list_schedules, delete_schedule,
     schedule_capability_registry,
@@ -24,14 +24,11 @@ def scheduler(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _set_context(scheduler):
-    """Set up ContextVars for all tests."""
-    t1 = current_scheduler.set(scheduler)
-    t2 = current_tenant_id.set("T1")
-    t3 = current_user_id.set("U1")
+    """Set up RequestContext for all tests."""
+    ctx = RequestContext(scheduler=scheduler, tenant_id="T1", user_id="U1")
+    token = current_request.set(ctx)
     yield
-    current_scheduler.reset(t1)
-    current_tenant_id.reset(t2)
-    current_user_id.reset(t3)
+    current_request.reset(token)
 
 
 # ───── Registry ─────
@@ -67,12 +64,13 @@ class TestCreateSchedule:
         assert "cron" in result["error"].lower()
 
     def test_no_scheduler(self):
-        token = current_scheduler.set(None)
+        ctx = RequestContext(scheduler=None, tenant_id="T1", user_id="U1")
+        token = current_request.set(ctx)
         try:
             result = create_schedule(name="X", cron="* * * * *", message="y")
             assert "error" in result
         finally:
-            current_scheduler.reset(token)
+            current_request.reset(token)
 
 
 # ───── list_schedules ─────
@@ -92,12 +90,13 @@ class TestListSchedules:
         assert names == {"A", "B"}
 
     def test_no_scheduler(self):
-        token = current_scheduler.set(None)
+        ctx = RequestContext(scheduler=None, tenant_id="T1", user_id="U1")
+        token = current_request.set(ctx)
         try:
             result = list_schedules()
             assert "error" in result
         finally:
-            current_scheduler.reset(token)
+            current_request.reset(token)
 
 
 # ───── delete_schedule ─────
@@ -116,9 +115,10 @@ class TestDeleteSchedule:
         assert "error" in result
 
     def test_no_scheduler(self):
-        token = current_scheduler.set(None)
+        ctx = RequestContext(scheduler=None, tenant_id="T1", user_id="U1")
+        token = current_request.set(ctx)
         try:
             result = delete_schedule(task_id="x")
             assert "error" in result
         finally:
-            current_scheduler.reset(token)
+            current_request.reset(token)

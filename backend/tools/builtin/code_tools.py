@@ -18,7 +18,7 @@ import mimetypes
 import os
 import time
 
-from core.context import current_event_bus, current_sandbox, current_tenant_id, current_user_id, current_session_id
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -38,13 +38,11 @@ def _get_workspace() -> tuple:
     Returns:
         (sandbox, workspace) 或 (None, None)
     """
-    sandbox = current_sandbox.get(None)
+    ctx = get_request_context()
+    sandbox = ctx.sandbox
     if sandbox is None:
         return None, None
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
-    session_id = current_session_id.get("")
-    workspace = sandbox.get_workspace(tenant_id, user_id, session_id)
+    workspace = sandbox.get_workspace(ctx.tenant_id, ctx.user_id, ctx.session_id)
     return sandbox, workspace
 
 
@@ -161,11 +159,9 @@ def write_source_file(
         return {"error": str(e)}
 
     # A6: 磁盘配额检查
-    sandbox = current_sandbox.get(None)
-    if sandbox:
-        tenant_id = current_tenant_id.get("default")
-        user_id = current_user_id.get("anonymous")
-        quota = sandbox.check_disk_quota(tenant_id, user_id)
+    ctx = get_request_context()
+    if ctx.sandbox:
+        quota = ctx.sandbox.check_disk_quota(ctx.tenant_id, ctx.user_id)
         if quota["exceeded"]:
             return {"error": f"磁盘配额超限: 已使用 {quota['used_mb']}MB / {quota['quota_mb']}MB"}
 
@@ -204,10 +200,9 @@ def write_source_file(
         size = os.path.getsize(resolved)
         basename = os.path.basename(resolved)
         mime_type = mimetypes.guess_type(basename)[0] or "application/octet-stream"
-        session_id = current_session_id.get("")
 
         # 发射 SSE 事件
-        bus = current_event_bus.get()
+        bus = ctx.event_bus
         if bus:
             bus.emit("code_file_written", {
                 "path": path,
@@ -219,7 +214,7 @@ def write_source_file(
                 "filename": basename,
                 "size_bytes": size,
                 "content_type": mime_type,
-                "session_id": session_id,
+                "session_id": ctx.session_id,
             })
 
         result = {"path": path, "mode": mode, "size": size}
@@ -268,7 +263,7 @@ def run_command(
         result = sandbox.run_command(command, work_dir, timeout)
 
         # 发射 SSE 事件
-        bus = current_event_bus.get()
+        bus = get_request_context().event_bus
         if bus:
             bus.emit("command_executed", {
                 "command": command[:200],
@@ -318,7 +313,7 @@ def run_command(
             stderr = stderr[:MAX_OUTPUT_SIZE]
             stderr_truncated = True
 
-        bus = current_event_bus.get()
+        bus = get_request_context().event_bus
         if bus:
             bus.emit("command_executed", {
                 "command": command[:200],

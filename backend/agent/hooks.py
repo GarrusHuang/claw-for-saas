@@ -114,20 +114,18 @@ def known_values_guard(event: HookEvent) -> HookResult:
     """
     阻止覆盖 known_values 中的字段。
 
-    通过 contextvars 中的 current_known_field_ids 检查
+    通过 RequestContext.known_field_ids 检查
     (由 Gateway 在请求入口设置)。
 
     注: 当前 known_field_ids 始终为空集合 — 需要 MCP 集成后
     由 Gateway 从 get_protected_values() 响应填充。
     在此之前本 hook 是 no-op 但保留框架以备 MCP 激活。
     """
-    from core.context import current_known_field_ids
+    from core.context import current_request
 
     field_id = event.tool_input.get("field_id", "")
-    try:
-        known_ids = current_known_field_ids.get()
-    except LookupError:
-        known_ids = set()
+    ctx = current_request.get()
+    known_ids = ctx.known_field_ids if ctx else set()
 
     if field_id in known_ids and event.tool_input.get("source") != "known_value":
         return HookResult(

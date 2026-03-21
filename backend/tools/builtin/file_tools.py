@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from core.context import current_event_bus, current_user_id, current_tenant_id, current_session_id
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -20,9 +20,8 @@ file_capability_registry = ToolRegistry()
 
 
 def _get_file_service():
-    """从 contextvars 获取 FileService。"""
-    from core.context import current_file_service
-    service = current_file_service.get()
+    """从 RequestContext 获取 FileService。"""
+    service = get_request_context().file_service
     if service is None:
         raise RuntimeError("FileService not available (not injected)")
     return service
@@ -48,9 +47,8 @@ def read_uploaded_file(
     from config import settings
 
     service = _get_file_service()
-    tenant_id = current_tenant_id.get()
-    user_id = current_user_id.get()
-    session_id = current_session_id.get("")
+    ctx = get_request_context()
+    tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
 
     try:
         metadata, _ = service.get_file(tenant_id, user_id, file_id)
@@ -105,9 +103,8 @@ def read_uploaded_file(
 def list_user_files() -> dict:
     """列出当前会话关联的文件。"""
     service = _get_file_service()
-    tenant_id = current_tenant_id.get()
-    user_id = current_user_id.get()
-    session_id = current_session_id.get("")
+    ctx = get_request_context()
+    tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
 
     try:
         if session_id:
@@ -206,8 +203,8 @@ def add_to_knowledge_base(
     source_file_id: str = "",   # 从已上传文件复制 (与 text_content 二选一)
 ) -> dict:
     """将内容添加到用户知识库，自动创建元数据和索引。"""
-    tenant_id = current_tenant_id.get()
-    user_id = current_user_id.get()
+    ctx = get_request_context()
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     if not text_content and not source_file_id:
         return {"error": "必须提供 text_content 或 source_file_id"}
@@ -245,7 +242,7 @@ def add_to_knowledge_base(
         )
 
         # 触发异步索引 (后台生成摘要 + 更新 _index.md)
-        bus = current_event_bus.get()
+        bus = ctx.event_bus
         if bus:
             import asyncio
             from api.knowledge_routes import _auto_index
@@ -276,8 +273,8 @@ def add_to_knowledge_base(
 def analyze_file(file_id: str) -> dict:  # 文件 ID
     """分析文件结构，返回详细元信息。"""
     service = _get_file_service()
-    tenant_id = current_tenant_id.get()
-    user_id = current_user_id.get()
+    ctx = get_request_context()
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     try:
         metadata, content = service.get_file(tenant_id, user_id, file_id)
@@ -362,8 +359,8 @@ def process_file_content(file_id: str) -> dict:  # 文件 ID
     from services.content_processor import process_file
 
     service = _get_file_service()
-    tenant_id = current_tenant_id.get()
-    user_id = current_user_id.get()
+    ctx = get_request_context()
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     try:
         metadata, content = service.get_file(tenant_id, user_id, file_id)

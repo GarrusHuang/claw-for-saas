@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from agent.hooks import HookEvent
 from agent.quality_gate import check_memory_compliance, QualityGate
-from core.context import current_memory_store, current_tenant_id, current_user_id
+from core.context import RequestContext, current_request
 
 
 def _make_event(final_answer: str = "", **kwargs) -> HookEvent:
@@ -24,21 +24,17 @@ def _make_event(final_answer: str = "", **kwargs) -> HookEvent:
 
 
 def _run_with_memory(final_answer: str, memory_content: str) -> tuple[bool, str, str]:
-    """Helper: 设置 ContextVar 并运行 check_memory_compliance。"""
+    """Helper: 设置 RequestContext 并运行 check_memory_compliance。"""
     mock_store = MagicMock()
     mock_store.build_memory_prompt.return_value = memory_content
 
-    # 设置 ContextVar
-    token_mem = current_memory_store.set(mock_store)
-    token_tid = current_tenant_id.set("default")
-    token_uid = current_user_id.set("U1")
+    ctx = RequestContext(memory_store=mock_store, tenant_id="default", user_id="U1")
+    token = current_request.set(ctx)
     try:
         event = _make_event(final_answer=final_answer)
         return check_memory_compliance(event)
     finally:
-        current_memory_store.reset(token_mem)
-        current_tenant_id.reset(token_tid)
-        current_user_id.reset(token_uid)
+        current_request.reset(token)
 
 
 class TestCheckMemoryCompliance:
@@ -46,13 +42,14 @@ class TestCheckMemoryCompliance:
 
     def test_no_memory_store_passes(self):
         """没有 memory store 时应通过。"""
-        token = current_memory_store.set(None)
+        ctx = RequestContext(memory_store=None)
+        token = current_request.set(ctx)
         try:
             event = _make_event(final_answer="Hello world, this is a test")
             passed, _, _ = check_memory_compliance(event)
             assert passed is True
         finally:
-            current_memory_store.reset(token)
+            current_request.reset(token)
 
     def test_empty_final_answer_passes(self):
         """空 final_answer 时应通过。"""
@@ -124,13 +121,14 @@ class TestCheckMemoryCompliance:
         """memory store 抛异常时应通过 (不影响整体流程)。"""
         mock_store = MagicMock()
         mock_store.build_memory_prompt.side_effect = Exception("DB error")
-        token = current_memory_store.set(mock_store)
+        ctx = RequestContext(memory_store=mock_store)
+        token = current_request.set(ctx)
         try:
             event = _make_event(final_answer="Some response")
             passed, _, _ = check_memory_compliance(event)
             assert passed is True
         finally:
-            current_memory_store.reset(token)
+            current_request.reset(token)
 
     def test_quality_gate_with_memory_check(self):
         """验证 check_memory_compliance 可以作为 QualityGate check 使用。"""

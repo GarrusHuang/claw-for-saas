@@ -461,11 +461,11 @@ async def test_quality_gate_blocks_and_corrects(llm_client):
     """
     from agent.hooks import HookRegistry, HookEvent, HookResult
     from agent.quality_gate import reset_correction_count
-    from core.context import current_user_id, current_session_id
+    from core.context import RequestContext, current_request
 
-    # Set context vars for quality gate
-    current_user_id.set("test_user")
-    current_session_id.set("test_session_qg")
+    # Set RequestContext for quality gate
+    ctx = RequestContext(user_id="test_user", session_id="test_session_qg")
+    current_request.set(ctx)
 
     # Custom quality gate that blocks the first attempt
     block_count = {"n": 0}

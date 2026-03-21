@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-from core.context import current_event_bus, current_plan_tracker
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 from agent.plan_tracker import PlanTracker
 
@@ -53,7 +53,8 @@ def propose_plan(
         except (json.JSONDecodeError, TypeError):
             steps = []
 
-    bus = current_event_bus.get()
+    ctx = get_request_context()
+    bus = ctx.event_bus
     event_data = {
         "summary": summary,
         "detail": detail,
@@ -63,9 +64,9 @@ def propose_plan(
     if bus:
         bus.emit("plan_proposed", event_data)
 
-    # 创建 PlanTracker 并存入 ContextVar
+    # 创建 PlanTracker 并存入 RequestContext
     tracker = PlanTracker(steps, event_bus=bus)
-    current_plan_tracker.set(tracker)
+    ctx.plan_tracker = tracker
 
     step_count = len(steps)
     return {
@@ -95,7 +96,7 @@ def update_plan_step(
     status: str,  # 目标状态: "running" | "completed" | "failed"
 ) -> dict:
     """更新计划步骤状态，推送实时进度到前端。"""
-    tracker = current_plan_tracker.get(None)
+    tracker = get_request_context().plan_tracker
     if tracker is None:
         return {"ok": False, "error": "尚未创建计划，请先调用 propose_plan"}
 

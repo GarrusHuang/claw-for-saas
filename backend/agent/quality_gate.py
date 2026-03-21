@@ -229,17 +229,14 @@ def check_memory_compliance(event: HookEvent) -> tuple[bool, str, str]:
     if not final_answer:
         return True, "", ""
 
-    # 从 ContextVar 读取记忆
+    # 从 RequestContext 读取记忆
     try:
-        from core.context import current_memory_store
-        memory_store = current_memory_store.get(None)
-        if not memory_store:
+        from core.context import current_request
+        ctx = current_request.get()
+        if not ctx or not ctx.memory_store:
             return True, "", ""
 
-        from core.context import current_tenant_id, current_user_id as ctx_user_id
-        tenant_id = current_tenant_id.get("default")
-        user_id = ctx_user_id.get("anonymous")
-        memory_content = memory_store.build_memory_prompt(tenant_id, user_id)
+        memory_content = ctx.memory_store.build_memory_prompt(ctx.tenant_id, ctx.user_id)
     except Exception:
         return True, "", ""
 

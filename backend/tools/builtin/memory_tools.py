@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from core.context import current_event_bus, current_memory_store, current_tenant_id, current_user_id
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -34,12 +34,12 @@ def save_memory(
     mode: str = "append",       # "append" 追加 | "rewrite" 覆盖
 ) -> dict:
     """保存记忆到 Markdown 笔记文件。"""
-    store = current_memory_store.get(None)
+    ctx = get_request_context()
+    store = ctx.memory_store
     if not store:
         return {"error": "MarkdownMemoryStore 未初始化"}
 
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     if scope not in ("user", "tenant", "global"):
         return {"error": f"无效的 scope: {scope}, 必须是 user/tenant/global"}
@@ -70,7 +70,7 @@ def save_memory(
         )
 
         # 发射 SSE 事件
-        bus = current_event_bus.get(None)
+        bus = ctx.event_bus
         if bus:
             bus.emit("memory_saved", {
                 "scope": scope,
@@ -108,12 +108,12 @@ def recall_memory(
     file: str = "",            # 指定文件名, 空 = 该层级全部
 ) -> dict:
     """查询 Markdown 笔记记忆。"""
-    store = current_memory_store.get(None)
+    ctx = get_request_context()
+    store = ctx.memory_store
     if not store:
         return {"error": "MarkdownMemoryStore 未初始化"}
 
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     try:
         if scope == "all":
@@ -168,12 +168,12 @@ def search_memory(
     scope: str = "user",       # "user" | "tenant" | "global" | "all"
 ) -> dict:
     """按关键词搜索记忆笔记，返回匹配的段落。"""
-    store = current_memory_store.get(None)
+    ctx = get_request_context()
+    store = ctx.memory_store
     if not store:
         return {"error": "MarkdownMemoryStore 未初始化"}
 
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     keywords = [k.strip().lower() for k in query.split() if k.strip()]
     if not keywords:

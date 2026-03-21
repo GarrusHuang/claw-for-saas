@@ -54,8 +54,9 @@ async def read_skill(skill_name: str) -> dict:
     """读取指定 Skill 的完整内容。"""
     try:
         from skills.loader import SkillLoader
-        from core.context import current_skill_loader
-        loader = current_skill_loader.get(None)
+        from core.context import current_request
+        ctx = current_request.get()
+        loader = ctx.skill_loader if ctx else None
         if not loader:
             loader = SkillLoader()
         body = loader.get_skill_body(skill_name)

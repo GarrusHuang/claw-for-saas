@@ -24,7 +24,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 
-from core.context import current_event_bus, current_sandbox, current_tenant_id, current_user_id, current_session_id
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -406,13 +406,11 @@ def apply_patch_to_filesystem(
 
 def _get_workspace() -> tuple:
     """获取 workspace 和 sandbox。"""
-    sandbox = current_sandbox.get(None)
+    ctx = get_request_context()
+    sandbox = ctx.sandbox
     if sandbox is None:
         return None, None
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
-    session_id = current_session_id.get("")
-    workspace = sandbox.get_workspace(tenant_id, user_id, session_id)
+    workspace = sandbox.get_workspace(ctx.tenant_id, ctx.user_id, ctx.session_id)
     return sandbox, workspace
 
 
@@ -452,11 +450,9 @@ def apply_patch(
     - *** Update File: path — 增量修改 (search/replace)
     """
     # 磁盘配额检查
-    sandbox = current_sandbox.get(None)
-    if sandbox:
-        tenant_id = current_tenant_id.get("default")
-        user_id = current_user_id.get("anonymous")
-        quota = sandbox.check_disk_quota(tenant_id, user_id)
+    ctx = get_request_context()
+    if ctx.sandbox:
+        quota = ctx.sandbox.check_disk_quota(ctx.tenant_id, ctx.user_id)
         if quota["exceeded"]:
             return {"error": f"磁盘配额超限: 已使用 {quota['used_mb']}MB / {quota['quota_mb']}MB"}
 
@@ -496,7 +492,7 @@ def apply_patch(
         return {"error": f"Patch 应用失败: {e}"}
 
     # 发射事件
-    bus = current_event_bus.get()
+    bus = ctx.event_bus
     if bus:
         all_files = result["added"] + result["modified"] + result["deleted"]
         bus.emit("code_patch_applied", {
@@ -505,12 +501,11 @@ def apply_patch(
             "deleted": result["deleted"],
             "total_files": len(all_files),
         })
-        session_id = current_session_id.get("")
         for f in result["added"] + result["modified"]:
             bus.emit("file_artifact", {
                 "path": f,
                 "filename": os.path.basename(f),
-                "session_id": session_id,
+                "session_id": ctx.session_id,
             })
 
     summary_parts = []
