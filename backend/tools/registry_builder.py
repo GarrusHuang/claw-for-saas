@@ -11,7 +11,7 @@ Built-in tools (no domain-specific tools):
 - subagent: spawn_subagent, spawn_subagents
 - file: read_uploaded_file, list_user_files, analyze_file
 - browser: open_url, page_screenshot, page_extract_text
-- code: read_source_file, write_source_file, run_command
+- code: read_source_file, write_source_file, apply_patch, run_command
 - memory: save_memory, recall_memory
 - skill: create_skill, update_skill
 - mcp: get_form_schema, get_business_rules, get_candidate_types,
@@ -49,7 +49,7 @@ def build_capability_registry() -> ToolRegistry:
     - subagent: spawn_subagent, spawn_subagents
     - file: read_uploaded_file, list_user_files, analyze_file
     - browser: open_url, page_screenshot, page_extract_text
-    - code: read_source_file, write_source_file, run_command
+    - code: read_source_file, write_source_file, apply_patch, run_command
     - memory: save_memory, recall_memory
     """
     from tools.builtin.skill_tools import skill_capability_registry
@@ -57,6 +57,7 @@ def build_capability_registry() -> ToolRegistry:
     from tools.builtin.file_tools import file_capability_registry
     from tools.builtin.browser_tools import browser_capability_registry
     from tools.builtin.code_tools import code_capability_registry
+    from tools.builtin.apply_patch import apply_patch_registry
     from tools.builtin.memory_tools import memory_capability_registry
     from tools.builtin.schedule_tools import schedule_capability_registry
 
@@ -64,6 +65,7 @@ def build_capability_registry() -> ToolRegistry:
     merged = merged.merge(file_capability_registry)
     merged = merged.merge(browser_capability_registry)
     merged = merged.merge(code_capability_registry)
+    merged = merged.merge(apply_patch_registry)
     merged = merged.merge(memory_capability_registry)
     merged = merged.merge(schedule_capability_registry)
     return merged
