@@ -19,6 +19,7 @@ from typing import Any
 import mimetypes
 
 from core.context import (
+    RequestContext, current_request,
     current_event_bus, current_session_id, current_user_id,
     current_tenant_id,
     current_skill_loader, current_file_service, current_browser_service,
@@ -246,60 +247,89 @@ class AgentGateway:
 
     def _setup_context_vars(
         self, *, tenant_id: str, user_id: str, event_bus: EventBus | None,
-    ) -> None:
-        """注入所有 ContextVar 依赖。"""
-        if event_bus:
-            current_event_bus.set(event_bus)
-        current_tenant_id.set(tenant_id)
-        current_user_id.set(user_id)
+    ) -> RequestContext:
+        """
+        构建 RequestContext 并注入 ContextVar。
 
-        # 注入 SubagentRunner 到 contextvars
-        from tools.builtin.subagent_tools import _subagent_runner
-        _subagent_runner.set(self.subagent_runner)
-
-        # 注入 SkillLoader 到 contextvars (供 skill 管理工具使用)
-        if self.skill_loader:
-            current_skill_loader.set(self.skill_loader)
-
-        # 注入 FileService 到 contextvars (供文件工具使用)
+        返回 ctx 供 Gateway 方法直接传递，避免逐个参数透传。
+        同时保留旧 ContextVar 的 .set() 作为工具层兼容。
+        """
+        # ── 收集依赖 ──
+        file_service = None
         try:
             from dependencies import get_file_service
-            current_file_service.set(get_file_service())
+            file_service = get_file_service()
         except Exception:
             logger.debug("FileService injection skipped", exc_info=True)
 
-        # 注入 BrowserService 到 contextvars (供浏览器工具使用)
+        browser_service = None
         try:
             from dependencies import get_browser_service
-            current_browser_service.set(get_browser_service())
+            browser_service = get_browser_service()
         except Exception:
             logger.debug("BrowserService injection skipped", exc_info=True)
 
-        # 注入 known_field_ids 到 contextvars (供 known_values_guard hook 使用)
-        current_known_field_ids.set(set())  # 始终初始化，避免 LookupError
-
-        # A8: 注入 MarkdownMemoryStore 到 ContextVar (供记忆工具使用)
-        if self.memory_store:
-            current_memory_store.set(self.memory_store)
-
-        # A6: 注入 SandboxManager + DataLockRegistry 到 ContextVar
+        sandbox = None
+        data_lock = None
         try:
             from dependencies import get_sandbox_manager, get_data_lock_registry
-            current_sandbox.set(get_sandbox_manager())
-            current_data_lock.set(get_data_lock_registry())
+            sandbox = get_sandbox_manager()
+            data_lock = get_data_lock_registry()
         except Exception:
             logger.debug("Sandbox/DataLock injection skipped", exc_info=True)
 
-        # A2: 注入 MCPProvider 到 ContextVar (供 MCP 工具使用)
-        if self.mcp_provider:
-            current_mcp_provider.set(self.mcp_provider)
-
-        # A9: 注入 Scheduler 到 ContextVar (供 schedule_tools 使用)
+        scheduler = None
         try:
             from dependencies import get_scheduler
-            current_scheduler.set(get_scheduler())
+            scheduler = get_scheduler()
         except Exception:
             logger.debug("Scheduler injection skipped", exc_info=True)
+
+        # ── 构建 RequestContext ──
+        ctx = RequestContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            event_bus=event_bus,
+            skill_loader=self.skill_loader,
+            file_service=file_service,
+            browser_service=browser_service,
+            memory_store=self.memory_store,
+            sandbox=sandbox,
+            data_lock=data_lock,
+            mcp_provider=self.mcp_provider,
+            scheduler=scheduler,
+            subagent_runner=self.subagent_runner,
+            known_field_ids=set(),
+        )
+        current_request.set(ctx)
+
+        # ── 兼容层: 保留旧 ContextVar (工具层逐步迁移) ──
+        current_tenant_id.set(tenant_id)
+        current_user_id.set(user_id)
+        if event_bus:
+            current_event_bus.set(event_bus)
+        if self.skill_loader:
+            current_skill_loader.set(self.skill_loader)
+        if file_service:
+            current_file_service.set(file_service)
+        if browser_service:
+            current_browser_service.set(browser_service)
+        current_known_field_ids.set(set())
+        if self.memory_store:
+            current_memory_store.set(self.memory_store)
+        if sandbox:
+            current_sandbox.set(sandbox)
+        if data_lock:
+            current_data_lock.set(data_lock)
+        if self.mcp_provider:
+            current_mcp_provider.set(self.mcp_provider)
+        if scheduler:
+            current_scheduler.set(scheduler)
+
+        from tools.builtin.subagent_tools import _subagent_runner
+        _subagent_runner.set(self.subagent_runner)
+
+        return ctx
 
     async def chat(
         self,
@@ -332,7 +362,7 @@ class AgentGateway:
         start_time = time.time()
 
         # ── 1. 设置 contextvars ──
-        self._setup_context_vars(
+        ctx = self._setup_context_vars(
             tenant_id=tenant_id, user_id=user_id, event_bus=event_bus,
         )
 
@@ -347,7 +377,8 @@ class AgentGateway:
             )
             logger.info(f"New session: {session_id}")
 
-        current_session_id.set(session_id)
+        ctx.session_id = session_id
+        current_session_id.set(session_id)  # 兼容层
 
         # ── 2a. 绑定上传文件到会话 ──
         if materials:
@@ -356,28 +387,24 @@ class AgentGateway:
                 for m in materials
                 if m.get("material_id", "").startswith("file-")
             ]
-            if file_ids:
+            if file_ids and ctx.file_service:
                 try:
-                    from dependencies import get_file_service
-                    fs = get_file_service()
-                    bound = fs.bind_files_to_session(tenant_id, user_id, file_ids, session_id)
+                    bound = ctx.file_service.bind_files_to_session(
+                        tenant_id, user_id, file_ids, session_id,
+                    )
                     if bound:
                         logger.info(f"Bound {bound} files to session {session_id}")
                 except Exception:
                     logger.debug("File binding skipped", exc_info=True)
 
         # ── 2b. 获取 session 级文件锁 (跨 worker 互斥) ──
-        # 同一 session 同一时刻只允许一个请求，避免并发写入导致数据损坏。
-        # 锁定失败抛出 SessionBusyError，由 API 层捕获返回 409。
         session_lock_fd = self._acquire_session_lock(tenant_id, user_id, session_id)
 
         try:  # session lock — finally 中释放
             return await self._chat_inner(
-                tenant_id=tenant_id, user_id=user_id,
-                session_id=session_id, message=message,
+                ctx=ctx, message=message,
                 business_type=business_type, skill_names=skill_names,
-                event_bus=event_bus, materials=materials,
-                start_time=start_time,
+                materials=materials, start_time=start_time,
             )
         finally:
             try:
@@ -387,10 +414,12 @@ class AgentGateway:
                 pass
 
     def _load_prompt_sources(
-        self, *, tenant_id: str, user_id: str, session_id: str,
-        business_type: str, event_bus: EventBus | None,
+        self, *, ctx: RequestContext, business_type: str,
     ) -> tuple[str, str, str]:
         """加载 Skill + Memory + 知识库索引，返回 (skill_knowledge, memory_context, knowledge_index_text)。"""
+        tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
+        event_bus = ctx.event_bus
+
         # ── Skills (A7: 多源) ──
         skill_knowledge = ""
         if self.skill_loader:
@@ -458,12 +487,14 @@ class AgentGateway:
         return skill_knowledge, memory_context, knowledge_index_text
 
     def _build_prompt_and_message(
-        self, *, tenant_id: str, user_id: str, session_id: str,
+        self, *, ctx: RequestContext,
         message: str, materials: list[dict] | None,
         skill_knowledge: str, memory_context: str, knowledge_index_text: str,
         start_time: float,
     ) -> tuple[str, str | list]:
         """构建 system prompt + user message，并持久化用户消息。返回 (system_prompt, user_message)。"""
+        tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
+
         # ── 系统提示 ──
         from agent.prompt import ToolSummary
         tool_summaries = [
@@ -544,12 +575,15 @@ class AgentGateway:
         return system_prompt, user_message
 
     async def _persist_results(
-        self, *, tenant_id: str, user_id: str, session_id: str,
+        self, *, ctx: RequestContext,
         message: str, business_type: str,
         result: RuntimeResult | None, cancelled: bool, runtime_error: Exception | None,
-        event_bus: EventBus | None, start_time: float,
+        start_time: float,
     ) -> dict:
         """持久化结果 (消息/记忆/timeline/plan/用量/完成事件)。返回 response dict。"""
+        tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
+        event_bus = ctx.event_bus
+
         # ── 持久化 assistant 回复 — 总是保存 ──
         if cancelled:
             answer = self._extract_partial_answer(event_bus)
@@ -756,17 +790,17 @@ class AgentGateway:
     async def _chat_inner(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        session_id: str,
+        ctx: RequestContext,
         message: str,
         business_type: str,
         skill_names: list[str] | None,
-        event_bus: EventBus | None,
         materials: list[dict] | None,
         start_time: float,
     ) -> dict:
         """chat() 的核心逻辑，已在 session lock 保护下执行。"""
+        tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
+        event_bus = ctx.event_bus
+
         # ── 1. 发射 pipeline_started ──
         if event_bus:
             event_bus.emit("pipeline_started", {
@@ -782,18 +816,17 @@ class AgentGateway:
             from agent.plan_tracker import PlanTracker
             restored_tracker = PlanTracker.restore(saved_plan, event_bus=event_bus)
             current_plan_tracker.set(restored_tracker)
+            ctx.plan_tracker = restored_tracker
             logger.info(f"Restored PlanTracker with {len(saved_plan)} steps for session {session_id}")
 
         # ── 3. 加载 Skill + Memory + 知识库 ──
         skill_knowledge, memory_context, knowledge_index_text = self._load_prompt_sources(
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-            business_type=business_type, event_bus=event_bus,
+            ctx=ctx, business_type=business_type,
         )
 
         # ── 4. 构建 Prompt + Message ──
         system_prompt, user_message = self._build_prompt_and_message(
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-            message=message, materials=materials,
+            ctx=ctx, message=message, materials=materials,
             skill_knowledge=skill_knowledge, memory_context=memory_context,
             knowledge_index_text=knowledge_index_text, start_time=start_time,
         )
@@ -835,8 +868,7 @@ class AgentGateway:
 
         # ── 6. 持久化 + 返回 ──
         return await self._persist_results(
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-            message=message, business_type=business_type,
+            ctx=ctx, message=message, business_type=business_type,
             result=result, cancelled=cancelled, runtime_error=runtime_error,
-            event_bus=event_bus, start_time=start_time,
+            start_time=start_time,
         )

@@ -1,25 +1,23 @@
 """
 请求上下文: contextvars 注入。
 
-工具通过 contextvars 获取 EventBus/user_id/session_id，
-无需在函数签名中显式传参。
+**推荐方式** (P.2):
+    from core.context import get_request_context
+    ctx = get_request_context()
+    ctx.event_bus.emit(...)
 
-Usage:
+**兼容方式** (旧工具仍使用):
     from core.context import current_event_bus, current_user_id, current_session_id
-
-    # 在 Gateway 入口设置
-    current_event_bus.set(event_bus)
-    current_user_id.set("U001")
-    current_session_id.set("sess-xxx")
-
-    # 在工具中获取
     bus = current_event_bus.get()
-    bus.emit("field_update", {...})
+
+Gateway 在 _setup_context_vars() 中同时设置 RequestContext 和旧 ContextVar，
+工具层逐步迁移到 RequestContext。
 """
 
 from __future__ import annotations
 
 import contextvars
+from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -31,6 +29,43 @@ if TYPE_CHECKING:
     from services.browser_service import BrowserService
     from skills.loader import SkillLoader
     from memory.markdown_store import MarkdownMemoryStore
+
+
+# ── RequestContext: 聚合所有请求级依赖 ──
+
+
+@dataclass
+class RequestContext:
+    """一次请求的完整上下文，替代 16 个独立 ContextVar 的逐个注入。"""
+
+    tenant_id: str = "default"
+    user_id: str = "anonymous"
+    session_id: str = ""
+    event_bus: Any = None  # EventBus | None
+    skill_loader: Any = None  # SkillLoader | None
+    file_service: Any = None  # FileService | None
+    browser_service: Any = None  # BrowserService | None
+    memory_store: Any = None  # MarkdownMemoryStore | None
+    sandbox: Any = None  # SandboxManager | None
+    data_lock: Any = None  # DataLockRegistry | None
+    mcp_provider: Any = None
+    scheduler: Any = None  # Scheduler | None
+    subagent_runner: Any = None
+    known_field_ids: set = field(default_factory=set)
+    plan_tracker: Any = None  # PlanTracker | None
+
+
+current_request: contextvars.ContextVar[RequestContext | None] = contextvars.ContextVar(
+    "current_request", default=None
+)
+
+
+def get_request_context() -> RequestContext:
+    """获取当前请求上下文，未设置时抛出 RuntimeError。"""
+    ctx = current_request.get()
+    if ctx is None:
+        raise RuntimeError("RequestContext not set — 只能在 Gateway 请求链路内调用")
+    return ctx
 
 current_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "current_tenant_id", default="default"

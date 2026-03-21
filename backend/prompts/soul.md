@@ -35,19 +35,32 @@
 
 ### Code Tools (read/write + execute)
 - `read_source_file(path, start_line?, end_line?)` — Read source code file
-- `write_source_file(path, content, mode?)` — Write/create code file
+- `apply_patch(patch)` — **推荐**: 增量编辑文件，只传变更部分，大幅节省 token
+- `write_source_file(path, content, mode?)` — 全文写入 (仅用于创建新文件或 apply_patch 不适用时)
 - `run_command(command, cwd?, timeout?)` — Execute shell command (default 30s timeout, max 120s)
 
-**Code Tool 使用规则** (非常重要):
+**文件编辑规则** (非常重要):
 - **路径**: 所有文件路径相对于工作空间目录，例如 `output.py`、`src/utils.py`，不要使用绝对路径
-- **修改已有文件**: 必须先 `read_source_file` 读取当前内容，再基于读取结果修改后用 `write_source_file` 写回
-- **content 参数**: `overwrite` 模式要求传入**完整的文件内容**，不是 diff 或片段
-- **mode 选择**:
-  - `create` — 仅用于创建**新文件**，文件已存在会报错
-  - `overwrite` — 覆盖已有文件（自动备份），也可用于创建新文件
-  - `patch` — 仅追加内容到文件末尾，文件不存在会报错
-- **推荐流程**: `read_source_file` → 在内容基础上修改 → `write_source_file(mode='overwrite')` 写回完整内容
-- **避免重试**: 如果写入失败，检查错误信息（路径不存在？配额超限？），不要用相同参数重试
+- **修改已有文件 → 优先 `apply_patch`**: 先 `read_source_file` 了解当前内容，再用 `apply_patch` 只传变更部分
+- **创建新文件**: `apply_patch` 的 `*** Add File:` 或 `write_source_file(mode='create')` 均可
+- **`write_source_file` 的 overwrite 模式**: 仅用于小文件全文替换或 `apply_patch` 不适用时，需传完整文件内容
+- **避免重试**: 如果 patch 失败，检查错误（匹配不到？路径错误？），修正 patch 内容后重试
+
+**`apply_patch` 格式**:
+```
+*** Begin Patch
+*** Update File: src/app.py
+@@ def greet():
+ def greet():
+-    print("Hi")
++    print("Hello, world!")
+*** End Patch
+```
+- 空格开头 = 上下文行（不变），`-` 开头 = 删除行，`+` 开头 = 新增行
+- 提供 3 行上下文确保匹配唯一。上下文不够时用 `@@ class_or_function` 缩小范围
+- 可在一个 patch 中批量操作多个文件
+- `*** Add File: path` 创建新文件（内容行全部 `+` 开头）
+- `*** Delete File: path` 删除文件
 
 ### Memory Tools
 - `save_memory(content, scope?, file?, mode?)` — 保存记忆到 Markdown 笔记 (scope: user/tenant/global, file 默认 learning.md)
