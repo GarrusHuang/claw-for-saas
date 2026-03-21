@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 import httpx
 import pytest
 
-from core.context import current_mcp_provider
+from core.context import RequestContext, current_request
 from tools.mcp.http_provider import HttpMCPProvider
 from agent.prompt import PromptBuilder
 
@@ -28,10 +28,11 @@ from agent.prompt import PromptBuilder
 
 @pytest.fixture(autouse=True)
 def _reset_mcp_context():
-    """Reset MCP ContextVar before each test."""
-    token = current_mcp_provider.set(None)
+    """Reset RequestContext before each test."""
+    ctx = RequestContext(mcp_provider=None)
+    token = current_request.set(ctx)
     yield
-    current_mcp_provider.reset(token)
+    current_request.reset(token)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -735,7 +736,8 @@ class TestMCPContextVarInjection:
 
         async def fake_runtime_run(**kwargs):
             """Capture ContextVar during runtime execution."""
-            captured_provider.append(current_mcp_provider.get(None))
+            ctx = current_request.get()
+            captured_provider.append(ctx.mcp_provider if ctx else None)
             return RuntimeResult(
                 final_answer="done",
                 steps=[],
@@ -808,7 +810,8 @@ class TestMCPContextVarInjection:
         captured_provider = []
 
         async def fake_runtime_run(**kwargs):
-            captured_provider.append(current_mcp_provider.get(None))
+            ctx = current_request.get()
+            captured_provider.append(ctx.mcp_provider if ctx else None)
             return RuntimeResult(
                 final_answer="done",
                 steps=[],
@@ -874,8 +877,9 @@ class TestMCPContextVarInjection:
             return_value={"fields": ["name"]}
         )
 
-        # Simulate what Gateway does: set the ContextVar
-        current_mcp_provider.set(mock_provider)
+        # Simulate what Gateway does: set RequestContext
+        ctx = RequestContext(mcp_provider=mock_provider)
+        current_request.set(ctx)
 
         # _get_provider should return our mock
         provider = _get_provider()
@@ -889,27 +893,29 @@ class TestMCPContextVarInjection:
     @pytest.mark.asyncio
     async def test_contextvar_isolation_between_calls(self):
         """
-        ContextVar set in one call should not leak to another
+        RequestContext set in one call should not leak to another
         (when properly reset).
         """
         mock_provider_a = MagicMock()
         mock_provider_b = MagicMock()
 
         # First call sets provider A
-        token_a = current_mcp_provider.set(mock_provider_a)
-        assert current_mcp_provider.get() is mock_provider_a
+        ctx_a = RequestContext(mcp_provider=mock_provider_a)
+        token_a = current_request.set(ctx_a)
+        assert current_request.get().mcp_provider is mock_provider_a
 
         # Reset
-        current_mcp_provider.reset(token_a)
+        current_request.reset(token_a)
 
-        # After reset, should be back to default (None)
-        assert current_mcp_provider.get(None) is None
+        # After reset, should be back to fixture's context (mcp_provider=None)
+        assert current_request.get().mcp_provider is None
 
         # Second call sets provider B
-        token_b = current_mcp_provider.set(mock_provider_b)
-        assert current_mcp_provider.get() is mock_provider_b
+        ctx_b = RequestContext(mcp_provider=mock_provider_b)
+        token_b = current_request.set(ctx_b)
+        assert current_request.get().mcp_provider is mock_provider_b
 
         # Provider A is no longer accessible
-        assert current_mcp_provider.get() is not mock_provider_a
+        assert current_request.get().mcp_provider is not mock_provider_a
 
-        current_mcp_provider.reset(token_b)
+        current_request.reset(token_b)

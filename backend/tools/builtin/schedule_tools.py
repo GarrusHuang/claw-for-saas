@@ -1,7 +1,7 @@
 """
 A9: 定时调度工具 — Agent 可创建/查看/删除定时任务。
 
-通过 current_scheduler ContextVar 访问 Scheduler 实例。
+通过 RequestContext 访问 Scheduler 实例。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import uuid
 
 from croniter import croniter
 
-from core.context import current_scheduler, current_tenant_id, current_user_id
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,8 @@ def create_schedule(
     scheduled_at: str = "", # ISO 格式日期时间 (一次性任务填写, 如 "2026-03-15T09:00:00")
 ) -> dict:
     """创建定时调度任务。"""
-    scheduler = current_scheduler.get(None)
+    ctx = get_request_context()
+    scheduler = ctx.scheduler
     if not scheduler:
         return {"error": "调度器未初始化"}
 
@@ -55,8 +56,7 @@ def create_schedule(
         except ValueError:
             return {"error": f"无效的时间格式: {scheduled_at}, 请使用 ISO 格式如 2026-03-15T09:00:00"}
 
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     from core.scheduler import ScheduledTask
     task = ScheduledTask(
@@ -94,12 +94,12 @@ def create_schedule(
 )
 def list_schedules() -> dict:
     """列出当前用户的定时任务。"""
-    scheduler = current_scheduler.get(None)
+    ctx = get_request_context()
+    scheduler = ctx.scheduler
     if not scheduler:
         return {"error": "调度器未初始化"}
 
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     try:
         tasks = scheduler.list_tasks(tenant_id, user_id)
@@ -135,12 +135,12 @@ def delete_schedule(
     task_id: str,  # 要删除的任务 ID
 ) -> dict:
     """删除定时任务。"""
-    scheduler = current_scheduler.get(None)
+    ctx = get_request_context()
+    scheduler = ctx.scheduler
     if not scheduler:
         return {"error": "调度器未初始化"}
 
-    tenant_id = current_tenant_id.get("default")
-    user_id = current_user_id.get("anonymous")
+    tenant_id, user_id = ctx.tenant_id, ctx.user_id
 
     try:
         ok = scheduler.remove_task(tenant_id, user_id, task_id)

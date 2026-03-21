@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from core.context import current_event_bus, current_plan_tracker
+from core.context import RequestContext, current_request
 from core.event_bus import EventBus
 from tools.builtin.plan_tools import propose_plan, update_plan_step, plan_capability_registry
 
@@ -16,14 +16,11 @@ class TestProposePlan:
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.bus = EventBus(trace_id="test")
-        self.token = current_event_bus.set(self.bus)
+        ctx = RequestContext(event_bus=self.bus)
+        self.token = current_request.set(ctx)
+        self.ctx = ctx
         yield
-        current_event_bus.reset(self.token)
-        # 清理 plan_tracker ContextVar
-        try:
-            current_plan_tracker.set(None)
-        except Exception:
-            pass
+        current_request.reset(self.token)
         self.bus.close()
 
     def test_basic_plan(self):
@@ -56,7 +53,7 @@ class TestProposePlan:
                 {"action": "s2", "description": "Step 2"},
             ],
         )
-        tracker = current_plan_tracker.get(None)
+        tracker = self.ctx.plan_tracker
         assert tracker is not None
         assert len(tracker.steps) == 2
 
@@ -64,13 +61,13 @@ class TestProposePlan:
         steps_json = json.dumps([{"action": "step1"}])
         result = propose_plan(summary="Test", steps=steps_json)
         assert result["status"] == "ok"
-        tracker = current_plan_tracker.get(None)
+        tracker = self.ctx.plan_tracker
         assert len(tracker.steps) == 1
 
     def test_steps_invalid_json_string(self):
         result = propose_plan(summary="Test", steps="not valid json")
         assert result["status"] == "ok"
-        tracker = current_plan_tracker.get(None)
+        tracker = self.ctx.plan_tracker
         assert len(tracker.steps) == 0
 
     def test_empty_steps(self):
@@ -86,7 +83,8 @@ class TestUpdatePlanStep:
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.bus = EventBus(trace_id="test")
-        self.token_bus = current_event_bus.set(self.bus)
+        self.ctx = RequestContext(event_bus=self.bus)
+        self.token = current_request.set(self.ctx)
         # 先创建 plan
         propose_plan(
             summary="Test plan",
@@ -97,11 +95,7 @@ class TestUpdatePlanStep:
             ],
         )
         yield
-        current_event_bus.reset(self.token_bus)
-        try:
-            current_plan_tracker.set(None)
-        except Exception:
-            pass
+        current_request.reset(self.token)
         self.bus.close()
 
     def test_set_running(self):
@@ -135,7 +129,7 @@ class TestUpdatePlanStep:
         update_plan_step(step_index=2, status="running")
         update_plan_step(step_index=2, status="completed")
 
-        tracker = current_plan_tracker.get()
+        tracker = self.ctx.plan_tracker
         assert all(s["status"] == "completed" for s in tracker.steps)
 
         started = [e for e in self.bus.history if e.event_type == "step_started"]
@@ -153,7 +147,7 @@ class TestUpdatePlanStep:
 
     def test_no_tracker_returns_error(self):
         """没有调用 propose_plan 时直接调用 update_plan_step"""
-        current_plan_tracker.set(None)
+        self.ctx.plan_tracker = None
         result = update_plan_step(step_index=0, status="running")
         assert result["ok"] is False
         assert "propose_plan" in result["error"]

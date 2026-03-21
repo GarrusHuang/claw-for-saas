@@ -7,7 +7,7 @@ Skill 管理能力工具 — 让 Agent 在对话中创建/更新 Skill。
 
 from __future__ import annotations
 
-from core.context import current_event_bus, current_skill_loader
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 skill_capability_registry = ToolRegistry()
@@ -40,7 +40,8 @@ def create_skill(
     token_estimate: int | None = None,  # 预估 token
 ) -> dict:
     """创建新 Skill 并注册到系统。"""
-    loader = current_skill_loader.get()
+    ctx = get_request_context()
+    loader = ctx.skill_loader
     if not loader:
         return {"status": "error", "message": "SkillLoader not available"}
 
@@ -60,7 +61,7 @@ def create_skill(
     result = loader.create_skill(name, metadata, body)
 
     # 通过 SSE 通知前端
-    bus = current_event_bus.get()
+    bus = ctx.event_bus
     if bus and result.get("ok"):
         bus.emit("skill_created", {
             "name": name,
@@ -101,7 +102,8 @@ def update_skill(
     token_estimate: int | None = None,
 ) -> dict:
     """更新已有 Skill 的内容和元数据。"""
-    loader = current_skill_loader.get()
+    ctx = get_request_context()
+    loader = ctx.skill_loader
     if not loader:
         return {"status": "error", "message": "SkillLoader not available"}
 
@@ -133,7 +135,7 @@ def update_skill(
 
     result = loader.update_skill(name, metadata, body)
 
-    bus = current_event_bus.get()
+    bus = ctx.event_bus
     if bus and result.get("ok"):
         bus.emit("skill_updated", {"name": name})
 

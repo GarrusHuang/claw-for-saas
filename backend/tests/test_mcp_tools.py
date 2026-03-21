@@ -17,7 +17,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from core.context import current_mcp_provider
+from core.context import RequestContext, current_request
 from tools.mcp.mcp_tools import (
     mcp_registry,
     get_form_schema,
@@ -37,10 +37,11 @@ from tools.mcp.http_provider import HttpMCPProvider
 
 @pytest.fixture(autouse=True)
 def _reset_mcp_context():
-    """Reset MCP ContextVar before each test."""
-    token = current_mcp_provider.set(None)
+    """Reset RequestContext before each test."""
+    ctx = RequestContext(mcp_provider=None)
+    token = current_request.set(ctx)
     yield
-    current_mcp_provider.reset(token)
+    current_request.reset(token)
 
 
 class MockMCPProvider:
@@ -112,7 +113,8 @@ class TestMCPToolsWithProvider:
     @pytest.fixture(autouse=True)
     def _set_provider(self):
         self.provider = MockMCPProvider()
-        current_mcp_provider.set(self.provider)
+        ctx = RequestContext(mcp_provider=self.provider)
+        current_request.set(ctx)
 
     @pytest.mark.asyncio
     async def test_get_form_schema(self):
@@ -285,7 +287,8 @@ class TestHttpMCPProvider:
 class TestGetProvider:
     def test_returns_set_provider(self):
         mock = MockMCPProvider()
-        current_mcp_provider.set(mock)
+        ctx = RequestContext(mcp_provider=mock)
+        current_request.set(ctx)
         assert _get_provider() is mock
 
     def test_returns_default_when_none(self):

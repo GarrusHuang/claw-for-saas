@@ -270,24 +270,28 @@ class TestSpawnSubagentTool:
     @pytest.mark.asyncio
     async def test_spawn_subagent_no_runner(self):
         """未注入 runner 时返回错误。"""
-        from tools.builtin.subagent_tools import spawn_subagent, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagent
+        from core.context import RequestContext, current_request
 
-        token = _subagent_runner.set(None)
+        ctx = RequestContext(subagent_runner=None)
+        token = current_request.set(ctx)
         try:
             result = await spawn_subagent(task="test")
             assert "未初始化" in result
         finally:
-            _subagent_runner.reset(token)
+            current_request.reset(token)
 
     @pytest.mark.asyncio
     async def test_spawn_subagent_delegates(self):
         """正常调用委托给 runner。"""
-        from tools.builtin.subagent_tools import spawn_subagent, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagent
+        from core.context import RequestContext, current_request
 
         mock_runner = AsyncMock()
         mock_runner.run_subagent.return_value = "子任务结果"
 
-        token = _subagent_runner.set(mock_runner)
+        ctx = RequestContext(subagent_runner=mock_runner)
+        token = current_request.set(ctx)
         try:
             result = await spawn_subagent(
                 task="检查数据",
@@ -296,7 +300,7 @@ class TestSpawnSubagentTool:
                 timeout_s=60,
             )
         finally:
-            _subagent_runner.reset(token)
+            current_request.reset(token)
 
         assert result == "子任务结果"
         mock_runner.run_subagent.assert_called_once_with(
@@ -312,48 +316,55 @@ class TestSpawnSubagentTool:
 
 class TestSpawnSubagentsTool:
 
+    def _set_runner(self, runner):
+        from core.context import RequestContext, current_request
+        ctx = RequestContext(subagent_runner=runner)
+        return current_request.set(ctx)
+
+    def _reset(self, token):
+        from core.context import current_request
+        current_request.reset(token)
+
     @pytest.mark.asyncio
     async def test_spawn_subagents_no_runner(self):
         """未注入 runner 时返回错误。"""
-        from tools.builtin.subagent_tools import spawn_subagents, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagents
 
-        token = _subagent_runner.set(None)
+        token = self._set_runner(None)
         try:
             result = await spawn_subagents(tasks='[{"task":"test"}]')
             assert "未初始化" in result
         finally:
-            _subagent_runner.reset(token)
+            self._reset(token)
 
     @pytest.mark.asyncio
     async def test_spawn_subagents_invalid_json(self):
         """无效 JSON 返回错误。"""
-        from tools.builtin.subagent_tools import spawn_subagents, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagents
 
-        mock_runner = AsyncMock()
-        token = _subagent_runner.set(mock_runner)
+        token = self._set_runner(AsyncMock())
         try:
             result = await spawn_subagents(tasks="not json")
             assert "JSON 解析失败" in result
         finally:
-            _subagent_runner.reset(token)
+            self._reset(token)
 
     @pytest.mark.asyncio
     async def test_spawn_subagents_empty_array(self):
         """空数组返回错误。"""
-        from tools.builtin.subagent_tools import spawn_subagents, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagents
 
-        mock_runner = AsyncMock()
-        token = _subagent_runner.set(mock_runner)
+        token = self._set_runner(AsyncMock())
         try:
             result = await spawn_subagents(tasks="[]")
             assert "非空" in result
         finally:
-            _subagent_runner.reset(token)
+            self._reset(token)
 
     @pytest.mark.asyncio
     async def test_spawn_subagents_parallel(self):
         """并行执行多个子任务。"""
-        from tools.builtin.subagent_tools import spawn_subagents, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagents
 
         call_count = 0
 
@@ -365,7 +376,7 @@ class TestSpawnSubagentsTool:
         mock_runner = AsyncMock()
         mock_runner.run_subagent.side_effect = mock_run
 
-        token = _subagent_runner.set(mock_runner)
+        token = self._set_runner(mock_runner)
         try:
             tasks = json.dumps([
                 {"task": "任务1", "prompt": "专家1"},
@@ -374,7 +385,7 @@ class TestSpawnSubagentsTool:
             ])
             result = await spawn_subagents(tasks=tasks)
         finally:
-            _subagent_runner.reset(token)
+            self._reset(token)
 
         assert mock_runner.run_subagent.call_count == 3
         assert "任务1" in result
@@ -384,23 +395,23 @@ class TestSpawnSubagentsTool:
     @pytest.mark.asyncio
     async def test_spawn_subagents_string_items(self):
         """支持简单字符串数组。"""
-        from tools.builtin.subagent_tools import spawn_subagents, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagents
 
         mock_runner = AsyncMock()
         mock_runner.run_subagent.return_value = "OK"
 
-        token = _subagent_runner.set(mock_runner)
+        token = self._set_runner(mock_runner)
         try:
             result = await spawn_subagents(tasks='["任务A","任务B"]')
         finally:
-            _subagent_runner.reset(token)
+            self._reset(token)
 
         assert mock_runner.run_subagent.call_count == 2
 
     @pytest.mark.asyncio
     async def test_spawn_subagents_handles_exception(self):
         """某个子任务异常不影响其他。"""
-        from tools.builtin.subagent_tools import spawn_subagents, _subagent_runner
+        from tools.builtin.subagent_tools import spawn_subagents
 
         async def mock_run(**kwargs):
             if kwargs["task"] == "失败任务":
@@ -410,7 +421,7 @@ class TestSpawnSubagentsTool:
         mock_runner = AsyncMock()
         mock_runner.run_subagent.side_effect = mock_run
 
-        token = _subagent_runner.set(mock_runner)
+        token = self._set_runner(mock_runner)
         try:
             tasks = json.dumps([
                 {"task": "正常任务"},
@@ -418,7 +429,7 @@ class TestSpawnSubagentsTool:
             ])
             result = await spawn_subagents(tasks=tasks)
         finally:
-            _subagent_runner.reset(token)
+            self._reset(token)
 
         assert "成功" in result
         assert "错误" in result or "boom" in result

@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from core.context import current_mcp_provider
+from core.context import RequestContext, current_request
 from core.scheduler import ScheduleStore, ScheduledTask
 from core.webhook import WebhookConfig, WebhookDispatcher, WebhookStore
 from tools.mcp.defaults import DefaultMCPProvider
@@ -49,10 +49,11 @@ from tools.mcp.mcp_tools import (
 
 @pytest.fixture(autouse=True)
 def _reset_mcp_context():
-    """Reset MCP ContextVar before each test."""
-    token = current_mcp_provider.set(None)
+    """Reset RequestContext before each test."""
+    ctx = RequestContext(mcp_provider=None)
+    token = current_request.set(ctx)
     yield
-    current_mcp_provider.reset(token)
+    current_request.reset(token)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -232,7 +233,8 @@ class TestMCPToolExceptionPropagation:
     @pytest.fixture(autouse=True)
     def _set_raising_provider(self):
         self.provider = _RaisingProvider()
-        current_mcp_provider.set(self.provider)
+        ctx = RequestContext(mcp_provider=self.provider)
+        current_request.set(ctx)
 
     @pytest.mark.asyncio
     async def test_get_form_schema_raises(self):
@@ -275,9 +277,9 @@ class TestGetProviderContextVarNeverSet:
 
     def test_returns_default_after_reset(self):
         """After setting and resetting, _get_provider should return DefaultMCPProvider."""
-        mock = MagicMock()
-        token = current_mcp_provider.set(mock)
-        current_mcp_provider.reset(token)
+        ctx = RequestContext(mcp_provider=MagicMock())
+        token = current_request.set(ctx)
+        current_request.reset(token)
         provider = _get_provider()
         assert isinstance(provider, DefaultMCPProvider)
 

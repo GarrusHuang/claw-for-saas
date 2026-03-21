@@ -19,7 +19,6 @@ from fastapi.responses import JSONResponse
 from agent.gateway import SessionBusyError
 from core.event_bus import EventBus
 from core.ws_bridge import EventBusWSBridge
-from core.context import current_trace_id
 from core.errors import AgentError, classify_error
 from core.auth import AuthUser, get_current_user, get_current_user_optional
 from models.request import ChatRequest
@@ -45,7 +44,6 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
 
     # Generate request trace ID
     trace_id = uuid.uuid4().hex[:12]
-    current_trace_id.set(trace_id)
 
     # Create EventBus
     bus = EventBus(trace_id=trace_id)

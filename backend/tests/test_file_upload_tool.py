@@ -12,7 +12,7 @@ import tempfile
 import pytest
 
 from services.file_service import FileService
-from core.context import current_file_service, current_tenant_id, current_user_id, current_session_id
+from core.context import RequestContext, current_request
 
 
 @pytest.fixture
@@ -37,11 +37,9 @@ class TestFileUploadToToolRead:
         )
         file_id = meta.file_id
 
-        # 设置 contextvars
-        current_file_service.set(file_service)
-        current_tenant_id.set("T1")
-        current_user_id.set("U1")
-        current_session_id.set("sess-test")
+        # 设置 RequestContext
+        ctx = RequestContext(file_service=file_service, tenant_id="T1", user_id="U1", session_id="sess-test")
+        current_request.set(ctx)
 
         # 调用工具
         from tools.builtin.file_tools import read_uploaded_file
@@ -63,10 +61,8 @@ class TestFileUploadToToolRead:
         )
         file_id = meta.file_id
 
-        current_file_service.set(file_service)
-        current_tenant_id.set("T1")
-        current_user_id.set("U1")
-        current_session_id.set("sess-test")
+        ctx = RequestContext(file_service=file_service, tenant_id="T1", user_id="U1", session_id="sess-test")
+        current_request.set(ctx)
 
         from tools.builtin.file_tools import read_uploaded_file
         tool_result = read_uploaded_file(file_id=file_id)
@@ -77,10 +73,8 @@ class TestFileUploadToToolRead:
 
     def test_read_nonexistent_file(self, file_service):
         """读取不存在的文件应返回错误。"""
-        current_file_service.set(file_service)
-        current_tenant_id.set("T1")
-        current_user_id.set("U1")
-        current_session_id.set("sess-test")
+        ctx = RequestContext(file_service=file_service, tenant_id="T1", user_id="U1", session_id="sess-test")
+        current_request.set(ctx)
 
         from tools.builtin.file_tools import read_uploaded_file
         tool_result = read_uploaded_file(file_id="nonexistent-id")

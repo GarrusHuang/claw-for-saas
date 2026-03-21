@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from core.context import current_event_bus, current_sandbox
+from core.context import get_request_context
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -21,9 +21,8 @@ browser_capability_registry = ToolRegistry()
 
 
 def _get_browser_service():
-    """从 contextvars 获取 BrowserService，并检查可用性。"""
-    from core.context import current_browser_service
-    service = current_browser_service.get()
+    """从 RequestContext 获取 BrowserService，并检查可用性。"""
+    service = get_request_context().browser_service
     if service is None:
         raise RuntimeError("BrowserService not available (not injected)")
     if not service.is_available():
@@ -41,15 +40,15 @@ def _validate_url(url: str) -> str | None:
     Returns:
         None 如果允许，否则返回拒绝原因。
     """
-    sandbox = current_sandbox.get(None)
-    if sandbox is None:
+    ctx = get_request_context()
+    if ctx.sandbox is None:
         return None  # 无 sandbox 时不阻止 (由 security_hooks 兜底)
-    return sandbox.validate_url(url)
+    return ctx.sandbox.validate_url(url)
 
 
 def _emit_event(event_type: str, data: dict):
     """发射 SSE 事件 (EventBus.emit 是同步的)。"""
-    bus = current_event_bus.get()
+    bus = get_request_context().event_bus
     if bus:
         try:
             bus.emit(event_type, data)

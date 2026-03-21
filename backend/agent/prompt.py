@@ -365,7 +365,7 @@ class PromptBuilder:
 
     @staticmethod
     def _build_plan_guidance_section(_ctx: PromptContext) -> str:
-        from core.context import current_plan_tracker
+        from core.context import current_request
 
         base = (
             "\n<plan_guidance>\n"
@@ -386,7 +386,8 @@ class PromptBuilder:
         )
 
         # 注入已恢复的 plan 状态
-        tracker = current_plan_tracker.get(None)
+        ctx = current_request.get()
+        tracker = ctx.plan_tracker if ctx else None
         if tracker and tracker.steps:
             has_incomplete = any(s["status"] != "completed" for s in tracker.steps)
             if has_incomplete:
@@ -433,16 +434,13 @@ class PromptBuilder:
         import platform as _platform
         now = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        # workspace_dir: 从 ContextVar 获取沙箱工作目录
-        from core.context import current_sandbox, current_tenant_id, current_user_id as ctx_user_id, current_session_id as ctx_session_id
+        # workspace_dir: 从 RequestContext 获取沙箱工作目录
+        from core.context import current_request
         workspace_dir = ""
-        sandbox = current_sandbox.get(None)
-        if sandbox:
-            tenant_id = current_tenant_id.get("default")
-            ws_user_id = ctx_user_id.get("anonymous")
-            ws_session_id = ctx_session_id.get("")
+        ctx = current_request.get()
+        if ctx and ctx.sandbox:
             try:
-                workspace_dir = sandbox.get_workspace(tenant_id, ws_user_id, ws_session_id)
+                workspace_dir = ctx.sandbox.get_workspace(ctx.tenant_id, ctx.user_id, ctx.session_id)
             except Exception:
                 pass
 

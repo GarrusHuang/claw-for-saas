@@ -191,8 +191,9 @@ class TestDataLockHookIntegration:
 
     def _run_hook_with_registry(self, registry, tool_input):
         """Run data_lock_hook with a DataLockRegistry set via contextvars."""
-        from core.context import current_data_lock
-        token = current_data_lock.set(registry)
+        from core.context import RequestContext, current_request
+        ctx = RequestContext(data_lock=registry)
+        token = current_request.set(ctx)
         try:
             event = HookEvent(
                 event_type="pre_tool_use",
@@ -201,7 +202,7 @@ class TestDataLockHookIntegration:
             )
             return data_lock_hook(event)
         finally:
-            current_data_lock.reset(token)
+            current_request.reset(token)
 
     def test_readonly_lock_blocks_modification(self, data_lock_registry):
         """Readonly lock causes hook to block the tool call."""
@@ -249,8 +250,7 @@ class TestDataLockHookIntegration:
         assert result.action == "allow"
 
     def test_no_registry_set_allows(self):
-        """When current_data_lock contextvar is None, hook allows."""
-        from core.context import current_data_lock
+        """When data_lock is None in RequestContext, hook allows."""
         # Ensure no registry is set (use default None)
         ctx = contextvars.copy_context()
         event = HookEvent(

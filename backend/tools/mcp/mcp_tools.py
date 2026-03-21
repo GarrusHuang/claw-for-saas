@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Protocol, runtime_checkable
 
-from core.context import current_mcp_provider
+from core.context import get_request_context, current_request
 from core.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -37,10 +37,10 @@ class MCPProvider(Protocol):
 # ─── Helper ───
 
 def _get_provider() -> MCPProvider:
-    """从 ContextVar 获取 MCPProvider，fallback 到 DefaultMCPProvider。"""
-    provider = current_mcp_provider.get(None)
-    if provider is not None:
-        return provider
+    """从 RequestContext 获取 MCPProvider，fallback 到 DefaultMCPProvider。"""
+    ctx = current_request.get()
+    if ctx is not None and ctx.mcp_provider is not None:
+        return ctx.mcp_provider
     from tools.mcp.defaults import DefaultMCPProvider
     return DefaultMCPProvider()
 

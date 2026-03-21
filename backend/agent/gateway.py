@@ -18,18 +18,7 @@ from typing import Any
 
 import mimetypes
 
-from core.context import (
-    RequestContext, current_request,
-    current_event_bus, current_session_id, current_user_id,
-    current_tenant_id,
-    current_skill_loader, current_file_service, current_browser_service,
-    current_plan_tracker,
-    current_memory_store,
-    current_known_field_ids,
-    current_sandbox, current_data_lock,
-    current_mcp_provider,
-    current_scheduler,
-)
+from core.context import RequestContext, current_request
 from core.event_bus import EventBus
 from core.llm_client import LLMGatewayClient
 from core.runtime import AgenticRuntime, RuntimeConfig, RuntimeResult, StepType
@@ -252,7 +241,6 @@ class AgentGateway:
         构建 RequestContext 并注入 ContextVar。
 
         返回 ctx 供 Gateway 方法直接传递，避免逐个参数透传。
-        同时保留旧 ContextVar 的 .set() 作为工具层兼容。
         """
         # ── 收集依赖 ──
         file_service = None
@@ -303,32 +291,6 @@ class AgentGateway:
         )
         current_request.set(ctx)
 
-        # ── 兼容层: 保留旧 ContextVar (工具层逐步迁移) ──
-        current_tenant_id.set(tenant_id)
-        current_user_id.set(user_id)
-        if event_bus:
-            current_event_bus.set(event_bus)
-        if self.skill_loader:
-            current_skill_loader.set(self.skill_loader)
-        if file_service:
-            current_file_service.set(file_service)
-        if browser_service:
-            current_browser_service.set(browser_service)
-        current_known_field_ids.set(set())
-        if self.memory_store:
-            current_memory_store.set(self.memory_store)
-        if sandbox:
-            current_sandbox.set(sandbox)
-        if data_lock:
-            current_data_lock.set(data_lock)
-        if self.mcp_provider:
-            current_mcp_provider.set(self.mcp_provider)
-        if scheduler:
-            current_scheduler.set(scheduler)
-
-        from tools.builtin.subagent_tools import _subagent_runner
-        _subagent_runner.set(self.subagent_runner)
-
         return ctx
 
     async def chat(
@@ -378,7 +340,6 @@ class AgentGateway:
             logger.info(f"New session: {session_id}")
 
         ctx.session_id = session_id
-        current_session_id.set(session_id)  # 兼容层
 
         # ── 2a. 绑定上传文件到会话 ──
         if materials:
@@ -650,7 +611,7 @@ class AgentGateway:
                     logger.warning(f"agent_stop hook error: {e}")
 
         # ── PlanTracker 收尾 + 持久化 — 总是保存 ──
-        tracker = current_plan_tracker.get(None)
+        tracker = ctx.plan_tracker
         if tracker:
             if runtime_error:
                 tracker.fail_current()
@@ -815,7 +776,6 @@ class AgentGateway:
         if saved_plan:
             from agent.plan_tracker import PlanTracker
             restored_tracker = PlanTracker.restore(saved_plan, event_bus=event_bus)
-            current_plan_tracker.set(restored_tracker)
             ctx.plan_tracker = restored_tracker
             logger.info(f"Restored PlanTracker with {len(saved_plan)} steps for session {session_id}")
 
