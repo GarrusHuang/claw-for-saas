@@ -334,6 +334,48 @@ class MarkdownMemoryStore:
 
         return False
 
+    async def scan_and_merge_all(
+        self,
+        llm_client: Any,
+        max_per_run: int = 50,
+    ) -> int:
+        """
+        扫描 data/memory/user/ 全部目录，对超 50KB 的 auto-learning.md 执行合并。
+
+        Returns:
+            合并成功的用户数。
+        """
+        user_dir = self.base_dir / "user"
+        if not user_dir.exists():
+            return 0
+
+        merged_count = 0
+        processed = 0
+
+        # 遍历 user_dir/{tenant_id}/{user_id}/
+        for tenant_dir in sorted(user_dir.iterdir()):
+            if not tenant_dir.is_dir():
+                continue
+            tenant_id = tenant_dir.name
+            for uid_dir in sorted(tenant_dir.iterdir()):
+                if not uid_dir.is_dir():
+                    continue
+                if processed >= max_per_run:
+                    break
+                user_id = uid_dir.name
+                if self.needs_merge(tenant_id=tenant_id, user_id=user_id):
+                    processed += 1
+                    try:
+                        ok = await self.merge_auto_learning(tenant_id, user_id, llm_client)
+                        if ok:
+                            merged_count += 1
+                    except Exception as e:
+                        logger.warning(f"Merge failed for {tenant_id}/{user_id}: {e}")
+            if processed >= max_per_run:
+                break
+
+        return merged_count
+
     # ─── 统计 ────────────────────────────────────────────────
 
     def get_stats(

@@ -209,6 +209,14 @@ class Settings(BaseSettings):
         default=8000,
         description="Max chars for memory injection into system prompt",
     )
+    memory_merge_interval_hours: int = Field(
+        default=6,
+        description="Interval in hours between auto-learning memory merge runs",
+    )
+    memory_merge_max_per_run: int = Field(
+        default=50,
+        description="Max number of users to merge per run",
+    )
 
     # ─── Scheduler (A9) ───
     scheduler_enabled: bool = Field(
