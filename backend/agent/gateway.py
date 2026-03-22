@@ -114,6 +114,35 @@ class AgentGateway:
             os.close(fd)
             raise SessionBusyError(session_id)
 
+    @staticmethod
+    def _summarize_timeline(timeline_entries: list[dict]) -> str:
+        """把 timeline_entries 压缩为每行一条的摘要，上限 1500 字符。"""
+        lines: list[str] = []
+        for i, entry in enumerate(timeline_entries, 1):
+            etype = entry.get("type", "")
+            if etype == "tool":
+                tool_name = entry.get("tool_name", "unknown")
+                args = entry.get("args_summary", {})
+                args_str = ", ".join(f'{k}="{v}"' for k, v in args.items()) if args else ""
+                success = entry.get("success", True)
+                blocked = entry.get("blocked", False)
+                result = entry.get("result_summary", "")
+                if blocked:
+                    status = "被阻止"
+                elif success:
+                    status = f"成功: {result[:80]}" if result else "成功"
+                else:
+                    status = f"失败: {result[:80]}" if result else "失败"
+                lines.append(f"[{i}] {tool_name}({args_str}) → {status}")
+            elif etype == "thinking":
+                content = entry.get("content", "")[:60]
+                if content:
+                    lines.append(f"[{i}] thinking: {content}...")
+        summary = "\n".join(lines)
+        if len(summary) > 1500:
+            summary = summary[:1497] + "..."
+        return summary
+
     async def _auto_save_memory(
         self,
         *,
@@ -121,6 +150,7 @@ class AgentGateway:
         user_id: str,
         message: str,
         answer: str,
+        timeline_entries: list[dict] | None = None,
     ) -> None:
         """
         对话结束后自动提取跨会话记忆 (对标 Codex Session Memory Hook Phase1)。
@@ -196,7 +226,11 @@ class AgentGateway:
                 f"<conversation>\n"
                 f"用户: {message[:1000]}\n"
                 f"Agent: {answer[:1000]}\n"
-                f"</conversation>"
+                + (
+                    f"\n<timeline>\n{self._summarize_timeline(timeline_entries)}\n</timeline>\n"
+                    if timeline_entries else ""
+                )
+                + f"</conversation>"
             )
 
             llm_resp = await asyncio.wait_for(
@@ -558,6 +592,62 @@ class AgentGateway:
             {"role": "assistant", "content": answer, "ts": time.time()},
         )
 
+        # ── 构建 timeline entries (提前构建，供 memory 提取和持久化共用) ──
+        timeline_entries: list[dict] = []
+        if event_bus:
+            try:
+                _text_accum: dict[int, str] = {}
+                for evt in event_bus.history:
+                    if evt.event_type == "thinking":
+                        for it in sorted(_text_accum):
+                            if _text_accum[it]:
+                                timeline_entries.append({
+                                    "type": "text",
+                                    "content": _text_accum[it],
+                                    "iteration": it,
+                                    "ts": evt.timestamp,
+                                })
+                        _text_accum.clear()
+                        timeline_entries.append({
+                            "type": "thinking",
+                            "content": evt.data.get("content", ""),
+                            "iteration": evt.data.get("iteration", 0),
+                            "ts": evt.timestamp,
+                        })
+                    elif evt.event_type == "text_delta":
+                        it = evt.data.get("iteration", 0)
+                        _text_accum[it] = _text_accum.get(it, "") + evt.data.get("content", "")
+                    elif evt.event_type == "tool_executed":
+                        for it in sorted(_text_accum):
+                            if _text_accum[it]:
+                                timeline_entries.append({
+                                    "type": "text",
+                                    "content": _text_accum[it],
+                                    "iteration": it,
+                                    "ts": evt.timestamp,
+                                })
+                        _text_accum.clear()
+                        timeline_entries.append({
+                            "type": "tool",
+                            "tool_name": evt.data.get("tool", ""),
+                            "success": evt.data.get("success", True),
+                            "blocked": evt.data.get("blocked", False),
+                            "latency_ms": evt.data.get("latency_ms", 0),
+                            "args_summary": evt.data.get("args_summary", {}),
+                            "result_summary": evt.data.get("result_summary", ""),
+                            "ts": evt.timestamp,
+                        })
+                for it in sorted(_text_accum):
+                    if _text_accum[it]:
+                        timeline_entries.append({
+                            "type": "text",
+                            "content": _text_accum[it],
+                            "iteration": it,
+                            "ts": evt.timestamp if event_bus.history else 0,
+                        })
+            except Exception as e:
+                logger.debug(f"Failed to build timeline: {e}", exc_info=True)
+
         # ── memory/compact/agent_message/thinking/hooks — 仅正常完成 ──
         if result and not cancelled and not runtime_error:
             await self._auto_save_memory(
@@ -565,6 +655,7 @@ class AgentGateway:
                 user_id=user_id,
                 message=message,
                 answer=result.final_answer or "",
+                timeline_entries=timeline_entries or None,
             )
 
             # 上下文压缩检查
@@ -623,69 +714,18 @@ class AgentGateway:
                 logger.debug(f"Failed to persist plan steps: {e}", exc_info=True)
 
         # ── 持久化 timeline — 总是保存 ──
-        if event_bus:
+        if timeline_entries:
             try:
-                timeline_entries = []
-                _text_accum: dict[int, str] = {}
-                for evt in event_bus.history:
-                    if evt.event_type == "thinking":
-                        for it in sorted(_text_accum):
-                            if _text_accum[it]:
-                                timeline_entries.append({
-                                    "type": "text",
-                                    "content": _text_accum[it],
-                                    "iteration": it,
-                                    "ts": evt.timestamp,
-                                })
-                        _text_accum.clear()
-                        timeline_entries.append({
-                            "type": "thinking",
-                            "content": evt.data.get("content", ""),
-                            "iteration": evt.data.get("iteration", 0),
-                            "ts": evt.timestamp,
-                        })
-                    elif evt.event_type == "text_delta":
-                        it = evt.data.get("iteration", 0)
-                        _text_accum[it] = _text_accum.get(it, "") + evt.data.get("content", "")
-                    elif evt.event_type == "tool_executed":
-                        for it in sorted(_text_accum):
-                            if _text_accum[it]:
-                                timeline_entries.append({
-                                    "type": "text",
-                                    "content": _text_accum[it],
-                                    "iteration": it,
-                                    "ts": evt.timestamp,
-                                })
-                        _text_accum.clear()
-                        timeline_entries.append({
-                            "type": "tool",
-                            "tool_name": evt.data.get("tool", ""),
-                            "success": evt.data.get("success", True),
-                            "blocked": evt.data.get("blocked", False),
-                            "latency_ms": evt.data.get("latency_ms", 0),
-                            "args_summary": evt.data.get("args_summary", {}),
-                            "result_summary": evt.data.get("result_summary", ""),
-                            "ts": evt.timestamp,
-                        })
-                for it in sorted(_text_accum):
-                    if _text_accum[it]:
-                        timeline_entries.append({
-                            "type": "text",
-                            "content": _text_accum[it],
-                            "iteration": it,
-                            "ts": evt.timestamp if event_bus.history else 0,
-                        })
-                if timeline_entries:
-                    messages = self.session_manager.load_messages(
-                        tenant_id, user_id, session_id,
-                    )
-                    assistant_count = sum(
-                        1 for m in messages if m.get("role") == "assistant"
-                    )
-                    self.session_manager.save_timeline(
-                        tenant_id, user_id, session_id,
-                        timeline_entries, turn_index=assistant_count - 1,
-                    )
+                messages = self.session_manager.load_messages(
+                    tenant_id, user_id, session_id,
+                )
+                assistant_count = sum(
+                    1 for m in messages if m.get("role") == "assistant"
+                )
+                self.session_manager.save_timeline(
+                    tenant_id, user_id, session_id,
+                    timeline_entries, turn_index=assistant_count - 1,
+                )
             except Exception as e:
                 logger.debug(f"Failed to persist timeline: {e}", exc_info=True)
 

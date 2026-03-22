@@ -99,11 +99,46 @@ async def lifespan(app: FastAPI):
         file_cleanup_task = asyncio.create_task(_file_cleanup_loop())
         logger.info(f"File cleanup enabled: retention={s.file_retention_days} days, interval=6h")
 
+    # Start memory merge background task
+    memory_merge_task = None
+    if s.memory_auto_extract_enabled and s.memory_merge_interval_hours > 0:
+        async def _memory_merge_loop():
+            """先 sleep 再扫描，避免冷启动瞬间触发大量 LLM 调用。"""
+            from dependencies import get_memory_store, get_llm_client
+            interval = s.memory_merge_interval_hours * 3600
+            while True:
+                try:
+                    await asyncio.sleep(interval)
+                    store = get_memory_store()
+                    llm = get_llm_client()
+                    merged = await store.scan_and_merge_all(
+                        llm_client=llm,
+                        max_per_run=s.memory_merge_max_per_run,
+                    )
+                    if merged:
+                        logger.info(f"Memory merge: merged {merged} users")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"Memory merge error: {e}")
+                    await asyncio.sleep(60)
+
+        memory_merge_task = asyncio.create_task(_memory_merge_loop())
+        logger.info(f"Memory merge enabled: interval={s.memory_merge_interval_hours}h, max_per_run={s.memory_merge_max_per_run}")
+
     logger.info("Agent Gateway routes mounted at /api")
 
     yield
 
     logger.info("Claw-for-SaaS backend shutting down...")
+
+    # Stop memory merge
+    if memory_merge_task and not memory_merge_task.done():
+        memory_merge_task.cancel()
+        try:
+            await memory_merge_task
+        except asyncio.CancelledError:
+            pass
 
     # Stop file cleanup
     if file_cleanup_task and not file_cleanup_task.done():
