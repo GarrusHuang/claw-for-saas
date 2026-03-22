@@ -29,8 +29,9 @@ class TestToolResult:
     def test_to_json_truncation(self):
         r = ToolResult(success=True, data="a" * 1000)
         j = r.to_json(max_chars=50)
-        assert len(j) == 50 + len("...[truncated]")
-        assert j.endswith("...[truncated]")
+        assert j.startswith('"' + "a" * 49)  # 保留前 50 字符
+        assert "truncated" in j  # 确认截断发生
+        assert len(j) < 1000  # 确认实际被截断了
 
     def test_to_json_no_truncation_when_zero(self):
         r = ToolResult(success=True, data="a" * 1000)

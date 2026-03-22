@@ -139,21 +139,29 @@ class TestSandboxFileOperations:
 class TestSandboxCommandExecution:
     """Integration: command sandbox (blacklist, timeout, workspace)."""
 
-    def test_blacklisted_command_blocked(self, sandbox):
-        """Blacklisted command (sudo) is blocked."""
-        ws = sandbox.get_workspace("T1", "U1", "sess1")
-        result = sandbox.run_command("sudo ls", ws)
-        assert result.get("blocked") is True
-        assert "危险" in result["stderr"]
+    def test_blacklisted_command_blocked(self):
+        """Blacklisted command (sudo) is blocked by code_safety_hook."""
+        from agent.hooks import code_safety_hook
+        event = HookEvent(
+            event_type="pre_tool_use",
+            tool_name="run_command",
+            tool_input={"command": "sudo ls"},
+        )
+        result = code_safety_hook(event)
+        assert result.action == "block"
+        assert "危险" in result.message
 
-    def test_extra_spaces_in_blacklisted_command(self, sandbox):
+    def test_extra_spaces_in_blacklisted_command(self):
         """Command with extra spaces around blacklisted pattern.
-        The blacklist uses 'in' matching on stripped/lowered command,
-        so 'sudo' with extra spaces still gets caught."""
-        ws = sandbox.get_workspace("T1", "U1", "sess1")
-        result = sandbox.run_command("   sudo   ls   ", ws)
-        # _is_command_blocked does cmd.lower().strip() then checks 'pattern in cmd'
-        assert result.get("blocked") is True
+        regex \\bsudo\\b still matches with surrounding spaces."""
+        from agent.hooks import code_safety_hook
+        event = HookEvent(
+            event_type="pre_tool_use",
+            tool_name="run_command",
+            tool_input={"command": "   sudo   ls   "},
+        )
+        result = code_safety_hook(event)
+        assert result.action == "block"
 
     def test_normal_command_in_workspace_succeeds(self, sandbox):
         """Normal command runs successfully in workspace directory."""
