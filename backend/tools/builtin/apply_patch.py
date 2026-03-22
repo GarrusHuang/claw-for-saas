@@ -486,10 +486,32 @@ def apply_patch(
             if not full.startswith(os.path.realpath(workspace) + os.sep) and full != os.path.realpath(workspace):
                 return {"error": f"Path escapes workspace: {p}"}
 
+    # TurnDiffTracker: 捕获所有目标文件的写入前基线
+    if ctx.diff_tracker:
+        for hunk in hunks:
+            if isinstance(hunk, AddFile):
+                target = os.path.join(workspace, hunk.path)
+                ctx.diff_tracker.capture_baseline(target)
+            elif isinstance(hunk, UpdateFile):
+                target = os.path.join(workspace, hunk.path)
+                ctx.diff_tracker.capture_baseline(target)
+            elif isinstance(hunk, DeleteFile):
+                target = os.path.join(workspace, hunk.path)
+                ctx.diff_tracker.capture_baseline(target)
+
     try:
         result = apply_patch_to_filesystem(hunks, workspace)
     except (PatchApplyError, OSError) as e:
         return {"error": f"Patch 应用失败: {e}"}
+
+    # TurnDiffTracker: 记录写入操作
+    if ctx.diff_tracker:
+        for p in result["added"]:
+            ctx.diff_tracker.record_write(os.path.join(workspace, p), "create")
+        for p in result["modified"]:
+            ctx.diff_tracker.record_write(os.path.join(workspace, p), "modify")
+        for p in result["deleted"]:
+            ctx.diff_tracker.record_write(os.path.join(workspace, p), "delete")
 
     # 发射事件
     bus = ctx.event_bus

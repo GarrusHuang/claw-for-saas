@@ -49,6 +49,7 @@ class RequestContext:
     subagent_runner: Any = None
     known_field_ids: set = field(default_factory=set)
     plan_tracker: Any = None  # PlanTracker | None
+    diff_tracker: Any = None  # TurnDiffTracker | None
 
 
 current_request: contextvars.ContextVar[RequestContext | None] = contextvars.ContextVar(

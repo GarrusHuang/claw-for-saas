@@ -378,13 +378,43 @@ class FileService:
         return "\n\n".join(pages) if pages else "(PDF 中未提取到文本)"
 
     def _extract_docx(self, content: bytes) -> str:
-        """从 DOCX 提取文本。"""
+        """从 DOCX 提取文本 (标题感知 + 表格)。"""
         import io
         from docx import Document
 
         doc = Document(io.BytesIO(content))
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        return "\n".join(paragraphs) if paragraphs else "(DOCX 中未提取到文本)"
+        parts: list[str] = []
+
+        # 段落提取 (标题感知)
+        for p in doc.paragraphs:
+            text = p.text.strip()
+            if not text:
+                continue
+            style_name = p.style.name if p.style else ""
+            if style_name.startswith("Heading 1") or style_name == "Title":
+                parts.append(f"# {text}")
+            elif style_name.startswith("Heading 2") or style_name == "Subtitle":
+                parts.append(f"## {text}")
+            elif style_name.startswith("Heading 3"):
+                parts.append(f"### {text}")
+            elif style_name.startswith("Heading 4"):
+                parts.append(f"#### {text}")
+            else:
+                parts.append(text)
+
+        # 表格提取 (简易 Markdown 表格)
+        for table in doc.tables:
+            rows = []
+            for row in table.rows:
+                cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+                rows.append("| " + " | ".join(cells) + " |")
+            if rows:
+                # 在第一行后插入分隔行
+                header_sep = "| " + " | ".join("---" for _ in table.rows[0].cells) + " |"
+                rows.insert(1, header_sep)
+                parts.append("\n".join(rows))
+
+        return "\n".join(parts) if parts else "(DOCX 中未提取到文本)"
 
     def _extract_image_info(self, content: bytes, filename: str) -> str:
         """从图片获取元信息。"""

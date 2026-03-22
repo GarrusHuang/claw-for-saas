@@ -17,6 +17,7 @@ Built-in tools (no domain-specific tools):
 - mcp: get_form_schema, get_business_rules, get_candidate_types,
        get_protected_values, submit_form_data, query_data
 - schedule: create_schedule, list_schedules, delete_schedule
+- interaction: request_user_input
 """
 from __future__ import annotations
 
@@ -60,6 +61,7 @@ def build_capability_registry() -> ToolRegistry:
     from tools.builtin.apply_patch import apply_patch_registry
     from tools.builtin.memory_tools import memory_capability_registry
     from tools.builtin.schedule_tools import schedule_capability_registry
+    from tools.builtin.interaction import interaction_capability_registry
 
     merged = skill_capability_registry.merge(subagent_capability_registry)
     merged = merged.merge(file_capability_registry)
@@ -68,6 +70,7 @@ def build_capability_registry() -> ToolRegistry:
     merged = merged.merge(apply_patch_registry)
     merged = merged.merge(memory_capability_registry)
     merged = merged.merge(schedule_capability_registry)
+    merged = merged.merge(interaction_capability_registry)
     return merged
 
 

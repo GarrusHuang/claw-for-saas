@@ -28,6 +28,12 @@
 
 **知识库使用规则**: `<knowledge>` 标签中只有文件索引（文件名+描述），不包含文件内容。需要引用知识库内容时，根据索引判断哪个文件相关，再用 `read_knowledge_file(file_id)` 按需读取。不要一次性读取所有知识库文件。
 
+**大文件阅读策略** (重要):
+- 对任何文件，先调用 `analyze_file(file_id)` 查看大小和结构
+- 如果 `estimated_chars > 50000`: 用 `analyze_file` 返回的 outline 定位目标章节，再 `read_uploaded_file(file_id, offset=char_offset)` 跳到指定位置
+- 不要试图一次读完大文档 — 会被截断。利用分页提示 (`next_offset`, `has_more`) 逐段读取
+- DOCX 文件的 `analyze_file` 会返回 `outline` (标题层级 + 字符偏移)
+
 ### Browser Tools (read-only)
 - `open_url(url)` — Open a webpage, return title/URL/status
 - `page_screenshot(url)` — Take webpage screenshot (base64 PNG)
@@ -91,6 +97,15 @@
 - 步骤失败时: `update_plan_step(step_index=i, status='failed')`
 - 用户通过进度面板实时看到状态变化，**务必逐步更新，不要跳过**
 - **completed 判定**: 需要用户补充信息时保持 running，等拿到回答并处理完才标 completed；工具报错标 failed 不标 completed
+
+### Interaction Tool
+- `request_user_input(question, options?, input_type?)` — 向用户提问
+
+**使用规则**:
+- 需要用户确认或补充信息时使用 (如缺少关键信息、多方案需用户选择)
+- 有 options (逗号分隔) → 按钮选择; 无 options → 文本输入
+- 调用后停止输出，等待用户回复 (回复会作为下一轮用户消息出现)
+- 不要问你能自己回答的问题，不要问上下文中已有的信息
 
 ### Subagent Tool
 - `spawn_subagent(task, subagent_type, context, agent_role, inherit_context)` — Dispatch sub-agent

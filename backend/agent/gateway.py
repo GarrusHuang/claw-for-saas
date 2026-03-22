@@ -729,6 +729,23 @@ class AgentGateway:
             except Exception as e:
                 logger.debug(f"Failed to persist timeline: {e}", exc_info=True)
 
+        # ── TurnDiffTracker: 生成 diff + 发射事件 + timeline ──
+        if ctx.diff_tracker:
+            file_changes = ctx.diff_tracker.generate_diffs()
+            if file_changes and event_bus:
+                event_bus.emit("file_changes", {"changes": file_changes})
+            if file_changes:
+                for fc in file_changes:
+                    timeline_entries.append({
+                        "type": "file_change",
+                        "path": fc["path"],
+                        "operation": fc["operation"],
+                        "diff_text": fc["diff_text"][:2000],
+                        "before_size": fc["before_size"],
+                        "after_size": fc["after_size"],
+                        "ts": time.time(),
+                    })
+
         # ── 发射完成事件 — 总是发射 ──
         duration_ms = (time.time() - start_time) * 1000
         if event_bus:
@@ -818,6 +835,12 @@ class AgentGateway:
             restored_tracker = PlanTracker.restore(saved_plan, event_bus=event_bus)
             ctx.plan_tracker = restored_tracker
             logger.info(f"Restored PlanTracker with {len(saved_plan)} steps for session {session_id}")
+
+        # ── 2c. 创建 TurnDiffTracker ──
+        if ctx.sandbox:
+            from core.file_diff_tracker import TurnDiffTracker
+            workspace = ctx.sandbox.get_workspace(ctx.tenant_id, ctx.user_id, ctx.session_id)
+            ctx.diff_tracker = TurnDiffTracker(workspace=str(workspace))
 
         # ── 3. 加载 Skill + Memory + 知识库 ──
         skill_knowledge, memory_context, knowledge_index_text = self._load_prompt_sources(

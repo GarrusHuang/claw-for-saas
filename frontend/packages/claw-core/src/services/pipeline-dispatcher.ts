@@ -349,6 +349,19 @@ export function dispatchPipelineEvent(
       store.addEvent({ type: 'request_input', data, timestamp: Date.now() });
       break;
 
+    case 'file_changes': {
+      const rawChanges = (data.changes as Array<Record<string, unknown>>) || [];
+      store.setFileChanges(rawChanges.map((c) => ({
+        path: (c.path as string) || '',
+        operation: (c.operation as 'create' | 'modify' | 'delete') || 'modify',
+        diffText: (c.diff_text as string) || '',
+        beforeSize: (c.before_size as number) || 0,
+        afterSize: (c.after_size as number) || 0,
+      })));
+      store.addEvent({ type: 'file_changes', data, timestamp: Date.now() });
+      break;
+    }
+
     default:
       // Unknown event type — log for debugging
       console.debug('[pipeline-dispatcher] Unknown event:', eventType, data);

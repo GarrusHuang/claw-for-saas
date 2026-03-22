@@ -41,6 +41,7 @@ export type {
   ParallelReviewState,
   PendingInteraction,
   InteractionOption,
+  FileChange,
 } from './types/pipeline.ts';
 
 // ── Stores ──
