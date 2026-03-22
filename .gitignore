@@ -47,8 +47,6 @@ deploy/
 
 # Internal docs
 docs/
-CLAUDE.md
-**/CLAUDE.md
 
 # Test
 .coverage
