@@ -57,12 +57,14 @@ class SubagentRunner:
         capability_registry: ToolRegistry,
         prompt_builder: PromptBuilder | None = None,
         hooks: Any | None = None,
+        secret_redactor: Any | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.shared_registry = shared_registry
         self.capability_registry = capability_registry
         self.prompt_builder = prompt_builder
         self.hooks = hooks  # 继承父级安全 hooks
+        self.secret_redactor = secret_redactor
 
     async def run_subagent(
         self,
@@ -100,6 +102,7 @@ class SubagentRunner:
             tool_parser=ToolCallParser(),
             config=config,
             hooks=self.hooks,  # 继承父级安全 hooks (pre_tool_use / post_tool_use)
+            secret_redactor=self.secret_redactor,
         )
 
         try:

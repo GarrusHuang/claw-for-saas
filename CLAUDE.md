@@ -48,6 +48,8 @@ backend/
     context.py         — RequestContext 统一上下文 (无旧 ContextVar)
     sandbox.py         — 文件沙箱 + Docker 沙箱
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
+    exec_policy.py     — ExecPolicy: 命令执行安全策略 (白名单+黑名单)
+    secret_redactor.py — SecretRedactor: Secret 输出脱敏
     data_lock.py       — 字段锁定 (防止 Agent 覆盖关键数据)
     token_estimator.py — Token 估算
     scheduler.py       — Cron 定时调度引擎

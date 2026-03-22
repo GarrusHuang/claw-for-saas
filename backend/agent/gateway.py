@@ -61,6 +61,7 @@ class AgentGateway:
         mcp_provider: Any = None,  # MCPProvider (A2: MCP 标准工具接口)
         hooks: HookRegistry | None = None,
         runtime_config: RuntimeConfig | None = None,
+        secret_redactor: Any | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.tool_registry = tool_registry
@@ -71,6 +72,7 @@ class AgentGateway:
         self.memory_store = memory_store
         self.mcp_provider = mcp_provider
         self.hooks = hooks or build_default_hooks()
+        self.secret_redactor = secret_redactor
         self.runtime_config = runtime_config or RuntimeConfig(
             max_iterations=25,
             max_tokens_per_turn=4096,
@@ -863,6 +865,7 @@ class AgentGateway:
             event_bus=event_bus,
             trace_id=event_bus.trace_id if event_bus else "",
             hooks=self.hooks,
+            secret_redactor=self.secret_redactor,
         )
 
         initial_messages = history_messages if history_messages else None

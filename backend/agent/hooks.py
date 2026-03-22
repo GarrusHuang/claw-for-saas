@@ -144,68 +144,39 @@ def audit_logger(event: HookEvent) -> HookResult:
     return HookResult(action="allow")
 
 
-# ── Phase 27: 编码工具安全 Hook ──
+# ── Phase 27: 编码工具安全 Hook (委托 ExecPolicy) ──
 
-# 命令黑名单模式
-_COMMAND_BLACKLIST = [
-    r"rm\s+-rf\s+/",
-    r"rm\s+-rf\s+~",
-    r"\bsudo\b",
-    r"\bcurl\b.*\|\s*sh",
-    r"\bwget\b.*\|\s*sh",
-    r"\bmkfs\b",
-    r":\(\)\s*\{",        # fork bomb
-    r"\bdd\s+if=",
-    r"\bchmod\s+777\s+/",
-    r"\bshutdown\b",
-    r"\breboot\b",
-    r"\binit\s+0\b",
-]
+from core.exec_policy import ExecPolicy
 
-# 敏感文件名模式 (禁止写入)
-_SENSITIVE_FILES = [
-    ".env", ".env.local", ".env.production",
-    "credentials", "credentials.json",
-    "id_rsa", "id_ed25519", "id_ecdsa",
-    ".pem", ".key", ".p12", ".pfx",
-    "shadow", "passwd",
-]
+_exec_policy = ExecPolicy()
 
 
 def code_safety_hook(event: HookEvent) -> HookResult:
     """
     编码工具安全检查 (pre_tool_use)。
 
-    - read_source_file / write_source_file: 敏感文件保护
-    - write_source_file: 禁止写入敏感文件 (.env, credentials, private keys)
-    - run_command: 命令黑名单检查
+    - write_source_file / apply_patch: 敏感文件保护
+    - run_command: 命令安全策略 (白名单 + 黑名单)
     """
-    import re
-
     tool = event.tool_name
-    if tool not in ("read_source_file", "write_source_file", "run_command"):
+    if tool not in ("read_source_file", "write_source_file", "run_command", "apply_patch"):
         return HookResult(action="allow")
 
     # ── 写入敏感文件检查 ──
-    if tool == "write_source_file":
+    if tool in ("write_source_file", "apply_patch"):
         path = event.tool_input.get("path", "")
-        basename = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
-        for sensitive in _SENSITIVE_FILES:
-            if basename == sensitive or basename.endswith(sensitive):
-                return HookResult(
-                    action="block",
-                    message=f"安全检查: 禁止写入敏感文件 {path}",
-                )
+        if path and _exec_policy.is_sensitive_file(path):
+            return HookResult(
+                action="block",
+                message=f"安全检查: 禁止写入敏感文件 {path}",
+            )
 
-    # ── 命令黑名单检查 ──
+    # ── 命令安全策略检查 ──
     if tool == "run_command":
         command = event.tool_input.get("command", "")
-        for pattern in _COMMAND_BLACKLIST:
-            if re.search(pattern, command, re.IGNORECASE):
-                return HookResult(
-                    action="block",
-                    message=f"安全检查: 命令包含危险操作 — {command[:100]}",
-                )
+        safe, reason = _exec_policy.check_command(command)
+        if not safe:
+            return HookResult(action="block", message=reason)
 
     return HookResult(action="allow")
 
