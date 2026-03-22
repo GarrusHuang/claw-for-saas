@@ -174,36 +174,13 @@
 
 **已完成** (2026-03-22): 新增 `core/secret_redactor.py` (SecretRedactor 类)，双层脱敏策略: 字面值精确匹配 (从 Settings 收集 llm_api_key/auth_jwt_secret，最小 8 字符，排除 "not-needed" 默认值) + 正则模式兜底 (Bearer token / sk-* API key / AKIA AWS key / password=* 等)。通过 `dependencies.py` 工厂创建，传入 AgentGateway → AgenticRuntime → SubagentRunner，在两处关键路径应用: 工具结果序列化到 LLM messages + tool_executed SSE 事件推送到前端。
 
-### 2.3 Tool Search — 延迟工具加载
+### 2.3 Tool Search — 延迟工具加载 ✅
 
-**现状**: 所有工具 schema 全量注入 system prompt。
-**Codex 做法**: BM25 搜索引擎做语义工具发现，按需加载 schema。
+**已完成** (2026-03-22): 工具总数超过阈值 (默认 30) 时自动切换延迟加载模式。新增 `tools/builtin/tool_search.py` (tool_search 工具，关键词搜索延迟工具)。`ToolRegistry` 新增 `search_tools()` + `subset()` 方法。`Gateway._build_prompt_and_message()` 按 `CORE_TOOL_NAMES` 分割核心/延迟工具，延迟工具存入 `RequestContext.deferred_tools`。`Runtime` 新增 `llm_tool_registry` 参数，延迟模式下 LLM 只收到核心工具 schema，执行仍走全量 registry。`PromptBuilder` 在 `<tools>` 末尾追加延迟工具数量提示。
 
-**服务端适配**:
-- MCP + 插件 + 租户自定义工具可能导致工具数量远超 Codex (CLI 场景工具相对少)
-- 延迟加载对多租户场景价值更大
+### 2.4 OpenTelemetry 集成 ✅
 
-**要做的事**:
-- 设置阈值 (如 20 个工具)，超过时自动切换延迟模式
-- 实现 `tool_search` 工具 (基于关键词匹配，不需要 BM25 那么复杂)
-- 核心工具 (calculator, read_uploaded_file 等) 始终注入，MCP/plugin 工具延迟加载
-
-**收益**: prompt 瘦身，工具多时减少上下文浪费。
-
-### 2.4 OpenTelemetry 集成
-
-**现状**: 只有 structlog 日志。
-**Codex 做法**: `otel/` crate — 每个 LLM 调用、工具调用、压缩操作都有 span。
-
-**服务端适配**: 比 CLI 更需要 — 5000 用户的性能监控、慢请求排查、LLM 调用链路追踪。
-
-**要做的事**:
-- 接入 `opentelemetry-python` SDK
-- 在关键路径添加 span: Gateway.chat / Runtime.run / LLM call / tool execute / compact
-- 通过 `trace_id` (已有) 关联同一请求的所有 span
-- 导出到 Jaeger/Grafana Tempo (配置项控制)
-
-**收益**: 生产环境可观测性，问题定位从 "翻日志" 变成 "看链路"。
+**已完成** (2026-03-22): 新增 `core/tracing.py` — 完全 opt-in 的 OTel 集成，`otel_enabled=False` (默认) 时零开销 (NoOp tracer/span，不 import OTel 包)。未安装 OTel 包时自动 fallback 到 NoOp。4 个关键 span: `gateway.chat` (session_id/tenant_id) → `runtime.react_loop` (max_iterations) → `runtime.tool_call` (tool.name/success/latency_ms) + `llm.stream_call` (llm.model)。配置项: `OTEL_ENABLED` / `OTEL_ENDPOINT` / `OTEL_SERVICE_NAME`。`main.py` lifespan 中初始化和关闭。
 
 ---
 

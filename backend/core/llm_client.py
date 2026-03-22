@@ -279,6 +279,12 @@ class LLMGatewayClient:
         **kwargs: Any,
     ) -> AsyncIterator[dict]:
         """流式请求内部实现。"""
+        from core.tracing import get_tracer
+        tracer = get_tracer()
+        _llm_span = tracer.start_as_current_span("llm.stream_call")
+        _llm_span_ctx = _llm_span.__enter__()
+        _llm_span_ctx.set_attribute("llm.model", self.config.model)
+
         payload = self._build_payload(
             messages=messages,
             tools=tools,
@@ -320,6 +326,8 @@ class LLMGatewayClient:
                         yield json.loads(data_str)
                     except json.JSONDecodeError:
                         continue
+
+        _llm_span.__exit__(None, None, None)
 
     def _build_payload(
         self,

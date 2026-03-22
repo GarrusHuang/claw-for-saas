@@ -95,6 +95,12 @@ class Settings(BaseSettings):
         description="Default file page size in characters for pagination",
     )
 
+    # ─── Tool Search (2.3: 延迟加载) ───
+    agent_tool_deferred_threshold: int = Field(
+        default=30,
+        description="工具总数超过此阈值时自动切换延迟加载模式",
+    )
+
     # ─── LLM Vision (A4-4i: 多模态) ───
     llm_supports_vision: bool = Field(
         default=False,
@@ -284,6 +290,20 @@ class Settings(BaseSettings):
     db_path: str = Field(
         default="data/claw.db",
         description="SQLite database file path",
+    )
+
+    # ─── Observability (OpenTelemetry) ───
+    otel_enabled: bool = Field(
+        default=False,
+        description="启用 OpenTelemetry 分布式追踪",
+    )
+    otel_endpoint: str = Field(
+        default="http://localhost:4317",
+        description="OTLP gRPC endpoint",
+    )
+    otel_service_name: str = Field(
+        default="claw-for-saas",
+        description="OTel service name",
     )
 
     # ─── Logging ───

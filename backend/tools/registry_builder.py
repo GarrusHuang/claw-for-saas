@@ -95,10 +95,12 @@ def build_full_registry(mcp_enabled: bool = False) -> ToolRegistry:
         mcp_enabled: Only register MCP tools when True (avoids exposing
                      6 stub tools that return default/fallback data).
     """
+    from tools.builtin.tool_search import tool_search_registry
+
     shared = build_shared_registry()
     capability = build_capability_registry()
     plan = build_plan_registry()
-    merged = shared.merge(capability).merge(plan)
+    merged = shared.merge(capability).merge(plan).merge(tool_search_registry)
     if mcp_enabled:
         mcp = build_mcp_registry()
         merged = merged.merge(mcp)

@@ -287,6 +287,27 @@ class ToolRegistry:
         tool = self._tools.get(name)
         return tool.read_only if tool else False
 
+    def search_tools(self, query: str, limit: int = 10) -> list[RegisteredTool]:
+        """按关键词搜索工具 (名称+描述匹配)。"""
+        keywords = query.lower().split()
+        scored = []
+        for tool in self._tools.values():
+            text = f"{tool.name} {tool.description}".lower()
+            score = sum(1 for kw in keywords if kw in text)
+            if score > 0:
+                scored.append((score, tool))
+        scored.sort(key=lambda x: -x[0])
+        return [t for _, t in scored[:limit]]
+
+    def subset(self, names: set[str]) -> ToolRegistry:
+        """返回只包含指定工具的新 registry。"""
+        new_reg = ToolRegistry()
+        for name in names:
+            tool = self._tools.get(name)
+            if tool:
+                new_reg._tools[name] = tool
+        return new_reg
+
     def merge(self, other: ToolRegistry) -> ToolRegistry:
         """合并另一个 registry，返回新 registry（other 优先）。"""
         merged = ToolRegistry()
