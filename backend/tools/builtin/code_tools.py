@@ -158,8 +158,12 @@ def write_source_file(
     except PermissionError as e:
         return {"error": str(e)}
 
-    # A6: 磁盘配额检查
+    # TurnDiffTracker: 捕获写入前基线
     ctx = get_request_context()
+    if ctx.diff_tracker:
+        ctx.diff_tracker.capture_baseline(resolved)
+
+    # A6: 磁盘配额检查
     if ctx.sandbox:
         quota = ctx.sandbox.check_disk_quota(ctx.tenant_id, ctx.user_id)
         if quota["exceeded"]:
@@ -200,6 +204,10 @@ def write_source_file(
         size = os.path.getsize(resolved)
         basename = os.path.basename(resolved)
         mime_type = mimetypes.guess_type(basename)[0] or "application/octet-stream"
+
+        # TurnDiffTracker: 记录写入操作
+        if ctx.diff_tracker:
+            ctx.diff_tracker.record_write(resolved, "create" if mode == "create" else "modify")
 
         # 发射 SSE 事件
         bus = ctx.event_bus

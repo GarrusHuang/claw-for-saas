@@ -111,7 +111,7 @@ def process_image(
 def process_pdf(
     content: bytes,
     filename: str,
-    max_pages: int = 50,
+    max_pages: int = 500,
 ) -> ProcessedContent:
     """
     处理 PDF 文件: 提取文本。
@@ -187,7 +187,7 @@ def process_file(
     content: bytes,
     filename: str,
     max_image_dimension: int = 1024,
-    max_pdf_pages: int = 50,
+    max_pdf_pages: int = 500,
 ) -> ProcessedContent:
     """
     统一入口: 根据文件类型分发到对应处理器。

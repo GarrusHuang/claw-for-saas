@@ -146,6 +146,14 @@ export interface InteractionOption {
   value: string;
 }
 
+export interface FileChange {
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  diffText: string;
+  beforeSize: number;
+  afterSize: number;
+}
+
 export type PendingInteraction =
   | { type: 'upload'; prompt: string; accept: string }
   | { type: 'confirmation'; message: string; options: InteractionOption[] }

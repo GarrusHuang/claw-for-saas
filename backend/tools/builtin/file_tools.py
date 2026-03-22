@@ -307,6 +307,31 @@ def analyze_file(file_id: str) -> dict:  # 文件 ID
                 analysis["paragraph_count"] = len(doc.paragraphs)
                 analysis["table_count"] = len(doc.tables)
                 analysis["format"] = "DOCX"
+
+                # 构建 outline + estimated_chars
+                outline = []
+                char_offset = 0
+                for p in doc.paragraphs:
+                    text = p.text.strip()
+                    if not text:
+                        char_offset += 1
+                        continue
+                    style_name = p.style.name if p.style else ""
+                    level = 0
+                    if style_name.startswith("Heading 1") or style_name == "Title":
+                        level = 1
+                    elif style_name.startswith("Heading 2") or style_name == "Subtitle":
+                        level = 2
+                    elif style_name.startswith("Heading 3"):
+                        level = 3
+                    elif style_name.startswith("Heading 4"):
+                        level = 4
+                    if level > 0:
+                        outline.append({"level": level, "title": text[:100], "char_offset": char_offset})
+                    char_offset += len(text) + 1
+                if outline:
+                    analysis["outline"] = outline
+                analysis["estimated_chars"] = char_offset
             except Exception:
                 analysis["format"] = "DOCX (parse error)"
 

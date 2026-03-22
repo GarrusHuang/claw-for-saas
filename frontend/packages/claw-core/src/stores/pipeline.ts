@@ -13,6 +13,7 @@ import type {
   ConversationTurn, ToolExecution, AgentIterationInfo,
   ErrorDetail, ParallelReviewState, PlanStepTracking,
   PendingInteraction,
+  FileChange,
 } from '../types/pipeline.ts';
 
 // Re-export types for convenience
@@ -23,6 +24,7 @@ export type {
   ErrorDetail, ParallelReviewState, AuditItem, AgentReviewResult,
   PlanStepStatus, PlanStepTracking,
   PendingInteraction, InteractionOption,
+  FileChange,
 } from '../types/pipeline.ts';
 
 export interface FileArtifact {
@@ -99,6 +101,9 @@ interface PipelineState {
   // Phase 24: Agent 交互请求
   pendingInteraction: PendingInteraction | null;
 
+  // Phase 1.2: 文件变更 diff
+  fileChanges: FileChange[];
+
   // Phase 6: Agent 生成的文件
   fileArtifacts: FileArtifact[];
 
@@ -156,6 +161,8 @@ interface PipelineState {
   // Phase 24: Agent 交互请求
   setPendingInteraction: (interaction: PendingInteraction | null) => void;
   resolveInteraction: () => void;
+  // Phase 1.2: File changes
+  setFileChanges: (changes: FileChange[]) => void;
   // Phase 6: File artifacts
   addFileArtifact: (artifact: FileArtifact) => void;
   // Skills loaded
@@ -197,6 +204,8 @@ const initialState = {
   planSteps: [] as PlanStepTracking[],
   // Phase 24
   pendingInteraction: null as PendingInteraction | null,
+  // Phase 1.2: File changes
+  fileChanges: [] as FileChange[],
   // Phase 6: File artifacts
   fileArtifacts: [] as FileArtifact[],
   // Skills loaded
@@ -470,6 +479,9 @@ export const usePipelineStore = create<PipelineState>((set) => ({
   // Phase 24: Agent 交互请求
   setPendingInteraction: (interaction) => set({ pendingInteraction: interaction }),
   resolveInteraction: () => set({ pendingInteraction: null }),
+
+  // Phase 1.2: File changes
+  setFileChanges: (changes) => set({ fileChanges: changes }),
 
   // Phase 6: File artifacts
   addFileArtifact: (artifact) =>
