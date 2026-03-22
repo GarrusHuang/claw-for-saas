@@ -10,7 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-1890_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-2000+_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache&logoColor=white)](LICENSE)
 
 </div>
@@ -34,13 +34,15 @@
 | 特性 | 说明 |
 |:-----|:-----|
 | **ReAct 循环引擎** | 最多 25 轮迭代，支持并行工具调用，LLM 瞬时错误自动重试 (3 次) |
-| **37 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆搜索 · 技能 · 子 Agent · 定时任务 |
+| **38 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆搜索 · 技能 · 子 Agent · 定时任务 · 工具搜索 |
+| **Tool Search 延迟加载** | 工具数超过阈值时自动切换延迟模式，prompt 只含核心工具，Agent 按需搜索 |
 | **8 层提示词架构** | Identity → Soul → Safety → Tools → Skills → Memory → Runtime → Extra |
 | **跨会话记忆** | LLM 自动提取偏好/纠正/决策 + 关键词搜索 + 合并索引 + 三层 Markdown 笔记 |
 | **四阶段上下文压缩** | 截断 → 摘要 → 元数据 → 逐条删 + 1.2x token 安全边距 + 动态工具结果上限 |
 | **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
 | **WebSocket 实时推送** | 15+ 事件类型，实时展示思考过程和工具执行，指数退避重连 |
-| **运行时安全围栏** | 文件沙箱 · bcrypt 密码 · SSRF DNS 检查 · 速率限制 · 登录限速 · PII 检测 |
+| **运行时安全围栏** | 文件沙箱 · 命令安全策略 · Secrets 脱敏 · bcrypt · SSRF 检查 · 速率限制 · PII 检测 |
+| **OpenTelemetry 追踪** | opt-in 分布式追踪，4 个关键 span (gateway/runtime/tool/llm)，禁用时零开销 |
 | **MCP 标准工具接口** | 条件注册（mcp_enabled=True），6 个标准工具，HTTP 转发到宿主 |
 | **定时调度 + Webhook** | Cron 定时任务 · 一次性任务 · Webhook HMAC 签名回调 |
 | **全格式文件预览** | DOCX · PDF · Excel · 图片 · HTML · 代码 · Markdown |
@@ -133,11 +135,11 @@ docker compose up -d
 ```
 claw-for-saas/
 ├── backend/
-│   ├── core/               # Agent 引擎 (runtime, tools, llm, events, sandbox, scheduler)
+│   ├── core/               # Agent 引擎 (runtime, tools, llm, events, sandbox, tracing)
 │   ├── agent/              # Gateway + 编排 (prompt, session, hooks, subagent, quality_gate)
 │   ├── memory/             # 三层 Markdown 记忆 (global/tenant/user)
 │   ├── tools/
-│   │   ├── builtin/        # 31 个内置工具 (含 search_memory)
+│   │   ├── builtin/        # 32 个内置工具 (含 tool_search)
 │   │   └── mcp/            # MCP 标准工具接口
 │   ├── skills/builtin/     # 20 个内置 Skill
 │   ├── services/           # 文件 / 知识库 / 浏览器 / 用量统计
@@ -281,7 +283,10 @@ request_input      → Agent 请求用户输入
 | `MCP_ENABLED` | `False` | 启用 MCP 标准工具 |
 | `SCHEDULER_ENABLED` | `True` | 启用定时调度 |
 | `LLM_SUPPORTS_VISION` | `False` | 启用多模态 |
+| `AGENT_TOOL_DEFERRED_THRESHOLD` | `30` | 工具延迟加载阈值 (超过则只注入核心工具) |
 | `AGENT_MAX_TOOL_RESULT_CHARS` | `0` (动态) | 工具结果上限 (0=30% 上下文窗口) |
+| `OTEL_ENABLED` | `False` | 启用 OpenTelemetry 分布式追踪 |
+| `OTEL_ENDPOINT` | `http://localhost:4317` | OTLP gRPC 端点 |
 | `LLM_FALLBACK_MODEL` | *(空)* | 备用模型 (主模型不可用时切换) |
 | `MEMORY_AUTO_EXTRACT_ENABLED` | `True` | 自动提取跨会话记忆 |
 | `SANDBOX_MAX_DISK_QUOTA_MB` | `500` | 单用户磁盘配额 |
@@ -294,10 +299,10 @@ request_input      → Agent 请求用户输入
 ## 测试
 
 ```bash
-# 后端单元测试（1710 用例）
+# 后端单元测试（1822 用例）
 cd backend && python3 -m pytest tests/ -m "not llm" -v
 
-# 后端 + LLM 集成测试（1739 用例，需 LLM 服务在线）
+# 后端 + LLM 集成测试（1851 用例，需 LLM 服务在线）
 cd backend && python3 -m pytest tests/ -v
 
 # 前端单元测试（153 用例）
@@ -309,11 +314,11 @@ cd frontend && npx playwright test
 
 | 层级 | 测试数 | 覆盖范围 |
 |:-----|:-------|:---------|
-| 后端 Unit | 1,710 | 65 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
+| 后端 Unit | 1,822 | 68 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
 | 后端 LLM 集成 | 29 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
 | 前端 Unit | 153 | claw-core (66) · claw-ui (81) · app (6) |
 | 前端 E2E | 2 specs | Playwright 关键用户流程 |
-| **合计** | **1,890+** | |
+| **合计** | **2,000+** | |
 
 ---
 
