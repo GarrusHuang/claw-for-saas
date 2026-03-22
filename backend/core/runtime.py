@@ -152,6 +152,7 @@ class AgenticRuntime:
         event_bus: EventBus | None = None,
         trace_id: str | None = None,
         hooks: Any | None = None,
+        secret_redactor: Any | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.tool_registry = tool_registry
@@ -160,6 +161,7 @@ class AgenticRuntime:
         self.event_bus = event_bus
         self.trace_id = trace_id or ""
         self.hooks = hooks  # Optional HookRegistry
+        self._secret_redactor = secret_redactor  # Optional SecretRedactor
         self._steps: list[RuntimeStep] = []
         self._accumulated_usage = TokenUsage()
         self._thinking_parts: list[str] = []
@@ -489,10 +491,13 @@ class AgenticRuntime:
                     observations, self.config.get_effective_tool_result_chars(),
                 )
                 for tc, obs, budget in zip(parsed.tool_calls, observations, per_tool_budgets):
+                    content = obs.to_json(max_chars=budget)
+                    if self._secret_redactor:
+                        content = self._secret_redactor.redact(content)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": obs.to_json(max_chars=budget),
+                        "content": content,
                     })
 
                 # ── 4b. 重复警告: 注入提示让 Agent 停止重复 ──
@@ -1073,7 +1078,11 @@ class AgenticRuntime:
             "success": result.success,
             "latency_ms": round(latency_ms, 1),
             "args_summary": self._summarize_args(tool_call.arguments),
-            "result_summary": self._summarize_result(result),
+            "result_summary": (
+                self._secret_redactor.redact(self._summarize_result(result))
+                if self._secret_redactor
+                else self._summarize_result(result)
+            ),
         })
 
         logger.info(

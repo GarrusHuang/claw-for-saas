@@ -216,6 +216,14 @@ def get_notification_manager():
 
 
 @lru_cache()
+def get_secret_redactor():
+    from core.secret_redactor import SecretRedactor
+    redactor = SecretRedactor()
+    redactor.collect_from_settings(get_settings())
+    return redactor
+
+
+@lru_cache()
 def get_hook_rule_engine():
     from agent.hook_rules import HookRuleEngine
     return HookRuleEngine(os.path.join(_BACKEND_ROOT, "data", "hook_rules"))
@@ -317,12 +325,15 @@ def build_gateway():
 
     hooks = build_default_hooks()
 
+    secret_redactor = get_secret_redactor()
+
     subagent_runner = SubagentRunner(
         llm_client=llm_client,
         shared_registry=shared_registry,
         capability_registry=capability_registry,
         prompt_builder=prompt_builder,
         hooks=hooks,
+        secret_redactor=secret_redactor,
     )
 
     return AgentGateway(
@@ -336,4 +347,5 @@ def build_gateway():
         mcp_provider=get_mcp_provider(),
         hooks=hooks,
         runtime_config=get_runtime_config(),
+        secret_redactor=secret_redactor,
     )
