@@ -91,6 +91,7 @@ export function usePipeline() {
           message: params.userMessage || `请帮我处理${params.action}`,
           business_type: params.action,
           materials: params.materials || [],
+          mode: usePipelineStore.getState().chatMode,
         };
 
         // Build auth headers

@@ -363,6 +363,7 @@ class AgentGateway:
         skill_names: list[str] | None = None,
         event_bus: EventBus | None = None,
         materials: list[dict] | None = None,
+        mode: str = "execute",
     ) -> dict:
         """
         处理用户消息 — 单一入口。
@@ -425,6 +426,7 @@ class AgentGateway:
                 ctx=ctx, message=message,
                 business_type=business_type, skill_names=skill_names,
                 materials=materials, start_time=start_time,
+                mode=mode,
             )
         finally:
             try:
@@ -510,7 +512,7 @@ class AgentGateway:
         self, *, ctx: RequestContext,
         message: str, materials: list[dict] | None,
         skill_knowledge: str, memory_context: str, knowledge_index_text: str,
-        start_time: float,
+        start_time: float, mode: str = "execute",
     ) -> tuple[str, str | list]:
         """构建 system prompt + user message，并持久化用户消息。返回 (system_prompt, user_message)。"""
         tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
@@ -542,6 +544,14 @@ class AgentGateway:
                 for t in all_tools
             ]
 
+        # Plan 模式: 只保留只读工具 + plan 工具
+        if mode == "plan":
+            PLAN_MODE_EXTRA = {"propose_plan", "update_plan_step"}
+            tool_summaries = [
+                t for t in tool_summaries
+                if t.read_only or t.name in PLAN_MODE_EXTRA
+            ]
+
         system_prompt = self.prompt_builder.build_system_prompt(
             skill_knowledge=skill_knowledge,
             memory_context=memory_context,
@@ -550,6 +560,7 @@ class AgentGateway:
             session_id=session_id,
             tool_summaries=tool_summaries,
             deferred_tool_count=deferred_tool_count,
+            chat_mode=mode,
         )
 
         # ── 用户消息 (A4-4i: 多模态支持) ──
@@ -856,6 +867,7 @@ class AgentGateway:
         skill_names: list[str] | None,
         materials: list[dict] | None,
         start_time: float,
+        mode: str = "execute",
     ) -> dict:
         """chat() 的核心逻辑，已在 session lock 保护下执行。"""
         tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
@@ -894,11 +906,16 @@ class AgentGateway:
             ctx=ctx, message=message, materials=materials,
             skill_knowledge=skill_knowledge, memory_context=memory_context,
             knowledge_index_text=knowledge_index_text, start_time=start_time,
+            mode=mode,
         )
 
         # ── 5. 执行 Runtime (2.3: 延迟模式传 llm_tool_registry) ──
         llm_tool_registry = None
-        if ctx.deferred_tools:
+        if mode == "plan":
+            plan_allowed = {t.name for t in self.tool_registry.list_tools() if t.read_only}
+            plan_allowed |= {"propose_plan", "update_plan_step"}
+            llm_tool_registry = self.tool_registry.subset(plan_allowed)
+        elif ctx.deferred_tools:
             llm_tool_registry = self.tool_registry.subset(CORE_TOOL_NAMES)
 
         runtime = AgenticRuntime(

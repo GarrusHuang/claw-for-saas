@@ -99,6 +99,7 @@ async def chat(request: ChatRequest, raw_request: Request, user: AuthUser = Depe
                 business_type=request.business_type,
                 materials=[m.model_dump() for m in request.materials],
                 event_bus=bus,
+                mode=request.mode,
             )
             effective_session_id = result.get("session_id", effective_session_id)
         except asyncio.CancelledError:

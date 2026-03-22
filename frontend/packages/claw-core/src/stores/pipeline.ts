@@ -110,6 +110,9 @@ interface PipelineState {
   // Skills loaded for this pipeline
   loadedSkills: string[];
 
+  // 3.2: Collaboration Mode
+  chatMode: 'plan' | 'execute';
+
   // 文档采纳 — 宿主表单采纳 AI 生成的文档
   adoptedDocument: GeneratedDocument | null;
 
@@ -169,6 +172,8 @@ interface PipelineState {
   setLoadedSkills: (skills: string[]) => void;
   // 文档采纳
   adoptDocument: (doc: GeneratedDocument) => void;
+  // 3.2: Collaboration Mode
+  setChatMode: (mode: 'plan' | 'execute') => void;
 }
 
 const initialState = {
@@ -210,6 +215,8 @@ const initialState = {
   fileArtifacts: [] as FileArtifact[],
   // Skills loaded
   loadedSkills: [] as string[],
+  // 3.2: Collaboration Mode
+  chatMode: 'execute' as 'plan' | 'execute',
   // 文档采纳
   adoptedDocument: null as GeneratedDocument | null,
   // Metadata
@@ -492,5 +499,8 @@ export const usePipelineStore = create<PipelineState>((set) => ({
 
   // 文档采纳
   adoptDocument: (doc) => set({ adoptedDocument: doc }),
+
+  // 3.2: Collaboration Mode
+  setChatMode: (mode) => set({ chatMode: mode }),
 
 }));

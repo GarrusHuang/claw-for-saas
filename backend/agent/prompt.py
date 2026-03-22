@@ -63,6 +63,7 @@ class PromptContext:
     mode: str = "full"
     tool_summaries: list[ToolSummary] = field(default_factory=list)
     deferred_tool_count: int = 0  # 2.3: 延迟加载的工具数量
+    chat_mode: str = "execute"  # 3.2: plan | execute
 
 
 @dataclass
@@ -135,6 +136,7 @@ class PromptBuilder:
         mode: str = "full",
         tool_summaries: list[ToolSummary] | None = None,
         deferred_tool_count: int = 0,
+        chat_mode: str = "execute",
     ) -> str:
         """
         构建系统提示。
@@ -148,6 +150,7 @@ class PromptBuilder:
             mode: "full" | "minimal" | "none" — 控制生成哪些层
             tool_summaries: 工具摘要列表, 用于生成 <tools> 标签
             deferred_tool_count: 延迟加载的工具数量 (2.3)
+            chat_mode: "plan" | "execute" — 3.2 Collaboration Mode
         """
         ctx = PromptContext(
             skill_knowledge=skill_knowledge,
@@ -158,6 +161,7 @@ class PromptBuilder:
             mode=mode,
             tool_summaries=tool_summaries or [],
             deferred_tool_count=deferred_tool_count,
+            chat_mode=chat_mode,
         )
 
         allowed_layers = PROMPT_MODE_LAYERS.get(mode, set(PromptLayer))
@@ -379,9 +383,21 @@ class PromptBuilder:
     def _build_plan_guidance_section(_ctx: PromptContext) -> str:
         from core.context import current_request
 
+        # 3.2: Plan 模式引导
+        plan_mode_prefix = ""
+        if _ctx.chat_mode == "plan":
+            plan_mode_prefix = (
+                "你当前处于【分析规划模式】。\n"
+                "规则：\n"
+                "1. 只能使用只读查询工具分析情况，不能执行修改操作\n"
+                "2. 分析完成后，必须调用 propose_plan 提出执行计划\n"
+                "3. 用户确认计划后会切换到执行模式\n\n"
+            )
+
         base = (
             "\n<plan_guidance>\n"
-            "你拥有 propose_plan 和 update_plan_step 两个进度管理工具。\n\n"
+            + plan_mode_prefix
+            + "你拥有 propose_plan 和 update_plan_step 两个进度管理工具。\n\n"
             "使用规则：\n"
             "- 一步能完成的简单任务 → 直接调工具，不需要 plan\n"
             "- 需要多个步骤的任务 → 先 propose_plan 记录步骤，然后立即执行\n"

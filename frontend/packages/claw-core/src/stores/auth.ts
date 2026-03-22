@@ -1,7 +1,8 @@
 /**
- * Auth Store — JWT token 管理 + 登录状态。
+ * Auth Store — JWT token 管理 + 登录状态 + 自动刷新。
  *
- * F3: 配合 A1 后端认证，前端 token 管理 + 自动刷新。
+ * F3: 配合 A1 后端认证，前端 token 管理。
+ * 4.4: Token 自动刷新 — 到期前 80% 时间自动调 /api/auth/refresh。
  */
 
 import { create } from 'zustand';
@@ -27,12 +28,36 @@ export interface AuthState {
   logout: () => void;
   /** 从 localStorage 恢复 */
   restore: () => void;
+  /** 刷新 token */
+  refreshToken: () => Promise<boolean>;
   /** 是否已认证 */
   isAuthenticated: boolean;
 }
 
 const TOKEN_KEY = 'claw_auth_token';
 const USER_KEY = 'claw_auth_user';
+
+/** 刷新定时器 ID */
+let _refreshTimerId: ReturnType<typeof setTimeout> | null = null;
+
+function _clearRefreshTimer(): void {
+  if (_refreshTimerId !== null) {
+    clearTimeout(_refreshTimerId);
+    _refreshTimerId = null;
+  }
+}
+
+function _startRefreshTimer(expiresAt: number, getState: () => AuthState): void {
+  _clearRefreshTimer();
+  const now = Date.now();
+  const ttl = expiresAt - now;
+  if (ttl <= 0) return;
+  // 在 80% 过期时间点刷新，最低 60s
+  const delay = Math.max(ttl * 0.8, 60_000);
+  _refreshTimerId = setTimeout(() => {
+    getState().refreshToken();
+  }, delay);
+}
 
 /** 同步从 localStorage 恢复初始状态，避免首帧闪登录页 */
 function getInitialAuthState() {
@@ -51,7 +76,7 @@ function getInitialAuthState() {
 
 const _initial = getInitialAuthState();
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   token: _initial?.token ?? null,
   userId: _initial?.userId ?? null,
   tenantId: _initial?.tenantId ?? null,
@@ -98,6 +123,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: true,
       });
 
+      _startRefreshTimer(expiresAt, get);
+
       return true;
     } catch (e) {
       set({ loading: false, error: e instanceof Error ? e.message : 'Network error' });
@@ -106,6 +133,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
+    _clearRefreshTimer();
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     set({ token: null, userId: null, tenantId: null, expiresAt: null, error: null, isAuthenticated: false });
@@ -137,10 +165,68 @@ export const useAuthStore = create<AuthState>((set) => ({
         expiresAt: user.expiresAt,
         isAuthenticated: true,
       });
+
+      _startRefreshTimer(user.expiresAt, get);
     } catch {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
       set({ token: null, userId: null, tenantId: null, expiresAt: null, isAuthenticated: false });
     }
   },
+
+  refreshToken: async () => {
+    const state = get();
+    if (!state.token) {
+      get().logout();
+      return false;
+    }
+    // Already expired
+    if (state.expiresAt && Date.now() > state.expiresAt) {
+      get().logout();
+      return false;
+    }
+
+    try {
+      const baseUrl = getAIConfig().aiBaseUrl;
+      const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`,
+        },
+      });
+
+      if (!res.ok) {
+        get().logout();
+        return false;
+      }
+
+      const data = await res.json();
+      const expiresAt = Date.now() + (data.expires_in || 86400) * 1000;
+
+      // Update store + localStorage
+      localStorage.setItem(TOKEN_KEY, data.token);
+      localStorage.setItem(USER_KEY, JSON.stringify({
+        userId: data.user_id || state.userId,
+        tenantId: data.tenant_id || state.tenantId,
+        expiresAt,
+      }));
+
+      set({
+        token: data.token,
+        expiresAt,
+      });
+
+      _startRefreshTimer(expiresAt, get);
+      return true;
+    } catch {
+      get().logout();
+      return false;
+    }
+  },
 }));
+
+// Start refresh timer on initial load if we have a valid token
+if (_initial?.expiresAt) {
+  _startRefreshTimer(_initial.expiresAt, useAuthStore.getState);
+}

@@ -31,18 +31,7 @@ let _refreshing: Promise<boolean> | null = null;
 async function _tryRefreshToken(): Promise<boolean> {
   try {
     const { useAuthStore } = await import('../stores/auth.ts');
-    const state = useAuthStore.getState();
-    // 如果有 refresh 逻辑 (通过 getAuthToken 动态获取)
-    const config = getAIConfig();
-    if (config.getAuthToken) {
-      const newToken = await config.getAuthToken();
-      if (newToken && newToken !== state.token) {
-        return true; // getAuthToken 已返回新 token
-      }
-    }
-    // 无法刷新 → 登出
-    state.logout();
-    return false;
+    return await useAuthStore.getState().refreshToken();
   } catch {
     return false;
   }

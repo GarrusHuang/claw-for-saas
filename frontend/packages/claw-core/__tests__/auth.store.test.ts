@@ -247,4 +247,127 @@ describe('useAuthStore', () => {
       expect(useAuthStore.getState().isAuthenticated).toBe(false);
     });
   });
+
+  // ─── Token Refresh (4.4) ───
+
+  describe('refreshToken', () => {
+    it('success — store + localStorage updated', async () => {
+      // Setup authenticated state
+      useAuthStore.setState({
+        token: 'old-token',
+        userId: 'U1',
+        tenantId: 'T1',
+        expiresAt: Date.now() + 3600_000,
+        isAuthenticated: true,
+      });
+      storage[TOKEN_KEY] = 'old-token';
+      storage[USER_KEY] = JSON.stringify({ userId: 'U1', tenantId: 'T1', expiresAt: Date.now() + 3600_000 });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          token: 'new-token',
+          user_id: 'U1',
+          tenant_id: 'T1',
+          expires_in: 7200,
+        }),
+      });
+
+      const result = await useAuthStore.getState().refreshToken();
+
+      expect(result).toBe(true);
+      expect(useAuthStore.getState().token).toBe('new-token');
+      expect(mockLocalStorage.setItem).toHaveBeenCalledWith(TOKEN_KEY, 'new-token');
+    });
+
+    it('401 response — triggers logout', async () => {
+      useAuthStore.setState({
+        token: 'expired-tok',
+        userId: 'U1',
+        tenantId: 'T1',
+        expiresAt: Date.now() + 3600_000,
+        isAuthenticated: true,
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      });
+
+      const result = await useAuthStore.getState().refreshToken();
+
+      expect(result).toBe(false);
+      expect(useAuthStore.getState().token).toBeNull();
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    });
+
+    it('network error — triggers logout', async () => {
+      useAuthStore.setState({
+        token: 'tok',
+        userId: 'U1',
+        tenantId: 'T1',
+        expiresAt: Date.now() + 3600_000,
+        isAuthenticated: true,
+      });
+
+      mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+      const result = await useAuthStore.getState().refreshToken();
+
+      expect(result).toBe(false);
+      expect(useAuthStore.getState().token).toBeNull();
+    });
+
+    it('no token — returns false', async () => {
+      const result = await useAuthStore.getState().refreshToken();
+      expect(result).toBe(false);
+    });
+
+    it('login starts refresh timer', async () => {
+      vi.useFakeTimers();
+      try {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            token: 'jwt-timer',
+            user_id: 'U1',
+            tenant_id: 'T1',
+            expires_in: 100, // 100s
+          }),
+        });
+
+        await useAuthStore.getState().login('u', 'p');
+
+        // Timer should be set (at 80% of 100s = 80s = 80000ms)
+        expect(vi.getTimerCount()).toBeGreaterThanOrEqual(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('logout clears refresh timer', async () => {
+      vi.useFakeTimers();
+      try {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            token: 'jwt-clear',
+            user_id: 'U1',
+            tenant_id: 'T1',
+            expires_in: 3600,
+          }),
+        });
+
+        await useAuthStore.getState().login('u', 'p');
+        const timersBefore = vi.getTimerCount();
+        expect(timersBefore).toBeGreaterThanOrEqual(1);
+
+        useAuthStore.getState().logout();
+        // After logout, timers should be cleared
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

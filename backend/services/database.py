@@ -18,6 +18,7 @@ import hashlib
 import logging
 import secrets
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -121,139 +122,162 @@ class DatabaseService:
     def __init__(self, db_path: str = "data/claw.db") -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()
         self._init_db()
         self._run_migrations()
 
     def _get_conn(self) -> sqlite3.Connection:
+        """获取线程本地 SQLite 连接 (复用，PRAGMA 调优)。"""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._local.conn = None
+
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-8000")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        self._local.conn = conn
         return conn
+
+    def close_all(self) -> None:
+        """关闭当前线程的数据库连接。"""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
 
     def _init_db(self) -> None:
         """初始化表结构。"""
         conn = self._get_conn()
-        try:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS tenants (
-                    tenant_id   TEXT PRIMARY KEY,
-                    name        TEXT NOT NULL,
-                    status      TEXT NOT NULL DEFAULT 'active',
-                    max_users   INTEGER NOT NULL DEFAULT 100,
-                    created_at  REAL NOT NULL
-                );
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS tenants (
+                tenant_id   TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'active',
+                max_users   INTEGER NOT NULL DEFAULT 100,
+                created_at  REAL NOT NULL
+            );
 
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id       TEXT NOT NULL,
-                    tenant_id     TEXT NOT NULL,
-                    username      TEXT NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    roles         TEXT NOT NULL DEFAULT '[]',
-                    status        TEXT NOT NULL DEFAULT 'active',
-                    created_at    REAL NOT NULL,
-                    PRIMARY KEY (tenant_id, user_id),
-                    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id),
-                    UNIQUE (tenant_id, username)
-                );
+            CREATE TABLE IF NOT EXISTS users (
+                user_id       TEXT NOT NULL,
+                tenant_id     TEXT NOT NULL,
+                username      TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                roles         TEXT NOT NULL DEFAULT '[]',
+                status        TEXT NOT NULL DEFAULT 'active',
+                created_at    REAL NOT NULL,
+                PRIMARY KEY (tenant_id, user_id),
+                FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id),
+                UNIQUE (tenant_id, username)
+            );
 
-                CREATE TABLE IF NOT EXISTS api_keys (
-                    key_id      TEXT PRIMARY KEY,
-                    tenant_id   TEXT NOT NULL,
-                    key_hash    TEXT NOT NULL UNIQUE,
-                    description TEXT NOT NULL DEFAULT '',
-                    status      TEXT NOT NULL DEFAULT 'active',
-                    created_at  REAL NOT NULL,
-                    expires_at  REAL,
-                    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
-                );
+            CREATE TABLE IF NOT EXISTS api_keys (
+                key_id      TEXT PRIMARY KEY,
+                tenant_id   TEXT NOT NULL,
+                key_hash    TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                status      TEXT NOT NULL DEFAULT 'active',
+                created_at  REAL NOT NULL,
+                expires_at  REAL,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
+            );
 
-                -- A10: 用量统计 — 原始 pipeline 执行记录
-                CREATE TABLE IF NOT EXISTS usage_events (
-                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id         TEXT NOT NULL,
-                    user_id           TEXT NOT NULL,
-                    session_id        TEXT NOT NULL,
-                    business_type     TEXT NOT NULL DEFAULT 'general_chat',
-                    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
-                    completion_tokens INTEGER NOT NULL DEFAULT 0,
-                    total_tokens      INTEGER NOT NULL DEFAULT 0,
-                    tool_call_count   INTEGER NOT NULL DEFAULT 0,
-                    iterations        INTEGER NOT NULL DEFAULT 0,
-                    duration_ms       REAL NOT NULL DEFAULT 0.0,
-                    status            TEXT NOT NULL DEFAULT 'success',
-                    model             TEXT NOT NULL DEFAULT '',
-                    tool_names        TEXT NOT NULL DEFAULT '[]',
-                    created_at        REAL NOT NULL,
-                    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
-                );
-                CREATE INDEX IF NOT EXISTS idx_usage_tenant_date
-                    ON usage_events(tenant_id, created_at);
-                CREATE INDEX IF NOT EXISTS idx_usage_user_date
-                    ON usage_events(tenant_id, user_id, created_at);
+            -- A10: 用量统计 — 原始 pipeline 执行记录
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id         TEXT NOT NULL,
+                user_id           TEXT NOT NULL,
+                session_id        TEXT NOT NULL,
+                business_type     TEXT NOT NULL DEFAULT 'general_chat',
+                prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens      INTEGER NOT NULL DEFAULT 0,
+                tool_call_count   INTEGER NOT NULL DEFAULT 0,
+                iterations        INTEGER NOT NULL DEFAULT 0,
+                duration_ms       REAL NOT NULL DEFAULT 0.0,
+                status            TEXT NOT NULL DEFAULT 'success',
+                model             TEXT NOT NULL DEFAULT '',
+                tool_names        TEXT NOT NULL DEFAULT '[]',
+                created_at        REAL NOT NULL,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_tenant_date
+                ON usage_events(tenant_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_user_date
+                ON usage_events(tenant_id, user_id, created_at);
 
-                -- A10: 用量统计 — 日汇总（UPSERT 更新）
-                CREATE TABLE IF NOT EXISTS usage_daily (
-                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id               TEXT NOT NULL,
-                    user_id                 TEXT NOT NULL,
-                    date                    TEXT NOT NULL,
-                    total_requests          INTEGER NOT NULL DEFAULT 0,
-                    total_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
-                    total_completion_tokens INTEGER NOT NULL DEFAULT 0,
-                    total_tokens            INTEGER NOT NULL DEFAULT 0,
-                    total_tool_calls        INTEGER NOT NULL DEFAULT 0,
-                    total_duration_ms       REAL NOT NULL DEFAULT 0.0,
-                    success_count           INTEGER NOT NULL DEFAULT 0,
-                    failed_count            INTEGER NOT NULL DEFAULT 0,
-                    UNIQUE(tenant_id, user_id, date)
-                );
-                CREATE INDEX IF NOT EXISTS idx_daily_tenant_date
-                    ON usage_daily(tenant_id, date);
-            """)
-            conn.commit()
-            logger.info(f"Database initialized: {self.db_path}")
-        finally:
-            conn.close()
+            -- A10: 用量统计 — 日汇总（UPSERT 更新）
+            CREATE TABLE IF NOT EXISTS usage_daily (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id               TEXT NOT NULL,
+                user_id                 TEXT NOT NULL,
+                date                    TEXT NOT NULL,
+                total_requests          INTEGER NOT NULL DEFAULT 0,
+                total_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+                total_completion_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens            INTEGER NOT NULL DEFAULT 0,
+                total_tool_calls        INTEGER NOT NULL DEFAULT 0,
+                total_duration_ms       REAL NOT NULL DEFAULT 0.0,
+                success_count           INTEGER NOT NULL DEFAULT 0,
+                failed_count            INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(tenant_id, user_id, date)
+            );
+            CREATE INDEX IF NOT EXISTS idx_daily_tenant_date
+                ON usage_daily(tenant_id, date);
+        """)
+        conn.commit()
+        logger.info(f"Database initialized: {self.db_path}")
 
     def _run_migrations(self) -> None:
         """运行未执行的 schema 迁移。"""
         conn = self._get_conn()
-        try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS schema_version (
-                    version INTEGER NOT NULL DEFAULT 0
-                )
-            """)
-            row = conn.execute("SELECT version FROM schema_version").fetchone()
-            if row is None:
-                conn.execute("INSERT INTO schema_version (version) VALUES (?)",
-                             (_CURRENT_SCHEMA_VERSION,))
-                conn.commit()
-                return  # 首次初始化，无需迁移
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        row = conn.execute("SELECT version FROM schema_version").fetchone()
+        if row is None:
+            conn.execute("INSERT INTO schema_version (version) VALUES (?)",
+                         (_CURRENT_SCHEMA_VERSION,))
+            conn.commit()
+            return  # 首次初始化，无需迁移
 
-            current = row["version"]
-            applied = 0
-            for ver, sql in _MIGRATIONS:
-                if ver > current:
-                    try:
-                        conn.executescript(sql)
-                        applied += 1
-                    except Exception as e:
-                        logger.error(f"Migration v{ver} failed: {e}")
-                        raise
+        current = row["version"]
+        applied = 0
+        for ver, sql in _MIGRATIONS:
+            if ver > current:
+                try:
+                    conn.executescript(sql)
+                    applied += 1
+                except Exception as e:
+                    logger.error(f"Migration v{ver} failed: {e}")
+                    raise
 
-            if applied:
-                conn.execute("UPDATE schema_version SET version = ?",
-                             (_CURRENT_SCHEMA_VERSION,))
-                conn.commit()
-                logger.info(f"Applied {applied} database migrations (now v{_CURRENT_SCHEMA_VERSION})")
-            elif current < _CURRENT_SCHEMA_VERSION:
-                conn.execute("UPDATE schema_version SET version = ?",
-                             (_CURRENT_SCHEMA_VERSION,))
-                conn.commit()
-        finally:
-            conn.close()
+        if applied:
+            conn.execute("UPDATE schema_version SET version = ?",
+                         (_CURRENT_SCHEMA_VERSION,))
+            conn.commit()
+            logger.info(f"Applied {applied} database migrations (now v{_CURRENT_SCHEMA_VERSION})")
+        elif current < _CURRENT_SCHEMA_VERSION:
+            conn.execute("UPDATE schema_version SET version = ?",
+                         (_CURRENT_SCHEMA_VERSION,))
+            conn.commit()
 
     # ── Tenant CRUD ──
 
@@ -274,32 +298,24 @@ class DatabaseService:
             )
         except sqlite3.IntegrityError:
             raise ValueError(f"Tenant already exists: {tenant_id}")
-        finally:
-            conn.close()
 
     def get_tenant(self, tenant_id: str) -> TenantRecord | None:
         """获取租户。"""
         conn = self._get_conn()
-        try:
-            row = conn.execute(
-                "SELECT * FROM tenants WHERE tenant_id = ?", (tenant_id,)
-            ).fetchone()
-            if not row:
-                return None
-            return TenantRecord(**dict(row))
-        finally:
-            conn.close()
+        row = conn.execute(
+            "SELECT * FROM tenants WHERE tenant_id = ?", (tenant_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return TenantRecord(**dict(row))
 
     def list_tenants(self) -> list[TenantRecord]:
         """列出所有租户。"""
         conn = self._get_conn()
-        try:
-            rows = conn.execute(
-                "SELECT * FROM tenants ORDER BY created_at"
-            ).fetchall()
-            return [TenantRecord(**dict(r)) for r in rows]
-        finally:
-            conn.close()
+        rows = conn.execute(
+            "SELECT * FROM tenants ORDER BY created_at"
+        ).fetchall()
+        return [TenantRecord(**dict(r)) for r in rows]
 
     def update_tenant(
         self, tenant_id: str, name: str | None = None, status: str | None = None, max_users: int | None = None
@@ -320,26 +336,20 @@ class DatabaseService:
             return False
         params.append(tenant_id)
         conn = self._get_conn()
-        try:
-            cursor = conn.execute(
-                f"UPDATE tenants SET {', '.join(updates)} WHERE tenant_id = ?", params
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-        finally:
-            conn.close()
+        cursor = conn.execute(
+            f"UPDATE tenants SET {', '.join(updates)} WHERE tenant_id = ?", params
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def delete_tenant(self, tenant_id: str) -> bool:
         """删除租户（级联删除用户和 API Key）。"""
         conn = self._get_conn()
-        try:
-            conn.execute("DELETE FROM api_keys WHERE tenant_id = ?", (tenant_id,))
-            conn.execute("DELETE FROM users WHERE tenant_id = ?", (tenant_id,))
-            cursor = conn.execute("DELETE FROM tenants WHERE tenant_id = ?", (tenant_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-        finally:
-            conn.close()
+        conn.execute("DELETE FROM api_keys WHERE tenant_id = ?", (tenant_id,))
+        conn.execute("DELETE FROM users WHERE tenant_id = ?", (tenant_id,))
+        cursor = conn.execute("DELETE FROM tenants WHERE tenant_id = ?", (tenant_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
     # ── User CRUD ──
 
@@ -377,63 +387,52 @@ class DatabaseService:
             if "UNIQUE" in str(e) and "username" in str(e):
                 raise ValueError(f"Username already exists in tenant {tenant_id}: {username}")
             raise ValueError(f"User already exists: {tenant_id}/{user_id}")
-        finally:
-            conn.close()
 
     def get_user(self, tenant_id: str, user_id: str) -> UserRecord | None:
         """获取用户。"""
         import json
 
         conn = self._get_conn()
-        try:
-            row = conn.execute(
-                "SELECT * FROM users WHERE tenant_id = ? AND user_id = ?",
-                (tenant_id, user_id),
-            ).fetchone()
-            if not row:
-                return None
-            d = dict(row)
-            d["roles"] = json.loads(d["roles"])
-            return UserRecord(**d)
-        finally:
-            conn.close()
+        row = conn.execute(
+            "SELECT * FROM users WHERE tenant_id = ? AND user_id = ?",
+            (tenant_id, user_id),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["roles"] = json.loads(d["roles"])
+        return UserRecord(**d)
 
     def get_user_by_username(self, tenant_id: str, username: str) -> UserRecord | None:
         """按用户名查找用户。"""
         import json
 
         conn = self._get_conn()
-        try:
-            row = conn.execute(
-                "SELECT * FROM users WHERE tenant_id = ? AND username = ?",
-                (tenant_id, username),
-            ).fetchone()
-            if not row:
-                return None
-            d = dict(row)
-            d["roles"] = json.loads(d["roles"])
-            return UserRecord(**d)
-        finally:
-            conn.close()
+        row = conn.execute(
+            "SELECT * FROM users WHERE tenant_id = ? AND username = ?",
+            (tenant_id, username),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["roles"] = json.loads(d["roles"])
+        return UserRecord(**d)
 
     def list_users(self, tenant_id: str) -> list[UserRecord]:
         """列出租户下所有用户。"""
         import json
 
         conn = self._get_conn()
-        try:
-            rows = conn.execute(
-                "SELECT * FROM users WHERE tenant_id = ? ORDER BY created_at",
-                (tenant_id,),
-            ).fetchall()
-            results = []
-            for r in rows:
-                d = dict(r)
-                d["roles"] = json.loads(d["roles"])
-                results.append(UserRecord(**d))
-            return results
-        finally:
-            conn.close()
+        rows = conn.execute(
+            "SELECT * FROM users WHERE tenant_id = ? ORDER BY created_at",
+            (tenant_id,),
+        ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["roles"] = json.loads(d["roles"])
+            results.append(UserRecord(**d))
+        return results
 
     def update_user(
         self,
@@ -461,28 +460,22 @@ class DatabaseService:
             return False
         params.extend([tenant_id, user_id])
         conn = self._get_conn()
-        try:
-            cursor = conn.execute(
-                f"UPDATE users SET {', '.join(updates)} WHERE tenant_id = ? AND user_id = ?",
-                params,
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-        finally:
-            conn.close()
+        cursor = conn.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE tenant_id = ? AND user_id = ?",
+            params,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def delete_user(self, tenant_id: str, user_id: str) -> bool:
         """删除用户。"""
         conn = self._get_conn()
-        try:
-            cursor = conn.execute(
-                "DELETE FROM users WHERE tenant_id = ? AND user_id = ?",
-                (tenant_id, user_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-        finally:
-            conn.close()
+        cursor = conn.execute(
+            "DELETE FROM users WHERE tenant_id = ? AND user_id = ?",
+            (tenant_id, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def authenticate_user(self, tenant_id: str, username: str, password: str) -> UserRecord | None:
         """
@@ -504,16 +497,13 @@ class DatabaseService:
             try:
                 new_hash = hash_password(password)
                 conn = self._get_conn()
-                try:
-                    conn.execute(
-                        "UPDATE users SET password_hash = ? WHERE tenant_id = ? AND user_id = ?",
-                        (new_hash, tenant_id, user.user_id),
-                    )
-                    conn.commit()
-                    user.password_hash = new_hash
-                    logger.info(f"Auto-upgraded password hash for user {username} (tenant={tenant_id})")
-                finally:
-                    conn.close()
+                conn.execute(
+                    "UPDATE users SET password_hash = ? WHERE tenant_id = ? AND user_id = ?",
+                    (new_hash, tenant_id, user.user_id),
+                )
+                conn.commit()
+                user.password_hash = new_hash
+                logger.info(f"Auto-upgraded password hash for user {username} (tenant={tenant_id})")
             except Exception as e:
                 logger.warning(f"Failed to auto-upgrade password hash: {e}")
 
@@ -540,80 +530,65 @@ class DatabaseService:
         expires_at = (now + expires_in_days * 86400) if expires_in_days else None
 
         conn = self._get_conn()
-        try:
-            conn.execute(
-                "INSERT INTO api_keys (key_id, tenant_id, key_hash, description, created_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (key_id, tenant_id, k_hash, description, now, expires_at),
-            )
-            conn.commit()
-            record = ApiKeyRecord(
-                key_id=key_id,
-                tenant_id=tenant_id,
-                key_hash=k_hash,
-                description=description,
-                created_at=now,
-                expires_at=expires_at,
-            )
-            return raw_key, record
-        finally:
-            conn.close()
+        conn.execute(
+            "INSERT INTO api_keys (key_id, tenant_id, key_hash, description, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (key_id, tenant_id, k_hash, description, now, expires_at),
+        )
+        conn.commit()
+        record = ApiKeyRecord(
+            key_id=key_id,
+            tenant_id=tenant_id,
+            key_hash=k_hash,
+            description=description,
+            created_at=now,
+            expires_at=expires_at,
+        )
+        return raw_key, record
 
     def verify_api_key(self, raw_key: str) -> ApiKeyRecord | None:
         """验证 API Key，返回记录或 None。"""
         k_hash = hash_api_key(raw_key)
         conn = self._get_conn()
-        try:
-            row = conn.execute(
-                "SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'",
-                (k_hash,),
-            ).fetchone()
-            if not row:
-                return None
-            record = ApiKeyRecord(**dict(row))
-            # 检查过期
-            if record.expires_at and time.time() > record.expires_at:
-                return None
-            return record
-        finally:
-            conn.close()
+        row = conn.execute(
+            "SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'",
+            (k_hash,),
+        ).fetchone()
+        if not row:
+            return None
+        record = ApiKeyRecord(**dict(row))
+        # 检查过期
+        if record.expires_at and time.time() > record.expires_at:
+            return None
+        return record
 
     def list_api_keys(self, tenant_id: str) -> list[ApiKeyRecord]:
         """列出租户的所有 API Key。"""
         conn = self._get_conn()
-        try:
-            rows = conn.execute(
-                "SELECT * FROM api_keys WHERE tenant_id = ? ORDER BY created_at",
-                (tenant_id,),
-            ).fetchall()
-            return [ApiKeyRecord(**dict(r)) for r in rows]
-        finally:
-            conn.close()
+        rows = conn.execute(
+            "SELECT * FROM api_keys WHERE tenant_id = ? ORDER BY created_at",
+            (tenant_id,),
+        ).fetchall()
+        return [ApiKeyRecord(**dict(r)) for r in rows]
 
     def revoke_api_key(self, key_id: str) -> bool:
         """撤销 API Key。"""
         conn = self._get_conn()
-        try:
-            cursor = conn.execute(
-                "UPDATE api_keys SET status = 'revoked' WHERE key_id = ?",
-                (key_id,),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-        finally:
-            conn.close()
+        cursor = conn.execute(
+            "UPDATE api_keys SET status = 'revoked' WHERE key_id = ?",
+            (key_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def delete_api_key(self, key_id: str) -> bool:
         """删除 API Key。"""
         conn = self._get_conn()
-        try:
-            cursor = conn.execute(
-                "DELETE FROM api_keys WHERE key_id = ?", (key_id,)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-        finally:
-            conn.close()
+        cursor = conn.execute(
+            "DELETE FROM api_keys WHERE key_id = ?", (key_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     # ── Bootstrap ──
 

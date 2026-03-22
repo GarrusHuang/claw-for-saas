@@ -102,7 +102,7 @@ backend/
     response.py        — API 响应模型
     usage.py           — 用量数据模型
   plugins/             — 插件目录
-  tests/               — 65+ 测试文件
+  tests/               — 73+ 测试文件
   data/                — 运行时数据 (gitignored)
 
 frontend/

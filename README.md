@@ -10,7 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-2050+_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-2070+_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache&logoColor=white)](LICENSE)
 
 </div>
@@ -41,6 +41,7 @@
 | **四阶段上下文压缩** | 截断 → 摘要 → 元数据 → 逐条删 + 1.2x token 安全边距 + 动态工具结果上限 |
 | **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
 | **WebSocket 实时推送** | 15+ 事件类型，实时展示思考过程和工具执行，指数退避重连 |
+| **Collaboration Mode** | plan 模式 (只读分析 + 提出计划) / execute 模式 (全能力执行)，复杂任务先看计划再确认 |
 | **运行时安全围栏** | 文件沙箱 · 命令安全策略 · Secrets 脱敏 · bcrypt · SSRF 检查 · 速率限制 · PII 检测 |
 | **OpenTelemetry 追踪** | opt-in 分布式追踪，4 个关键 span (gateway/runtime/tool/llm)，禁用时零开销 |
 | **MCP 标准工具接口** | 条件注册（mcp_enabled=True），6 个标准工具，HTTP 转发到宿主 |
@@ -301,10 +302,10 @@ request_input      → Agent 请求用户输入
 ## 测试
 
 ```bash
-# 后端单元测试（1855 用例）
+# 后端单元测试（1879 用例）
 cd backend && python3 -m pytest tests/ -m "not llm" -v
 
-# 后端 + LLM 集成测试（1884 用例，需 LLM 服务在线）
+# 后端 + LLM 集成测试（1908 用例，需 LLM 服务在线）
 cd backend && python3 -m pytest tests/ -v
 
 # 前端单元测试（153 用例）
@@ -316,7 +317,7 @@ cd frontend && npx playwright test
 
 | 层级 | 测试数 | 覆盖范围 |
 |:-----|:-------|:---------|
-| 后端 Unit | 1,855 | 71 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
+| 后端 Unit | 1,879 | 73 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
 | 后端 LLM 集成 | 29 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
 | 前端 Unit | 153 | claw-core (66) · claw-ui (81) · app (6) |
 | 前端 E2E | 2 specs | Playwright 关键用户流程 |

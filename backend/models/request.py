@@ -6,7 +6,7 @@ A2: Removed BusinessContext (MCP pull mode) and plan_mode (Plan simplification).
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class MaterialInfo(BaseModel):
@@ -31,3 +31,14 @@ class ChatRequest(BaseModel):
         default_factory=list,
         description="Uploaded materials",
     )
+    mode: str = Field(
+        "execute",
+        description="Agent mode: plan (read-only analysis) | execute (full capability)",
+    )
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        if v not in ("plan", "execute"):
+            raise ValueError(f"mode must be 'plan' or 'execute', got '{v}'")
+        return v
