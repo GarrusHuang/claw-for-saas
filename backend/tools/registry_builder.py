@@ -37,8 +37,10 @@ def build_shared_registry() -> ToolRegistry:
     """
     from tools.builtin.calculator import calculator_registry
     from tools.builtin.skill_reference import skill_reference_registry
+    from tools.builtin.search_tools import search_tools_registry
 
     merged = calculator_registry.merge(skill_reference_registry)
+    merged = merged.merge(search_tools_registry)
     return merged
 
 

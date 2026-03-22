@@ -46,7 +46,21 @@ def get_llm_client() -> LLMGatewayClient:
         default_top_p=s.llm_default_top_p,
         enable_thinking=s.llm_enable_thinking,
     )
-    client = LLMGatewayClient(config)
+    fallback_config = None
+    if s.llm_fallback_model:
+        fallback_config = LLMClientConfig(
+            base_url=s.llm_fallback_base_url or s.llm_base_url,
+            model=s.llm_fallback_model,
+            api_key=s.llm_fallback_api_key or s.llm_api_key,
+            timeout_s=s.llm_timeout_s,
+            max_retries=0,  # 只试一次
+            default_temperature=s.llm_default_temperature,
+            default_top_p=s.llm_default_top_p,
+            enable_thinking=s.llm_enable_thinking,
+        )
+        logger.info(f"LLM fallback configured: {s.llm_fallback_model}")
+
+    client = LLMGatewayClient(config, fallback_config=fallback_config)
     _llm_client_instance = client
     return client
 

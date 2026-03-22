@@ -105,6 +105,31 @@ async def lifespan(app: FastAPI):
         file_cleanup_task = asyncio.create_task(_file_cleanup_loop())
         logger.info(f"File cleanup enabled: retention={s.file_retention_days} days, interval=6h")
 
+    # Start session cleanup background task
+    session_cleanup_task = None
+    if s.session_retention_days > 0:
+        async def _session_cleanup_loop():
+            """启动立即执行一次，之后每 6 小时清理过期的会话文件。"""
+            first_run = True
+            while True:
+                try:
+                    if not first_run:
+                        await asyncio.sleep(6 * 3600)
+                    first_run = False
+                    deleted = sm.cleanup_expired_sessions(s.session_retention_days)
+                    if deleted:
+                        logger.info(f"Session cleanup: removed {deleted} expired sessions")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"Session cleanup error: {e}")
+                    if first_run:
+                        first_run = False
+                    await asyncio.sleep(60)
+
+        session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
+        logger.info(f"Session cleanup enabled: retention={s.session_retention_days} days, interval=6h")
+
     # Start memory merge background task
     memory_merge_task = None
     if s.memory_auto_extract_enabled and s.memory_merge_interval_hours > 0:
@@ -143,6 +168,14 @@ async def lifespan(app: FastAPI):
         memory_merge_task.cancel()
         try:
             await memory_merge_task
+        except asyncio.CancelledError:
+            pass
+
+    # Stop session cleanup
+    if session_cleanup_task and not session_cleanup_task.done():
+        session_cleanup_task.cancel()
+        try:
+            await session_cleanup_task
         except asyncio.CancelledError:
             pass
 

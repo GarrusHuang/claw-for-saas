@@ -78,8 +78,13 @@ class LLMGatewayClient:
     - Thinking mode support (configurable)
     """
 
-    def __init__(self, config: LLMClientConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: LLMClientConfig | None = None,
+        fallback_config: LLMClientConfig | None = None,
+    ) -> None:
         self.config = config or LLMClientConfig()
+        self._fallback_config = fallback_config
         self._client: httpx.AsyncClient | None = None
         self._cumulative_usage = TokenUsage()
         self._call_count = 0
@@ -224,6 +229,49 @@ class LLMGatewayClient:
                     await asyncio.sleep(delay)
                     continue
 
+        # ── Fallback: 主模型所有重试耗尽后，尝试备用模型 ──
+        if self._fallback_config and last_error:
+            from core.errors import classify_error, ErrorCategory
+            import re as _re
+
+            # 从错误消息推断类别 (提取嵌入的 HTTP 状态码)
+            error_msg = str(last_error)
+            _status_match = _re.search(r"HTTP (\d{3})", error_msg)
+            _status_code = int(_status_match.group(1)) if _status_match else 0
+            category = classify_error(status_code=_status_code, error_msg=error_msg)
+
+            # 仅对可恢复类型触发 fallback
+            fallback_categories = {
+                ErrorCategory.MODEL_UNAVAILABLE,
+                ErrorCategory.OVERLOADED,
+                ErrorCategory.NETWORK,
+                ErrorCategory.LLM_ERROR,
+                ErrorCategory.RATE_LIMIT,
+            }
+
+            if category in fallback_categories:
+                logger.warning(
+                    f"Primary model failed ({category.value}), trying fallback: "
+                    f"{self._fallback_config.model}"
+                )
+                original_config = self.config
+                fallback_cfg = self._fallback_config
+                self.config = fallback_cfg
+                self._fallback_config = None  # 防止递归 fallback
+                try:
+                    result = await self.chat_completion(
+                        messages=messages, tools=tools,
+                        max_tokens=max_tokens, temperature=temperature,
+                        top_p=top_p, stream=stream, **kwargs,
+                    )
+                    result.model = f"{fallback_cfg.model} (fallback)"
+                    return result
+                except Exception:
+                    pass
+                finally:
+                    self.config = original_config
+                    self._fallback_config = fallback_cfg
+
         raise last_error or LLMClientError("All retries exhausted")
 
     async def chat_completion_stream(
@@ -265,6 +313,28 @@ class LLMGatewayClient:
                     )
                     await asyncio.sleep(delay)
                     continue
+
+                # ── Fallback for stream: 连接级失败时尝试备用模型 ──
+                if self._fallback_config:
+                    logger.warning(
+                        f"Stream primary model connection failed, trying fallback: "
+                        f"{self._fallback_config.model}"
+                    )
+                    original_config = self.config
+                    self.config = self._fallback_config
+                    try:
+                        async for chunk in self._stream_inner(
+                            messages=messages, tools=tools,
+                            max_tokens=max_tokens, temperature=temperature,
+                            **kwargs,
+                        ):
+                            yield chunk
+                        return
+                    except Exception:
+                        pass
+                    finally:
+                        self.config = original_config
+
                 raise
 
         if last_error:

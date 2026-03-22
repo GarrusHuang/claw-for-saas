@@ -80,7 +80,7 @@ backend/
     sse.py             — SSE 端点 (已迁移到 WebSocket，保留兼容)
   tools/
     registry_builder.py — 工具集组装 (shared + capability + plan + mcp)
-    builtin/           — 内置工具 (calculator/file/browser/code/apply_patch/memory/skill/plan/subagent/schedule/interaction/tool_search)
+    builtin/           — 内置工具 (calculator/file/browser/code/apply_patch/memory/skill/plan/subagent/schedule/interaction/tool_search/search_tools)
     mcp/               — MCP 标准工具接口 (条件注册)
     contrib/            — 社区贡献工具
   skills/
@@ -240,6 +240,10 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `LLM_API_KEY` — API Key (本地模型不需要)
 - `LLM_SUPPORTS_VISION` — 是否支持图片输入
 - `LLM_ENABLE_THINKING` — 启用思考模式 (vLLM thinking)
+- `LLM_FALLBACK_MODEL` — Fallback 模型名 (空=不启用)
+- `LLM_FALLBACK_BASE_URL` — Fallback LLM API 地址 (空=复用主地址)
+- `LLM_FALLBACK_API_KEY` — Fallback API Key (空=复用主 key)
+- `SESSION_RETENTION_DAYS` — 会话 JSONL 保留天数 (默认 30, 0=不清理)
 - `AGENT_MODEL_CONTEXT_WINDOW` — 模型上下文窗口大小 (默认 32000)
 - `AGENT_MAX_ITERATIONS` — ReAct 最大迭代数 (默认 25)
 - `MCP_ENABLED` — 启用 MCP 工具接口
@@ -285,6 +289,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - code: read_source_file
 - memory: recall_memory, search_memory
 - tool_search: tool_search (延迟工具搜索，工具数>30时自动启用)
+- search_tools: grep_files, list_dir (工作空间文件搜索/目录列出)
 
 **能力 (串行执行)**:
 - code: write_source_file, apply_patch, run_command

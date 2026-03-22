@@ -10,7 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-2000+_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-2050+_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache&logoColor=white)](LICENSE)
 
 </div>
@@ -33,8 +33,8 @@
 
 | 特性 | 说明 |
 |:-----|:-----|
-| **ReAct 循环引擎** | 最多 25 轮迭代，支持并行工具调用，LLM 瞬时错误自动重试 (3 次) |
-| **38 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆搜索 · 技能 · 子 Agent · 定时任务 · 工具搜索 |
+| **ReAct 循环引擎** | 最多 25 轮迭代，支持并行工具调用，LLM 自动重试 + Fallback 降级 |
+| **40 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆搜索 · 技能 · 子 Agent · 定时任务 · 工具搜索 · 文件搜索 |
 | **Tool Search 延迟加载** | 工具数超过阈值时自动切换延迟模式，prompt 只含核心工具，Agent 按需搜索 |
 | **8 层提示词架构** | Identity → Soul → Safety → Tools → Skills → Memory → Runtime → Extra |
 | **跨会话记忆** | LLM 自动提取偏好/纠正/决策 + 关键词搜索 + 合并索引 + 三层 Markdown 笔记 |
@@ -139,7 +139,7 @@ claw-for-saas/
 │   ├── agent/              # Gateway + 编排 (prompt, session, hooks, subagent, quality_gate)
 │   ├── memory/             # 三层 Markdown 记忆 (global/tenant/user)
 │   ├── tools/
-│   │   ├── builtin/        # 32 个内置工具 (含 tool_search)
+│   │   ├── builtin/        # 34 个内置工具 (含 tool_search + search_tools)
 │   │   └── mcp/            # MCP 标准工具接口
 │   ├── skills/builtin/     # 20 个内置 Skill
 │   ├── services/           # 文件 / 知识库 / 浏览器 / 用量统计
@@ -283,6 +283,8 @@ request_input      → Agent 请求用户输入
 | `MCP_ENABLED` | `False` | 启用 MCP 标准工具 |
 | `SCHEDULER_ENABLED` | `True` | 启用定时调度 |
 | `LLM_SUPPORTS_VISION` | `False` | 启用多模态 |
+| `LLM_FALLBACK_MODEL` | `""` | Fallback 模型名 (空=不启用) |
+| `SESSION_RETENTION_DAYS` | `30` | 会话文件保留天数 (0=不清理) |
 | `AGENT_TOOL_DEFERRED_THRESHOLD` | `30` | 工具延迟加载阈值 (超过则只注入核心工具) |
 | `AGENT_MAX_TOOL_RESULT_CHARS` | `0` (动态) | 工具结果上限 (0=30% 上下文窗口) |
 | `OTEL_ENABLED` | `False` | 启用 OpenTelemetry 分布式追踪 |
@@ -299,10 +301,10 @@ request_input      → Agent 请求用户输入
 ## 测试
 
 ```bash
-# 后端单元测试（1822 用例）
+# 后端单元测试（1855 用例）
 cd backend && python3 -m pytest tests/ -m "not llm" -v
 
-# 后端 + LLM 集成测试（1851 用例，需 LLM 服务在线）
+# 后端 + LLM 集成测试（1884 用例，需 LLM 服务在线）
 cd backend && python3 -m pytest tests/ -v
 
 # 前端单元测试（153 用例）
@@ -314,7 +316,7 @@ cd frontend && npx playwright test
 
 | 层级 | 测试数 | 覆盖范围 |
 |:-----|:-------|:---------|
-| 后端 Unit | 1,822 | 68 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
+| 后端 Unit | 1,855 | 71 文件 · Core / Agent / Memory / Tools / Skills / API / Services |
 | 后端 LLM 集成 | 29 | 多工具并行 · 上下文压缩 · 子 Agent · Gateway 全链路 |
 | 前端 Unit | 153 | claw-core (66) · claw-ui (81) · app (6) |
 | 前端 E2E | 2 specs | Playwright 关键用户流程 |

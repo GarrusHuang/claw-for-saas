@@ -51,6 +51,14 @@ class Settings(BaseSettings):
         default="",
         description="Fallback model when primary model is unavailable (empty=no fallback)",
     )
+    llm_fallback_base_url: str = Field(
+        default="",
+        description="Fallback LLM API base URL (空=复用主地址)",
+    )
+    llm_fallback_api_key: str = Field(
+        default="",
+        description="Fallback LLM API key (空=复用主 key)",
+    )
 
     # ─── Agent Runtime ───
     agent_max_iterations: int = Field(
@@ -182,6 +190,10 @@ class Settings(BaseSettings):
     file_retention_days: int = Field(
         default=7,
         description="用户上传的会话文件保留天数 (0=不清理)",
+    )
+    session_retention_days: int = Field(
+        default=30,
+        description="会话 JSONL 文件保留天数 (0=不清理)",
     )
 
     # ─── Skills ───

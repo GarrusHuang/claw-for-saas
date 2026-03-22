@@ -39,6 +39,12 @@
 - `page_screenshot(url)` — Take webpage screenshot (base64 PNG)
 - `page_extract_text(url)` — Extract webpage text (max 5000 chars)
 
+### Search Tools (read-only)
+- `grep_files(pattern, path?, include?, max_results?, context_lines?)` — 搜索工作空间文件内容 (正则)
+- `list_dir(path?, depth?, include?, offset?, limit?)` — 列出目录结构，含文件类型、大小、修改时间
+
+优先使用这两个工具搜索文件和目录，不要用 `run_command('grep/ls/find')`。
+
 ### Code Tools (read/write + execute)
 - `read_source_file(path, start_line?, end_line?)` — Read source code file
 - `apply_patch(patch)` — **推荐**: 增量编辑文件，只传变更部分，大幅节省 token

@@ -103,6 +103,46 @@ class SessionManager:
 
         return messages
 
+    def cleanup_expired_sessions(self, retention_days: int = 30) -> int:
+        """
+        清理过期会话 JSONL 文件。
+
+        根据首行 metadata 中的 created_at 时间戳判断是否过期。
+        同时删除对应的 .lock 文件。
+
+        Args:
+            retention_days: 保留天数 (0=不清理)
+
+        Returns:
+            删除的会话文件数量
+        """
+        if retention_days <= 0:
+            return 0
+
+        cutoff = time.time() - retention_days * 86400
+        deleted = 0
+
+        for session_file in self.base_dir.rglob("*.jsonl"):
+            try:
+                with open(session_file, "r", encoding="utf-8") as f:
+                    first_line = f.readline().strip()
+                if not first_line:
+                    continue
+                meta = json.loads(first_line)
+                created_at = meta.get("created_at", 0)
+                if created_at > 0 and created_at < cutoff:
+                    session_file.unlink()
+                    lock_file = session_file.with_suffix(".lock")
+                    if lock_file.exists():
+                        lock_file.unlink()
+                    deleted += 1
+            except Exception:
+                continue
+
+        if deleted:
+            logger.info(f"Cleaned {deleted} expired session files (retention={retention_days}d)")
+        return deleted
+
     def cleanup_orphan_locks(self, max_age_s: float = 3600) -> int:
         """
         清理孤儿 .lock 文件。

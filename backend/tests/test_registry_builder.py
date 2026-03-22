@@ -33,7 +33,7 @@ class TestBuildSharedRegistry:
 
     def test_tool_count(self):
         reg = build_shared_registry()
-        assert len(reg.get_tool_names()) == 7  # 5 calculator + 2 skill_reference (read_reference + read_skill)
+        assert len(reg.get_tool_names()) == 9  # 5 calculator + 2 skill_reference + 2 search (grep_files + list_dir)
 
 
 class TestBuildCapabilityRegistry:
@@ -122,6 +122,8 @@ class TestBuildFullRegistry:
         # Shared
         assert "arithmetic" in names
         assert "read_reference" in names
+        assert "grep_files" in names
+        assert "list_dir" in names
         # Capability
         assert "spawn_subagent" in names
         assert "save_memory" in names
