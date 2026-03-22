@@ -62,6 +62,7 @@ class PromptContext:
     session_id: str = ""
     mode: str = "full"
     tool_summaries: list[ToolSummary] = field(default_factory=list)
+    deferred_tool_count: int = 0  # 2.3: 延迟加载的工具数量
 
 
 @dataclass
@@ -133,6 +134,7 @@ class PromptBuilder:
         session_id: str = "",
         mode: str = "full",
         tool_summaries: list[ToolSummary] | None = None,
+        deferred_tool_count: int = 0,
     ) -> str:
         """
         构建系统提示。
@@ -145,6 +147,7 @@ class PromptBuilder:
             session_id: L6 会话 ID
             mode: "full" | "minimal" | "none" — 控制生成哪些层
             tool_summaries: 工具摘要列表, 用于生成 <tools> 标签
+            deferred_tool_count: 延迟加载的工具数量 (2.3)
         """
         ctx = PromptContext(
             skill_knowledge=skill_knowledge,
@@ -154,6 +157,7 @@ class PromptBuilder:
             session_id=session_id,
             mode=mode,
             tool_summaries=tool_summaries or [],
+            deferred_tool_count=deferred_tool_count,
         )
 
         allowed_layers = PROMPT_MODE_LAYERS.get(mode, set(PromptLayer))
@@ -329,6 +333,14 @@ class PromptBuilder:
             parts.append("  </category>")
 
         parts.append("</tools>")
+
+        # 2.3: 延迟加载提示
+        if ctx.deferred_tool_count > 0:
+            parts.append(
+                f"\n有 {ctx.deferred_tool_count} 个额外工具未显示在列表中。"
+                "需要时使用 tool_search(query) 按关键词搜索。"
+            )
+
         return "\n".join(parts)
 
     @staticmethod

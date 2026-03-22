@@ -72,6 +72,12 @@ async def lifespan(app: FastAPI):
         await scheduler.start()
         logger.info("Scheduler started")
 
+    # Initialize OpenTelemetry (2.4: opt-in)
+    if _s.otel_enabled:
+        from core.tracing import init_tracing
+        init_tracing(service_name=_s.otel_service_name, endpoint=_s.otel_endpoint)
+        logger.info(f"OpenTelemetry enabled: {_s.otel_endpoint}")
+
     # Start file cleanup background task
     file_cleanup_task = None
     if s.file_retention_days > 0:
@@ -155,6 +161,12 @@ async def lifespan(app: FastAPI):
             logger.info("Scheduler stopped")
     except Exception:
         pass
+
+    # Shutdown OpenTelemetry (2.4)
+    if _s.otel_enabled:
+        from core.tracing import shutdown_tracing
+        shutdown_tracing()
+        logger.info("OpenTelemetry shut down")
 
     try:
         from dependencies import _llm_client_instance

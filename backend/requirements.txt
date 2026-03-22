@@ -26,3 +26,8 @@ sse-starlette>=2.0
 
 # Scheduling
 croniter>=2.0
+
+# Observability (optional — only needed when OTEL_ENABLED=True)
+# opentelemetry-api>=1.20
+# opentelemetry-sdk>=1.20
+# opentelemetry-exporter-otlp-proto-grpc>=1.20

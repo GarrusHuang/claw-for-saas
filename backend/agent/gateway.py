@@ -24,6 +24,7 @@ from core.llm_client import LLMGatewayClient
 from core.runtime import AgenticRuntime, RuntimeConfig, RuntimeResult, StepType
 from core.tool_protocol import ToolCallParser
 from core.tool_registry import ToolRegistry
+from core.tracing import get_tracer
 
 from agent.hooks import HookRegistry, build_default_hooks
 from agent.prompt import PromptBuilder
@@ -31,6 +32,28 @@ from agent.session import SessionManager
 from agent.subagent import SubagentRunner
 
 logger = logging.getLogger(__name__)
+
+# 核心工具名: 始终注入 prompt，不延迟加载
+CORE_TOOL_NAMES: frozenset[str] = frozenset({
+    # calculator
+    "numeric_compare", "sum_values", "calculate_ratio", "arithmetic", "date_diff",
+    # skill
+    "read_reference", "create_skill", "update_skill",
+    # file
+    "read_uploaded_file", "list_user_files", "analyze_file", "read_knowledge_file",
+    # code
+    "read_source_file", "write_source_file", "apply_patch", "run_command",
+    # memory
+    "save_memory", "recall_memory", "search_memory",
+    # plan
+    "propose_plan", "update_plan_step",
+    # subagent
+    "spawn_subagent", "spawn_subagents",
+    # interaction
+    "request_user_input",
+    # tool_search (self)
+    "tool_search",
+})
 
 
 class SessionBusyError(Exception):
@@ -492,16 +515,32 @@ class AgentGateway:
         """构建 system prompt + user message，并持久化用户消息。返回 (system_prompt, user_message)。"""
         tenant_id, user_id, session_id = ctx.tenant_id, ctx.user_id, ctx.session_id
 
-        # ── 系统提示 ──
+        # ── 系统提示 (2.3: 延迟工具加载) ──
         from agent.prompt import ToolSummary
-        tool_summaries = [
-            ToolSummary(
-                name=t.name,
-                description=t.description,
-                read_only=t.read_only,
-            )
-            for t in self.tool_registry.list_tools()
-        ]
+        from config import settings as _cfg
+
+        all_tools = self.tool_registry.list_tools()
+        deferred_tool_count = 0
+
+        if len(all_tools) > _cfg.agent_tool_deferred_threshold:
+            # 延迟模式: prompt 只注入核心工具 + tool_search
+            core_summaries = []
+            deferred = []
+            for t in all_tools:
+                if t.name in CORE_TOOL_NAMES:
+                    core_summaries.append(ToolSummary(
+                        name=t.name, description=t.description, read_only=t.read_only,
+                    ))
+                else:
+                    deferred.append(t)
+            tool_summaries = core_summaries
+            ctx.deferred_tools = deferred
+            deferred_tool_count = len(deferred)
+        else:
+            tool_summaries = [
+                ToolSummary(name=t.name, description=t.description, read_only=t.read_only)
+                for t in all_tools
+            ]
 
         system_prompt = self.prompt_builder.build_system_prompt(
             skill_knowledge=skill_knowledge,
@@ -510,6 +549,7 @@ class AgentGateway:
             user_id=user_id,
             session_id=session_id,
             tool_summaries=tool_summaries,
+            deferred_tool_count=deferred_tool_count,
         )
 
         # ── 用户消息 (A4-4i: 多模态支持) ──
@@ -856,7 +896,11 @@ class AgentGateway:
             knowledge_index_text=knowledge_index_text, start_time=start_time,
         )
 
-        # ── 5. 执行 Runtime ──
+        # ── 5. 执行 Runtime (2.3: 延迟模式传 llm_tool_registry) ──
+        llm_tool_registry = None
+        if ctx.deferred_tools:
+            llm_tool_registry = self.tool_registry.subset(CORE_TOOL_NAMES)
+
         runtime = AgenticRuntime(
             llm_client=self.llm_client,
             tool_registry=self.tool_registry,
@@ -866,6 +910,7 @@ class AgentGateway:
             trace_id=event_bus.trace_id if event_bus else "",
             hooks=self.hooks,
             secret_redactor=self.secret_redactor,
+            llm_tool_registry=llm_tool_registry,
         )
 
         initial_messages = history_messages if history_messages else None
@@ -873,24 +918,29 @@ class AgentGateway:
         cancelled = False
         runtime_error: Exception | None = None
 
-        try:
-            result = await runtime.run(
-                system_prompt=system_prompt,
-                user_message=user_message,
-                initial_messages=initial_messages,
-            )
-        except asyncio.CancelledError:
-            cancelled = True
-            logger.info(f"Pipeline cancelled for session {session_id}")
-        except Exception as e:
-            runtime_error = e
-            logger.error(f"AgenticRuntime failed: {e}")
-            if event_bus:
-                event_bus.emit("error", {
-                    "code": "RUNTIME_ERROR",
-                    "message": str(e),
-                    "recoverable": False,
-                })
+        tracer = get_tracer()
+        with tracer.start_as_current_span("gateway.chat") as span:
+            span.set_attribute("session_id", session_id)
+            span.set_attribute("tenant_id", tenant_id)
+
+            try:
+                result = await runtime.run(
+                    system_prompt=system_prompt,
+                    user_message=user_message,
+                    initial_messages=initial_messages,
+                )
+            except asyncio.CancelledError:
+                cancelled = True
+                logger.info(f"Pipeline cancelled for session {session_id}")
+            except Exception as e:
+                runtime_error = e
+                logger.error(f"AgenticRuntime failed: {e}")
+                if event_bus:
+                    event_bus.emit("error", {
+                        "code": "RUNTIME_ERROR",
+                        "message": str(e),
+                        "recoverable": False,
+                    })
 
         # ── 6. 持久化 + 返回 ──
         return await self._persist_results(

@@ -32,6 +32,7 @@ from .llm_client import LLMGatewayClient, LLMResponse, TokenUsage
 from .token_estimator import estimate_messages_tokens
 from .tool_protocol import ParsedToolCall, ToolCallParser
 from .tool_registry import ToolRegistry, ToolResult
+from .tracing import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -153,9 +154,11 @@ class AgenticRuntime:
         trace_id: str | None = None,
         hooks: Any | None = None,
         secret_redactor: Any | None = None,
+        llm_tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.tool_registry = tool_registry
+        self._llm_tool_registry = llm_tool_registry
         self.tool_parser = tool_parser or ToolCallParser()
         self.config = config or RuntimeConfig()
         self.event_bus = event_bus
@@ -191,6 +194,11 @@ class AgenticRuntime:
         self._abort_requested = True
         logger.info("Abort requested for runtime", extra={"trace_id": self.trace_id})
 
+    def _get_llm_schemas(self) -> list[dict] | None:
+        """返回发给 LLM 的工具 schema (延迟模式下只含核心工具)。"""
+        reg = self._llm_tool_registry or self.tool_registry
+        return reg.get_schemas() or None
+
     async def run(
         self,
         system_prompt: str,
@@ -211,6 +219,10 @@ class AgenticRuntime:
         messages = self._build_initial_messages(system_prompt, user_message, initial_messages)
 
         self._emit("agent_progress", {"status": "started", "max_iterations": self.config.max_iterations})
+
+        tracer = get_tracer()
+        with tracer.start_as_current_span("runtime.react_loop") as span:
+            span.set_attribute("max_iterations", self.config.max_iterations)
 
         for iteration in range(self.config.max_iterations):
             # ─── Abort check ───
@@ -617,7 +629,7 @@ class AgenticRuntime:
         try:
             async for chunk in self.llm_client.chat_completion_stream(
                 messages=messages,
-                tools=self.tool_registry.get_schemas() or None,
+                tools=self._get_llm_schemas(),
                 max_tokens=self.config.max_tokens_per_turn,
                 temperature=self.config.temperature,
             ):
@@ -772,7 +784,7 @@ class AgenticRuntime:
                     try:
                         return await self.llm_client.chat_completion(
                             messages=compacted,
-                            tools=self.tool_registry.get_schemas() or None,
+                            tools=self._get_llm_schemas(),
                             max_tokens=self.config.max_tokens_per_turn,
                             temperature=self.config.temperature,
                         )
@@ -787,7 +799,7 @@ class AgenticRuntime:
             logger.warning(f"Streaming failed at iteration {iteration + 1}, falling back: {e}")
             return await self.llm_client.chat_completion(
                 messages=messages,
-                tools=self.tool_registry.get_schemas() or None,
+                tools=self._get_llm_schemas(),
                 max_tokens=self.config.max_tokens_per_turn,
                 temperature=self.config.temperature,
             )
@@ -934,6 +946,12 @@ class AgenticRuntime:
                 return cache_result
 
         start = time.monotonic()
+        tracer = get_tracer()
+        _tool_span = tracer.start_as_current_span("runtime.tool_call")
+        _tool_span_ctx = _tool_span.__enter__()
+        _tool_span_ctx.set_attribute("tool.name", tool_call.name)
+        _tool_span_ctx.set_attribute("tool.read_only", is_read_only)
+
         from core.context import current_request
         _ctx = current_request.get()
 
@@ -1094,6 +1112,10 @@ class AgenticRuntime:
             },
         )
 
+        _tool_span_ctx.set_attribute("tool.success", result.success)
+        _tool_span_ctx.set_attribute("tool.latency_ms", round(latency_ms, 1))
+        _tool_span.__exit__(None, None, None)
+
         return result
 
     async def _compact_messages(self, messages: list[dict]) -> list[dict]:
@@ -1109,7 +1131,7 @@ class AgenticRuntime:
         if budget <= 0:
             return messages
 
-        tools_schema = self.tool_registry.get_schemas() or None
+        tools_schema = self._get_llm_schemas()
         estimated = estimate_messages_tokens(messages, tools=tools_schema)
 
         # 压缩阈值 = 预算 × compress_threshold_ratio (提前触发)

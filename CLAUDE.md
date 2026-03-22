@@ -43,9 +43,10 @@ backend/
     event_bus.py       — 异步事件总线 (asyncio.Queue)
     ws_bridge.py       — EventBus → WebSocket 桥接
     text_utils.py      — 文本处理工具 (smart_truncate head+tail 截断)
-    tool_registry.py   — 工具注册表 (schema + 执行)
+    tool_registry.py   — 工具注册表 (schema + 执行 + search_tools + subset)
     tool_protocol.py   — ToolCallParser: 原生 tool_calls + Hermes XML 双模式解析
-    context.py         — RequestContext 统一上下文 (无旧 ContextVar)
+    context.py         — RequestContext 统一上下文 (含 deferred_tools)
+    tracing.py         — OpenTelemetry 分布式追踪 (opt-in, NoOp fallback)
     sandbox.py         — 文件沙箱 + Docker 沙箱
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
     exec_policy.py     — ExecPolicy: 命令执行安全策略 (白名单+黑名单)
@@ -79,7 +80,7 @@ backend/
     sse.py             — SSE 端点 (已迁移到 WebSocket，保留兼容)
   tools/
     registry_builder.py — 工具集组装 (shared + capability + plan + mcp)
-    builtin/           — 内置工具 (calculator/file/browser/code/apply_patch/memory/skill/plan/subagent/schedule/interaction)
+    builtin/           — 内置工具 (calculator/file/browser/code/apply_patch/memory/skill/plan/subagent/schedule/interaction/tool_search)
     mcp/               — MCP 标准工具接口 (条件注册)
     contrib/            — 社区贡献工具
   skills/
@@ -244,6 +245,10 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `MCP_ENABLED` — 启用 MCP 工具接口
 - `SCHEDULER_ENABLED` — 启用定时调度 (默认 true)
 - `SANDBOX_DOCKER_ENABLED` — 启用 Docker 沙箱
+- `AGENT_TOOL_DEFERRED_THRESHOLD` — 工具延迟加载阈值 (默认 30)
+- `OTEL_ENABLED` — 启用 OpenTelemetry 追踪 (默认 false)
+- `OTEL_ENDPOINT` — OTLP gRPC 端点 (默认 http://localhost:4317)
+- `OTEL_SERVICE_NAME` — OTel 服务名 (默认 claw-for-saas)
 - `APP_DEBUG` — 启用 debug/reload 模式
 
 ## 开发注意事项
@@ -279,6 +284,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - browser: open_url, page_screenshot, page_extract_text
 - code: read_source_file
 - memory: recall_memory, search_memory
+- tool_search: tool_search (延迟工具搜索，工具数>30时自动启用)
 
 **能力 (串行执行)**:
 - code: write_source_file, apply_patch, run_command

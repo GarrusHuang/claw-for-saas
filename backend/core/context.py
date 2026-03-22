@@ -50,6 +50,7 @@ class RequestContext:
     known_field_ids: set = field(default_factory=set)
     plan_tracker: Any = None  # PlanTracker | None
     diff_tracker: Any = None  # TurnDiffTracker | None
+    deferred_tools: list = field(default_factory=list)  # list[RegisteredTool]
 
 
 current_request: contextvars.ContextVar[RequestContext | None] = contextvars.ContextVar(
