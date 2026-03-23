@@ -385,11 +385,22 @@ class SkillLoader:
         根据 pipeline 上下文匹配 Skill，返回仅名称+描述的索引。
 
         供 prompt 注入: AI 通过 read_skill 工具按需读取完整内容。
+        5.5#41+10: 检查 env_requires 和 permissions 声明。
         """
         matched_names: list[str] = []
 
         for name, meta in self._registry.items():
             skill_type = meta.get("type", "capability")
+
+            # 5.5#41: 检查 env_requires — 缺少必要环境变量的 Skill 跳过
+            env_requires = meta.get("env_requires", [])
+            if env_requires:
+                missing = [v for v in env_requires if not os.environ.get(v)]
+                if missing:
+                    logger.debug(
+                        "Skill %s skipped: missing env vars %s", name, missing
+                    )
+                    continue
 
             if skill_type == "scenario" and scenario and name == scenario:
                 matched_names.append(name)
@@ -425,7 +436,10 @@ class SkillLoader:
         for name in ordered:
             meta = self._registry.get(name, {})
             desc = meta.get("description", "")
-            lines.append(f"- {name}: {desc}")
+            # 5.5#10: permissions 声明附在描述后
+            perms = meta.get("permissions", [])
+            perm_tag = f" [需要: {', '.join(perms)}]" if perms else ""
+            lines.append(f"- {name}: {desc}{perm_tag}")
         lines.append("")
         lines.append("需要使用某个技能时，调用 read_skill(skill_name) 获取详细内容。")
 
@@ -481,7 +495,7 @@ class SkillLoader:
         """将 metadata dict 转为 YAML frontmatter 字符串。"""
         lines = ["---"]
         simple_keys = ["name", "version", "description", "type", "token_estimate"]
-        list_keys = ["applies_to", "business_types", "depends_on", "tags"]
+        list_keys = ["applies_to", "business_types", "depends_on", "tags", "env_requires", "permissions"]
 
         for key in simple_keys:
             if key in metadata and metadata[key] is not None:

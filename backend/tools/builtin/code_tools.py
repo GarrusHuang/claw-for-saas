@@ -84,6 +84,7 @@ def _resolve_safe_path(path: str) -> str:
     description=(
         "读取源代码文件内容。"
         "传入文件路径，可选 start_line/end_line 指定行范围 (0 表示读全文)。"
+        "indent_block='class Foo' 可按缩进读取代码块 (如类/函数定义)。"
         "超过 50KB 的内容会被截断。"
     ),
     read_only=True,
@@ -92,6 +93,7 @@ def read_source_file(
     path: str,          # 文件路径
     start_line: int = 0,  # 起始行号 (1-based, 0=全文)
     end_line: int = 0,    # 结束行号 (1-based, 0=全文)
+    indent_block: str = "",  # 按缩进读取代码块 (匹配首行后读取同级及更深缩进的行)
 ) -> dict:
     """读取指定路径的源代码文件内容。"""
     try:
@@ -109,6 +111,22 @@ def read_source_file(
 
         lines = content.split("\n")
         total_lines = len(lines)
+
+        # 缩进模式: 找到匹配行，读取该块及其缩进内的所有子行
+        if indent_block:
+            block_lines, block_start = _extract_indent_block(lines, indent_block)
+            if block_lines is not None:
+                content = "\n".join(block_lines)
+                return {
+                    "path": path,
+                    "content": content,
+                    "line_count": total_lines,
+                    "block_start_line": block_start + 1,
+                    "block_line_count": len(block_lines),
+                    "size_bytes": file_size,
+                    "truncated": False,
+                }
+            return {"error": f"未找到匹配的代码块: {indent_block}"}
 
         # 行范围过滤
         if start_line > 0 or end_line > 0:
@@ -134,6 +152,49 @@ def read_source_file(
     except Exception as e:
         logger.error(f"read_source_file error: {e}")
         return {"error": str(e)}
+
+
+def _extract_indent_block(
+    lines: list[str], pattern: str,
+) -> tuple[list[str] | None, int]:
+    """
+    按缩进读取代码块: 匹配首行后，读取同级及更深缩进的所有后续行。
+
+    Returns:
+        (block_lines, start_index) 或 (None, -1) 如果未找到。
+    """
+    # 找到匹配行
+    start_idx = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if pattern in stripped:
+            start_idx = i
+            break
+
+    if start_idx < 0:
+        return None, -1
+
+    # 确定基准缩进
+    base_line = lines[start_idx]
+    base_indent = len(base_line) - len(base_line.lstrip())
+
+    # 收集块: 首行 + 后续缩进更深的行 (遇到同级或更浅的非空行停止)
+    block = [base_line]
+    for i in range(start_idx + 1, len(lines)):
+        line = lines[i]
+        if not line.strip():
+            block.append(line)  # 保留空行
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base_indent:
+            break
+        block.append(line)
+
+    # 去掉尾部空行
+    while block and not block[-1].strip():
+        block.pop()
+
+    return block, start_idx
 
 
 @code_capability_registry.tool(

@@ -28,7 +28,7 @@ backend/
     gateway.py         — AgentGateway: 单一入口处理所有用户请求
     session.py         — JSONL 会话存储 (data/sessions/{tenant}/{user}/{session}.jsonl)
     prompt.py          — 8 层模块化系统提示构建器
-    hooks.py           — Hook 系统 (pre_tool_use / post_tool_use / agent_stop / pre_compact)
+    hooks.py           — Hook 系统 (pre_tool_use / post_tool_use / agent_stop / pre_compact / user_prompt_submit / session_start + inject action)
     hook_rules.py      — 可配置 Hook 规则引擎
     security_hooks.py  — PII 检测 / SSRF 防护等安全 Hook
     subagent.py        — 子 Agent 派发 + 生命周期管理 (start/wait/send + depth/并发控制)
@@ -104,7 +104,7 @@ backend/
     response.py        — API 响应模型
     usage.py           — 用量数据模型
   plugins/             — 插件目录
-  tests/               — 77+ 测试文件
+  tests/               — 78+ 测试文件
   data/                — 运行时数据 (gitignored)
 
 frontend/
@@ -328,11 +328,13 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 
 ## Hook 系统
 
-四类事件:
-- `pre_tool_use` — 工具调用前检查 (可 block/modify)
+六类事件:
+- `pre_tool_use` — 工具调用前检查 (可 block/modify/inject developer instructions)
 - `post_tool_use` — 工具调用后审计
 - `agent_stop` — Agent 完成前质量门控 (可 block 触发自我纠正)
 - `pre_compact` — 压缩前保护关键信息
+- `user_prompt_submit` — 用户消息提交时触发
+- `session_start` — 新会话创建时触发
 
 内置安全 Hook: PII 检测、SSRF DNS 检查、路径穿越防护 + symlink TOCTOU 防护、速率限制、ExecPolicy 三层命令防御 (复合命令拆分+CommandRule 规则表+管道末端检查 + per-user 审批持久化)、apply_patch 敏感文件检查、Guardian AI 风险评估 (可选，含对话上下文注入)、SecretRedactor (GitHub/GitLab/Google/Slack/npm 等 10+ 模式)。安全阻止消息附 request_permissions 工具提示。
 

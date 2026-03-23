@@ -1017,6 +1017,15 @@ class AgenticRuntime:
                 logger.warning(f"Pre-hook error for {tool_call.name}: {e}")
                 pre_result = None
 
+            # 5.5#37: inject action — hook 注入 developer instruction 到工具结果
+            if pre_result and pre_result.action == "inject" and pre_result.message:
+                if messages is not None:
+                    messages.append({
+                        "role": "user",
+                        "content": f"[Developer Instruction] {pre_result.message}",
+                    })
+                # 继续正常执行工具 (inject 不阻止)
+
             if pre_result and pre_result.action == "block":
                 result = ToolResult(
                     success=False,

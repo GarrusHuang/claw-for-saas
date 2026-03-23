@@ -16,7 +16,10 @@ from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
-KNOWN_EVENT_TYPES = {"pre_tool_use", "post_tool_use", "agent_stop", "agent_completed", "pre_compact"}
+KNOWN_EVENT_TYPES = {
+    "pre_tool_use", "post_tool_use", "agent_stop", "agent_completed",
+    "pre_compact", "user_prompt_submit", "session_start",
+}
 
 
 @dataclass
@@ -35,8 +38,8 @@ class HookEvent:
 @dataclass
 class HookResult:
     """Hook 执行结果。"""
-    action: str = "allow"  # "allow" | "block" | "modify"
-    message: str = ""
+    action: str = "allow"  # "allow" | "block" | "modify" | "inject"
+    message: str = ""  # block/inject 时的消息 (inject: 注入到对话中的 developer instruction)
     modified_input: dict | None = None
 
 
@@ -81,11 +84,12 @@ class HookRegistry:
         self._handlers[event_type].append(_HookHandler(handler=handler, matcher=matcher))
 
     async def fire(self, event: HookEvent) -> HookResult:
-        """触发 hook，返回最终决策 (block 优先 > modify > allow)。"""
+        """触发 hook，返回最终决策 (block 优先 > inject > modify > allow)。"""
         import asyncio
 
         handlers = self._handlers.get(event.event_type, [])
         modify_result: HookResult | None = None
+        inject_result: HookResult | None = None
 
         for h in handlers:
             # matcher 过滤
@@ -99,13 +103,15 @@ class HookRegistry:
                 if result and result.action == "block":
                     logger.info(f"Hook blocked {event.event_type}:{event.tool_name}: {result.message}")
                     return result
+                if result and result.action == "inject" and inject_result is None:
+                    inject_result = result
                 if result and result.action == "modify" and modify_result is None:
                     modify_result = result
             except Exception as e:
                 logger.error(f"Hook error in {event.event_type}: {e}")
 
-        # 返回 modify 结果 (如有)，否则 allow
-        return modify_result or HookResult(action="allow")
+        # 优先级: inject > modify > allow
+        return inject_result or modify_result or HookResult(action="allow")
 
 
 # ── 内置 Hooks ──

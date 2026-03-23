@@ -454,10 +454,11 @@ class AgentGateway:
         )
 
         # ── 2. 解析/创建会话 ──
+        is_new_session = False
         if session_id and self.session_manager.session_exists(tenant_id, user_id, session_id):
             logger.info(f"Resuming session: {session_id}")
         else:
-            # 用用户首条消息生成会话标题
+            is_new_session = True
             title = (message[:60].strip() + "...") if len(message) > 60 else message.strip()
             session_id = self.session_manager.create_session(
                 tenant_id, user_id, {"business_type": business_type, "title": title}
@@ -465,6 +466,27 @@ class AgentGateway:
             logger.info(f"New session: {session_id}")
 
         ctx.session_id = session_id
+
+        # ── 5.5#35+36: Hook 事件 ──
+        if self.hooks:
+            from agent.hooks import HookEvent
+            if is_new_session:
+                try:
+                    await self.hooks.fire(HookEvent(
+                        event_type="session_start",
+                        session_id=session_id, user_id=user_id,
+                        context={"tenant_id": tenant_id, "business_type": business_type},
+                    ))
+                except Exception:
+                    pass
+            try:
+                await self.hooks.fire(HookEvent(
+                    event_type="user_prompt_submit",
+                    session_id=session_id, user_id=user_id,
+                    context={"message": message[:500], "tenant_id": tenant_id},
+                ))
+            except Exception:
+                pass
 
         # ── 2a. 绑定上传文件到会话 ──
         if materials:
