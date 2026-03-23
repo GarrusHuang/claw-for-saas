@@ -1,5 +1,5 @@
 """
-Batch 6 tests: #29 Personality, #42 Soul 租户隔离, #24 Network Policy Amendment
+Batch 6 tests: #29 Personality, #42 Soul 租户隔离, #28 模式预设, #27 Prompt 模板, #24 Network Policy Amendment
 """
 
 import json
@@ -7,6 +7,7 @@ import os
 import pytest
 
 from core.sandbox import SandboxConfig, SandboxManager
+from core.prompt_templates import PromptTemplateStore
 
 
 # ── #29 + #42: Personality + Soul 租户隔离 ──
@@ -51,6 +52,49 @@ class TestTenantSoulAndPersonality:
         builder.invalidate_tenant_cache("T1")
         assert "T1" not in builder._tenant_soul_cache
         assert "T1" not in builder._tenant_personality_cache
+
+
+# ── #28: 模式预设 ──
+
+class TestModePresets:
+
+    def test_config_has_presets(self):
+        from config import Settings
+        s = Settings()
+        presets = json.loads(s.mode_presets)
+        assert "quick" in presets
+        assert "deep" in presets
+        assert presets["quick"]["max_iterations"] == 10
+
+    def test_presets_parseable(self):
+        preset_str = '{"fast":{"max_iterations":5},"thorough":{"max_iterations":50}}'
+        presets = json.loads(preset_str)
+        assert presets["fast"]["max_iterations"] == 5
+
+
+# ── #27: Prompt 模板 ──
+
+class TestPromptTemplates:
+
+    def test_crud(self, tmp_path):
+        store = PromptTemplateStore(base_dir=str(tmp_path))
+        result = store.save_template("T1", "U1", "greet", "你好，请帮我 {{task}}")
+        assert result["ok"]
+        assert result["action"] == "created"
+        t = store.get_template("T1", "U1", "greet")
+        assert t["content"] == "你好，请帮我 {{task}}"
+        result = store.save_template("T1", "U1", "greet", "Hello {{task}}")
+        assert result["action"] == "updated"
+        assert len(store.list_templates("T1", "U1")) == 1
+        assert store.delete_template("T1", "U1", "greet")
+        assert store.list_templates("T1", "U1") == []
+
+    def test_max_limit(self, tmp_path):
+        store = PromptTemplateStore(base_dir=str(tmp_path))
+        for i in range(50):
+            store.save_template("T1", "U1", f"t{i}", f"content{i}")
+        result = store.save_template("T1", "U1", "overflow", "too many")
+        assert not result["ok"]
 
 
 # ── #24: Network Policy Amendment ──

@@ -1059,6 +1059,33 @@ class AgentGateway:
         )
 
         # ── 5. 执行 Runtime (2.3: 延迟模式传 llm_tool_registry) ──
+        # #28: mode_presets — 命名模式覆盖 RuntimeConfig 参数
+        effective_config = self.runtime_config
+        if mode not in ("plan", "execute", ""):
+            try:
+                import json as _json
+                from config import settings as _preset_cfg
+                from core.runtime import RuntimeConfig
+                presets = _json.loads(_preset_cfg.mode_presets)
+                if mode in presets:
+                    overrides = presets[mode]
+                    effective_config = RuntimeConfig(
+                        max_iterations=overrides.get("max_iterations", self.runtime_config.max_iterations),
+                        max_tokens_per_turn=overrides.get("max_tokens_per_turn", self.runtime_config.max_tokens_per_turn),
+                        tool_call_timeout_s=self.runtime_config.tool_call_timeout_s,
+                        parallel_tool_calls=self.runtime_config.parallel_tool_calls,
+                        max_tool_result_chars=self.runtime_config.max_tool_result_chars,
+                        context_budget_tokens=self.runtime_config.context_budget_tokens,
+                        model_context_window=self.runtime_config.model_context_window,
+                        context_budget_ratio=self.runtime_config.context_budget_ratio,
+                        compress_threshold_ratio=self.runtime_config.compress_threshold_ratio,
+                        context_budget_min=self.runtime_config.context_budget_min,
+                        temperature=overrides.get("temperature"),
+                    )
+                    logger.info(f"Mode preset '{mode}' applied: {overrides}")
+            except Exception as e:
+                logger.debug(f"Mode preset '{mode}' not applied: {e}")
+
         llm_tool_registry = None
         if mode == "plan":
             plan_allowed = {t.name for t in self.tool_registry.list_tools() if t.read_only}
@@ -1071,7 +1098,7 @@ class AgentGateway:
             llm_client=self.llm_client,
             tool_registry=self.tool_registry,
             tool_parser=ToolCallParser(),
-            config=self.runtime_config,
+            config=effective_config,
             event_bus=event_bus,
             trace_id=event_bus.trace_id if event_bus else "",
             hooks=self.hooks,
