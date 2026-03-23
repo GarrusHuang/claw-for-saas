@@ -23,7 +23,7 @@
 
 - **多轮自主推理** — ReAct 循环最多 25 轮迭代，Agent 自主规划、调用工具、验证结果
 - **即插即用** — 注册自定义工具只需一个装饰器，注入自定义 Soul 只需替换一个 Markdown 文件
-- **跨会话记忆** — LLM 自动提取用户偏好/纠正/决策，关键词搜索，合并索引
+- **跨会话记忆** — LLM 自动提取用户偏好/纠正/决策，引用追踪排序，过期清理，重复工作流 Skill 建议
 - **生产级可靠** — 四阶段上下文压缩、LLM 弹性重试、bcrypt 安全、SSRF DNS 检查、登录限速
 - **零 vendor lock-in** — 兼容任意 OpenAI API 格式的 LLM（Ollama、vLLM、OpenAI、Azure、Anthropic…）
 
@@ -37,7 +37,7 @@
 | **40 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆搜索 · 技能 · 子 Agent · 定时任务 · 工具搜索 · 文件搜索 |
 | **Tool Search 延迟加载** | 工具数超过阈值时自动切换延迟模式，prompt 只含核心工具，Agent 按需搜索 |
 | **8 层提示词架构** | Identity → Soul → Safety → Tools → Skills → Memory → Runtime → Extra |
-| **跨会话记忆** | LLM 自动提取偏好/纠正/决策 + 关键词搜索 + 合并索引 + 三层 Markdown 笔记 |
+| **跨会话记忆** | LLM 自动提取偏好/纠正/决策 + 引用追踪 (usage_count 排序) + 过期清理 + 关键词搜索 + 合并索引 + 三层 Markdown 笔记 + 重复工作流 Skill 建议 |
 | **四阶段上下文压缩** | 截断 → 摘要 → 元数据 → 逐条删 + 1.2x token 安全边距 + 动态工具结果上限 |
 | **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
 | **WebSocket 实时推送** | 15+ 事件类型，实时展示思考过程和工具执行，指数退避重连 |
@@ -264,6 +264,7 @@ step_started       → 步骤开始
 step_completed     → 步骤完成
 tool_executed      → 工具执行结果
 pipeline_complete  → 会话结束 (duration, summary)
+skill_suggestion   → Skill 自动建议 (重复工作流检测)
 error              → 错误 (category, recoverable, suggested_action)
 request_upload     → Agent 请求用户上传文件
 request_input      → Agent 请求用户输入
@@ -295,6 +296,8 @@ request_confirmation → Agent 请求用户确认/权限授权
 | `OTEL_ENDPOINT` | `http://localhost:4317` | OTLP gRPC 端点 |
 | `LLM_FALLBACK_MODEL` | *(空)* | 备用模型 (主模型不可用时切换) |
 | `MEMORY_AUTO_EXTRACT_ENABLED` | `True` | 自动提取跨会话记忆 |
+| `MEMORY_RETENTION_DAYS` | `30` | 记忆过期天数 (0=不清理, 仅清理 usage_count==0) |
+| `MEMORY_WORKFLOW_TRACKING_ENABLED` | `True` | 启用工作流指纹追踪 (Skill 建议) |
 | `SANDBOX_MAX_DISK_QUOTA_MB` | `500` | 单用户磁盘配额 |
 | `SANDBOX_WRITABLE_ROOTS` | `""` | 沙箱可写子目录 (逗号分隔，空=整个 workspace) |
 | `MAX_FILE_UPLOAD_MB` | `100` | 文件上传大小限制 |

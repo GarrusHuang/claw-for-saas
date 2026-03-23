@@ -95,28 +95,32 @@ class TestMarkdownMemoryStore:
     # ─── Prompt 注入 ──────────────────────────────────────
 
     def test_build_memory_prompt_empty(self):
-        prompt = self.store.build_memory_prompt("T1", "U1")
+        prompt, id_map = self.store.build_memory_prompt("T1", "U1")
         assert prompt == ""
+        assert id_map == {}
 
     def test_build_memory_prompt_single_level(self):
         self.store.write_file("user", "prefs.md", "Prefer dark mode", tenant_id="T1", user_id="U1")
-        prompt = self.store.build_memory_prompt("T1", "U1")
+        prompt, id_map = self.store.build_memory_prompt("T1", "U1")
         assert "<user>" in prompt
         assert "Prefer dark mode" in prompt
         assert "</user>" in prompt
+        assert "[m1]" in prompt
+        assert len(id_map) >= 1
 
     def test_build_memory_prompt_three_levels(self):
         self.store.write_file("global", "best.md", "Global tip")
         self.store.write_file("tenant", "policy.md", "Tenant rule", tenant_id="T1")
         self.store.write_file("user", "pref.md", "User pref", tenant_id="T1", user_id="U1")
 
-        prompt = self.store.build_memory_prompt("T1", "U1")
+        prompt, id_map = self.store.build_memory_prompt("T1", "U1")
         assert "<global>" in prompt
         assert "Global tip" in prompt
         assert "<tenant>" in prompt
         assert "Tenant rule" in prompt
         assert "<user>" in prompt
         assert "User pref" in prompt
+        assert len(id_map) == 3
 
     def test_build_memory_prompt_budget_truncation(self):
         # Set very small budget
@@ -124,7 +128,7 @@ class TestMarkdownMemoryStore:
         self.store.write_file("global", "big.md", "A" * 200)
         self.store.write_file("user", "small.md", "User data", tenant_id="T1", user_id="U1")
 
-        prompt = self.store.build_memory_prompt("T1", "U1")
+        prompt, _ = self.store.build_memory_prompt("T1", "U1")
         # User data should be preserved (higher priority)
         assert "User data" in prompt
 

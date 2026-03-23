@@ -219,7 +219,7 @@ class AgentGateway:
             # 读取现有记忆 (用于去重)
             existing_memory = ""
             try:
-                existing_memory = self.memory_store.build_memory_prompt(
+                existing_memory, _ = self.memory_store.build_memory_prompt(
                     tenant_id=tenant_id, user_id=user_id
                 )
             except Exception:
@@ -544,14 +544,15 @@ class AgentGateway:
             except Exception as e:
                 logger.warning(f"Skill loading failed: {e}")
 
-        # ── Memory (A8: Markdown 分层笔记) ──
+        # ── Memory (A8: Markdown 分层笔记 + 5.3: 引用追踪) ──
         memory_context = ""
         if self.memory_store:
             try:
-                memory_context = self.memory_store.build_memory_prompt(
+                memory_context, memory_id_map = self.memory_store.build_memory_prompt(
                     tenant_id=tenant_id,
                     user_id=user_id,
                 )
+                ctx.memory_id_map = memory_id_map
             except Exception as e:
                 logger.warning(f"MarkdownMemoryStore error: {e}")
 
@@ -775,6 +776,54 @@ class AgentGateway:
                 answer=result.final_answer or "",
                 timeline_entries=timeline_entries or None,
             )
+
+            # ── 5.3: 记忆引用追踪 — 解析 [mem:ID] 递增 usage_count ──
+            if result.final_answer and ctx.memory_id_map and self.memory_store:
+                import re as _re
+                refs = _re.findall(r"\[mem:(m\d+)\]", result.final_answer)
+                for mid in set(refs):
+                    if mid in ctx.memory_id_map:
+                        scope, entry_key = ctx.memory_id_map[mid]
+                        try:
+                            self.memory_store.increment_usage(
+                                scope, entry_key,
+                                tenant_id=tenant_id, user_id=user_id,
+                            )
+                        except Exception as e:
+                            logger.debug(f"Memory usage tracking failed for {mid}: {e}")
+
+            # ── 5.3: 工作流指纹记录 + Skill 建议 ──
+            from config import settings as _cfg
+            if _cfg.memory_workflow_tracking_enabled and self.memory_store:
+                try:
+                    from agent.skill_generator import WorkflowAnalyzer
+                    tool_names = [
+                        s.tool_name for s in result.steps
+                        if s.step_type == StepType.TOOL_CALL and s.tool_name
+                    ]
+                    if len(tool_names) >= 3:
+                        analyzer = WorkflowAnalyzer(
+                            self.memory_store,
+                            threshold=_cfg.memory_workflow_repeat_threshold,
+                        )
+                        analyzer.record_workflow(tenant_id, user_id, tool_names)
+                        repeated = analyzer.detect_repeated(tenant_id, user_id)
+                        if repeated and event_bus:
+                            for r in repeated:
+                                try:
+                                    draft = await analyzer.generate_skill_draft(
+                                        r["fingerprint"], r["tools"], self.llm_client,
+                                    )
+                                    event_bus.emit("skill_suggestion", {
+                                        "fingerprint": r["fingerprint"],
+                                        "count": r["count"],
+                                        "tools": r["tools"],
+                                        "draft": draft,
+                                    })
+                                except Exception as e:
+                                    logger.debug(f"Skill suggestion failed: {e}")
+                except Exception as e:
+                    logger.debug(f"Workflow tracking failed: {e}")
 
             # 上下文压缩检查
             history = self.session_manager.load_messages(tenant_id, user_id, session_id)

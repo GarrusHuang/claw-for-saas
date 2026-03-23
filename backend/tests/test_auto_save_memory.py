@@ -84,7 +84,7 @@ class TestAutoSaveMemoryExtraction:
     async def test_extracts_and_saves(self):
         """正常提取并保存到 auto-learning.md。"""
         store = MagicMock()
-        store.build_memory_prompt.return_value = ""
+        store.build_memory_prompt.return_value = ("", {})
         store.append_memory.return_value = True
 
         llm_resp = MagicMock()
@@ -114,7 +114,7 @@ class TestAutoSaveMemoryExtraction:
     async def test_none_response_skips(self):
         """LLM 返回 NONE 时不保存。"""
         store = MagicMock()
-        store.build_memory_prompt.return_value = ""
+        store.build_memory_prompt.return_value = ("", {})
 
         llm_resp = MagicMock()
         llm_resp.content = "NONE"
@@ -138,7 +138,7 @@ class TestAutoSaveMemoryExtraction:
     async def test_empty_response_skips(self):
         """LLM 返回空内容时不保存。"""
         store = MagicMock()
-        store.build_memory_prompt.return_value = ""
+        store.build_memory_prompt.return_value = ("", {})
 
         llm_resp = MagicMock()
         llm_resp.content = ""
@@ -162,7 +162,7 @@ class TestAutoSaveMemoryExtraction:
     async def test_llm_failure_silent(self):
         """LLM 调用失败时静默跳过。"""
         store = MagicMock()
-        store.build_memory_prompt.return_value = ""
+        store.build_memory_prompt.return_value = ("", {})
 
         llm = MagicMock()
         llm.chat_completion = AsyncMock(side_effect=Exception("LLM unavailable"))
@@ -184,7 +184,7 @@ class TestAutoSaveMemoryExtraction:
     async def test_timeout_silent(self):
         """LLM 调用超时时静默跳过。"""
         store = MagicMock()
-        store.build_memory_prompt.return_value = ""
+        store.build_memory_prompt.return_value = ("", {})
 
         async def slow_call(*args, **kwargs):
             await asyncio.sleep(100)

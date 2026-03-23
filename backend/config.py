@@ -239,6 +239,18 @@ class Settings(BaseSettings):
         default=50,
         description="Max number of users to merge per run",
     )
+    memory_retention_days: int = Field(
+        default=30,
+        description="记忆条目过期天数 (0=不清理, 仅清理 usage_count==0 的条目)",
+    )
+    memory_workflow_tracking_enabled: bool = Field(
+        default=True,
+        description="Enable workflow fingerprint tracking for Skill suggestion",
+    )
+    memory_workflow_repeat_threshold: int = Field(
+        default=3,
+        description="Workflow repeat count threshold to trigger Skill suggestion",
+    )
 
     # ─── Scheduler (A9) ───
     scheduler_enabled: bool = Field(

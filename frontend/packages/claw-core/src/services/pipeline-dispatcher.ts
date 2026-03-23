@@ -183,6 +183,10 @@ export function dispatchPipelineEvent(
       store.addEvent({ type: eventType, data, timestamp: Date.now() });
       break;
 
+    case 'skill_suggestion':
+      store.addEvent({ type: 'skill_suggestion', data, timestamp: Date.now() });
+      break;
+
     case 'pipeline_complete': {
       store.completePipeline(data.status as string, (data.duration_ms as number) || 0);
       store.addConversationTurn('assistant', '处理完成');

@@ -37,6 +37,7 @@ backend/
     quality_gate.py    — 输出质量门控
     safe_eval.py       — 安全表达式求值
     skill_validator.py — Skill YAML 校验
+    skill_generator.py — WorkflowAnalyzer: 重复工作流检测 + Skill 建议生成
     pre_compact.py     — 压缩前关键信息保护
   core/
     runtime.py         — AgenticRuntime: ReAct 循环引擎 (核心)
@@ -46,7 +47,7 @@ backend/
     text_utils.py      — 文本处理工具 (smart_truncate head+tail 截断)
     tool_registry.py   — 工具注册表 (schema + 执行 + search_tools + subset)
     tool_protocol.py   — ToolCallParser: 原生 tool_calls + Hermes XML 双模式解析
-    context.py         — RequestContext 统一上下文 (含 deferred_tools, subagent_depth)
+    context.py         — RequestContext 统一上下文 (含 deferred_tools, subagent_depth, memory_id_map)
     tracing.py         — OpenTelemetry 分布式追踪 (opt-in, NoOp fallback)
     sandbox.py         — 文件沙箱 + Docker 沙箱
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
@@ -90,7 +91,7 @@ backend/
     tenant/            — 租户级 Skill
     user/              — 用户级 Skill
   memory/
-    markdown_store.py  — Markdown 分层笔记 (global/tenant/user 三级)
+    markdown_store.py  — Markdown 分层笔记 (global/tenant/user 三级 + _meta.json 引用追踪 + 过期清理)
   services/
     database.py        — SQLite 数据库 (tenants/users/api_keys)
     file_service.py    — 文件服务 (上传/下载/过期清理)
@@ -103,7 +104,7 @@ backend/
     response.py        — API 响应模型
     usage.py           — 用量数据模型
   plugins/             — 插件目录
-  tests/               — 73+ 测试文件
+  tests/               — 76+ 测试文件
   data/                — 运行时数据 (gitignored)
 
 frontend/
@@ -181,6 +182,8 @@ frontend/
         → 直到 final_answer 或 max_iterations
     → 持久化消息 + Timeline
     → 自动提取记忆 (auto-learning.md)
+    → 记忆引用追踪 ([mem:ID] → increment_usage)
+    → 工作流指纹记录 + Skill 建议 (skill_suggestion 事件)
     → 记录用量 (SQLite)
   → EventBus → WSBridge → WebSocket 推送到前端
 ```
@@ -194,7 +197,7 @@ frontend/
 | L2 | SAFETY | 10 条安全约束 |
 | L3 | TOOLS | `<tools>` XML 按 read_only 分组 |
 | L4 | SKILLS | `<skills>` 领域知识索引 + 按需加载 |
-| L5 | MEMORY | `<memory>` 三级记忆 (global/tenant/user) |
+| L5 | MEMORY | `<memory>` 三级记忆 (global/tenant/user, 段落带 [mN] ID, 按 usage_count 排序) |
 | L5b | KNOWLEDGE | `<knowledge>` 知识库 _index.md |
 | L6 | RUNTIME | user_id / session_id / timestamp / workspace_dir / timezone / platform |
 | L7 | EXTRA | plan_guidance + 插件自定义 |
@@ -211,7 +214,7 @@ frontend/
 - **HTTP**: POST /api/chat 发起对话 → 返回 `{session_id, trace_id}`
 - **WebSocket**: `/api/ws/notifications` 全局通知通道
   - 服务端通过 EventBusWSBridge 将 pipeline 事件推送到用户 WS 连接
-  - 事件类型: pipeline_started, text_delta, thinking, tool_executed, agent_progress, plan_proposed, step_started/completed/failed, agent_message, pipeline_complete, error 等
+  - 事件类型: pipeline_started, text_delta, thinking, tool_executed, agent_progress, plan_proposed, step_started/completed/failed, agent_message, pipeline_complete, skill_suggestion, error 等
   - 心跳: 客户端 ping → 服务端 pong (60s 超时)
 
 ## 开发命令
@@ -270,6 +273,9 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `GUARDIAN_API_KEY` — Guardian LLM API Key (空=复用主 key)
 - `GUARDIAN_RISK_THRESHOLD` — 风险评分阈值 (默认 80, 0-100)
 - `GUARDIAN_TIMEOUT_S` — Guardian LLM 超时秒数 (默认 30)
+- `MEMORY_RETENTION_DAYS` — 记忆条目过期天数 (默认 30, 0=不清理, 仅清理 usage_count==0)
+- `MEMORY_WORKFLOW_TRACKING_ENABLED` — 启用工作流指纹追踪 (默认 true)
+- `MEMORY_WORKFLOW_REPEAT_THRESHOLD` — 工作流重复触发 Skill 建议的阈值 (默认 3)
 
 ## 开发注意事项
 
@@ -286,7 +292,8 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 |:-----|:-----|:-----|
 | 租户/用户/API Key | SQLite | data/claw.db |
 | 会话消息 | JSONL (append-only) | data/sessions/{tenant}/{user}/{session}.jsonl |
-| 用户记忆 | Markdown (三级) | data/memory/{global,tenant,user}/ |
+| 用户记忆 | Markdown (三级) + _meta.json | data/memory/{global,tenant,user}/ |
+| 工作流日志 | JSON | data/memory/user/{tenant}/{user}/_workflow_log.json |
 | 上传文件 | 文件系统 | data/files/ |
 | 知识库 | 文件系统 | data/knowledge/ |
 | 定时任务 | JSON | data/schedules/{tenant}/{user}/tasks.json |

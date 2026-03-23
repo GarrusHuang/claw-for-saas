@@ -15,8 +15,10 @@ LLM 自行判断相关性, 无需代码做结构化查询。
 from __future__ import annotations
 
 import fcntl
+import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -202,62 +204,184 @@ class MarkdownMemoryStore:
         return self.write_file(scope, filename, content, mode="append",
                                tenant_id=tenant_id, user_id=user_id)
 
+    # ─── _meta.json 元数据 (5.3: 记忆引用追踪) ──────────────
+
+    def _meta_path(self, scope: str, tenant_id: str = "", user_id: str = "") -> Path:
+        """获取 _meta.json 的路径。"""
+        return self._resolve_dir(scope, tenant_id, user_id) / "_meta.json"
+
+    def _load_meta(self, scope: str, tenant_id: str = "", user_id: str = "") -> dict:
+        """加载 _meta.json，不存在返回空结构。"""
+        path = self._meta_path(scope, tenant_id, user_id)
+        if not path.exists():
+            return {"entries": {}}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to load _meta.json at {path}: {e}")
+            return {"entries": {}}
+
+    def _save_meta(self, scope: str, meta: dict, tenant_id: str = "", user_id: str = "") -> None:
+        """带 fcntl 锁写入 _meta.json。"""
+        path = self._meta_path(scope, tenant_id, user_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _parse_entries(content: str, filename: str) -> list[tuple[str, str]]:
+        """按 ## 分段返回 [(entry_key, text)]。无 ## 段落的文件用 __full__。"""
+        sections: list[tuple[str, str]] = []
+        current_header: str | None = None
+        current_lines: list[str] = []
+
+        for line in content.split("\n"):
+            if line.startswith("## "):
+                if current_header is not None:
+                    text = "\n".join(current_lines).strip()
+                    if text:
+                        sections.append((f"{filename}::{current_header}", text))
+                current_header = line[3:].strip()
+                current_lines = [line]
+            else:
+                if current_header is not None:
+                    current_lines.append(line)
+
+        # flush last section
+        if current_header is not None:
+            text = "\n".join(current_lines).strip()
+            if text:
+                sections.append((f"{filename}::{current_header}", text))
+
+        # 无 ## 段落 → 整个文件作为一个条目
+        if not sections and content.strip():
+            sections.append((f"{filename}::__full__", content.strip()))
+
+        return sections
+
+    def increment_usage(
+        self, scope: str, entry_key: str, tenant_id: str = "", user_id: str = "",
+    ) -> None:
+        """递增 usage_count + 更新 last_used。"""
+        meta = self._load_meta(scope, tenant_id, user_id)
+        entries = meta.setdefault("entries", {})
+        now = datetime.now(timezone.utc).isoformat()
+        if entry_key in entries:
+            entries[entry_key]["usage_count"] = entries[entry_key].get("usage_count", 0) + 1
+            entries[entry_key]["last_used"] = now
+        else:
+            entries[entry_key] = {"usage_count": 1, "last_used": now, "created_at": now}
+        self._save_meta(scope, meta, tenant_id, user_id)
+
+    def get_usage_stats(
+        self, scope: str, tenant_id: str = "", user_id: str = "",
+    ) -> list[dict]:
+        """按 usage_count 降序返回所有条目统计。"""
+        meta = self._load_meta(scope, tenant_id, user_id)
+        result = [
+            {
+                "entry_key": key,
+                "usage_count": info.get("usage_count", 0),
+                "last_used": info.get("last_used", ""),
+                "created_at": info.get("created_at", ""),
+            }
+            for key, info in meta.get("entries", {}).items()
+        ]
+        result.sort(key=lambda x: x["usage_count"], reverse=True)
+        return result
+
     # ─── Prompt 注入 ──────────────────────────────────────────
 
     def build_memory_prompt(
         self,
         tenant_id: str = "default",
         user_id: str = "anonymous",
-    ) -> str:
+    ) -> tuple[str, dict[str, tuple[str, str]]]:
         """
         构建 <memory> XML 块, 注入 system prompt L5 层。
 
-        读取 global + tenant + user 三级, 按优先级拼接。
-        总字符控制在 max_prompt_chars 内。
+        读取 global + tenant + user 三级, 每个段落分配短 ID (m1, m2, ...)。
+        同 scope 内按 usage_count 降序排列。总字符控制在 max_prompt_chars 内。
+
+        Returns:
+            (prompt_text, id_map) — id_map: {"m1": ("scope", "entry_key"), ...}
         """
-        sections: list[tuple[str, str]] = []
+        scope_configs = [
+            ("global", {}),
+            ("tenant", {"tenant_id": tenant_id}),
+            ("user", {"tenant_id": tenant_id, "user_id": user_id}),
+        ]
 
-        global_content = self.read_all("global")
-        if global_content:
-            sections.append(("global", global_content))
+        # ── 收集每个 scope 的段落, 按 usage_count 排序 ──
+        scope_data: list[tuple[str, list[tuple[str, str]]]] = []
 
-        tenant_content = self.read_all("tenant", tenant_id=tenant_id)
-        if tenant_content:
-            sections.append(("tenant", tenant_content))
+        for scope_name, kwargs in scope_configs:
+            files = self.list_files(scope_name, **kwargs)
+            if not files:
+                continue
+            meta_entries = self._load_meta(scope_name, **kwargs).get("entries", {})
 
-        user_content = self.read_all("user", tenant_id=tenant_id, user_id=user_id)
-        if user_content:
-            sections.append(("user", user_content))
+            all_entries: list[tuple[str, str, int]] = []  # (entry_key, text, usage_count)
+            for fname in files:
+                content = self.read_file(scope_name, fname, **kwargs)
+                if not content.strip():
+                    continue
+                for entry_key, text in self._parse_entries(content, fname):
+                    uc = meta_entries.get(entry_key, {}).get("usage_count", 0)
+                    all_entries.append((entry_key, text, uc))
 
-        if not sections:
-            return ""
+            all_entries.sort(key=lambda x: x[2], reverse=True)
+            if all_entries:
+                scope_data.append((scope_name, [(k, t) for k, t, _ in all_entries]))
 
-        # 按优先级裁剪: user > tenant > global
-        # 先预留高优先级, 低优先级截断
+        if not scope_data:
+            return ("", {})
+
+        # ── 按优先级分配预算: user > tenant > global ──
         budget = self.max_prompt_chars
-        final_sections: list[tuple[str, str]] = []
+        id_counter = 1
+        id_map: dict[str, tuple[str, str]] = {}
+        allocated: list[tuple[str, list[str]]] = []
 
-        # 倒序处理 (user 最后加入 sections 列表, 但优先级最高)
-        for tag, content in reversed(sections):
+        for scope_name, entries in reversed(scope_data):
             if budget <= 0:
                 break
-            if len(content) <= budget:
-                final_sections.append((tag, content))
-                budget -= len(content)
-            else:
-                # 截断低优先级内容
-                truncated = content[:budget] + "\n[...truncated...]"
-                final_sections.append((tag, truncated))
-                budget = 0
+            parts: list[str] = []
+            for entry_key, text in entries:
+                if budget <= 0:
+                    break
+                mid = f"m{id_counter}"
+                prefixed = f"[{mid}] {text}"
+                cost = len(prefixed) + 2  # \n\n separator
+                if cost <= budget:
+                    parts.append(prefixed)
+                    id_map[mid] = (scope_name, entry_key)
+                    id_counter += 1
+                    budget -= cost
+                else:
+                    overhead = len(f"[{mid}] ") + len("\n[...truncated...]")
+                    remaining = budget - overhead
+                    if remaining > 20:
+                        parts.append(f"[{mid}] {text[:remaining]}\n[...truncated...]")
+                        id_map[mid] = (scope_name, entry_key)
+                        id_counter += 1
+                    budget = 0
+                    break
+            if parts:
+                allocated.append((scope_name, parts))
 
-        # 恢复原始顺序 (global → tenant → user)
-        final_sections.reverse()
+        allocated.reverse()  # 恢复 global → tenant → user 顺序
 
-        parts: list[str] = []
-        for tag, content in final_sections:
-            parts.append(f"<{tag}>\n{content}\n</{tag}>")
+        text_parts: list[str] = []
+        for scope_name, parts in allocated:
+            content = "\n\n".join(parts)
+            text_parts.append(f"<{scope_name}>\n{content}\n</{scope_name}>")
 
-        return "\n".join(parts)
+        return ("\n".join(text_parts), id_map)
 
     # ─── 记忆合并 (Phase 4B) ──────────────────────────────────
 
@@ -375,6 +499,139 @@ class MarkdownMemoryStore:
                 break
 
         return merged_count
+
+    # ─── 过期清理 (5.3) ──────────────────────────────────────
+
+    def cleanup_expired_entries(
+        self,
+        scope: str,
+        tenant_id: str = "",
+        user_id: str = "",
+        retention_days: int = 30,
+    ) -> int:
+        """
+        清理 _meta.json 中已过期的记忆条目。
+
+        条件: last_used (或 created_at) 超过 retention_days 且 usage_count == 0。
+        保护规则: usage_count > 0 的永不清理。
+
+        Returns:
+            清理的条目数。
+        """
+        if retention_days <= 0:
+            return 0
+
+        meta = self._load_meta(scope, tenant_id, user_id)
+        entries = meta.get("entries", {})
+        if not entries:
+            return 0
+
+        now = datetime.now(timezone.utc)
+        to_remove: list[str] = []
+
+        for key, info in entries.items():
+            if info.get("usage_count", 0) > 0:
+                continue
+            ts_str = info.get("last_used") or info.get("created_at", "")
+            if not ts_str:
+                continue
+            try:
+                ts = datetime.fromisoformat(ts_str)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                age_days = (now - ts).days
+                if age_days >= retention_days:
+                    to_remove.append(key)
+            except (ValueError, TypeError):
+                continue
+
+        if not to_remove:
+            return 0
+
+        # ── 从 .md 文件中删除对应段落 ──
+        kwargs = {"tenant_id": tenant_id, "user_id": user_id} if scope != "global" else {}
+        if scope == "tenant":
+            kwargs = {"tenant_id": tenant_id}
+        elif scope == "user":
+            kwargs = {"tenant_id": tenant_id, "user_id": user_id}
+        else:
+            kwargs = {}
+
+        files_to_rewrite: dict[str, list[str]] = {}  # filename → [headers_to_remove]
+        for key in to_remove:
+            parts = key.split("::", 1)
+            if len(parts) != 2:
+                continue
+            filename, header = parts
+            files_to_rewrite.setdefault(filename, []).append(header)
+
+        for filename, headers in files_to_rewrite.items():
+            content = self.read_file(scope, filename, **kwargs)
+            if not content:
+                continue
+            parsed = self._parse_entries(content, filename)
+            remaining = [
+                text for ek, text in parsed
+                if ek.split("::", 1)[1] not in headers
+            ]
+            new_content = "\n\n".join(remaining)
+            if new_content.strip():
+                self.write_file(scope, filename, new_content, mode="rewrite", **kwargs)
+            else:
+                self.delete_file(scope, filename, **kwargs)
+
+        # ── 从 _meta.json 删除条目 ──
+        for key in to_remove:
+            entries.pop(key, None)
+        self._save_meta(scope, meta, tenant_id, user_id)
+
+        logger.info(f"Cleaned {len(to_remove)} expired memory entries in {scope}")
+        return len(to_remove)
+
+    def scan_and_cleanup_expired(
+        self,
+        retention_days: int = 30,
+        max_per_run: int = 100,
+    ) -> int:
+        """
+        扫描 data/memory/user/ 全部目录，清理过期记忆条目。
+
+        Returns:
+            清理的总条目数。
+        """
+        if retention_days <= 0:
+            return 0
+
+        user_dir = self.base_dir / "user"
+        if not user_dir.exists():
+            return 0
+
+        total_cleaned = 0
+        processed = 0
+
+        for tenant_dir in sorted(user_dir.iterdir()):
+            if not tenant_dir.is_dir():
+                continue
+            tenant_id = tenant_dir.name
+            for uid_dir in sorted(tenant_dir.iterdir()):
+                if not uid_dir.is_dir():
+                    continue
+                if processed >= max_per_run:
+                    break
+                user_id = uid_dir.name
+                processed += 1
+                try:
+                    cleaned = self.cleanup_expired_entries(
+                        "user", tenant_id=tenant_id, user_id=user_id,
+                        retention_days=retention_days,
+                    )
+                    total_cleaned += cleaned
+                except Exception as e:
+                    logger.warning(f"Cleanup failed for {tenant_id}/{user_id}: {e}")
+            if processed >= max_per_run:
+                break
+
+        return total_cleaned
 
     # ─── 统计 ────────────────────────────────────────────────
 

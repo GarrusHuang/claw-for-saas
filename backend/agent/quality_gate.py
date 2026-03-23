@@ -236,7 +236,7 @@ def check_memory_compliance(event: HookEvent) -> tuple[bool, str, str]:
         if not ctx or not ctx.memory_store:
             return True, "", ""
 
-        memory_content = ctx.memory_store.build_memory_prompt(ctx.tenant_id, ctx.user_id)
+        memory_content, _ = ctx.memory_store.build_memory_prompt(ctx.tenant_id, ctx.user_id)
     except Exception:
         return True, "", ""
 

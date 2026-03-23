@@ -148,6 +148,14 @@ async def lifespan(app: FastAPI):
                     )
                     if merged:
                         logger.info(f"Memory merge: merged {merged} users")
+                    # 5.3: 过期记忆清理 (复用同一循环周期)
+                    if s.memory_retention_days > 0:
+                        cleaned = store.scan_and_cleanup_expired(
+                            retention_days=s.memory_retention_days,
+                            max_per_run=100,
+                        )
+                        if cleaned:
+                            logger.info(f"Memory cleanup: removed {cleaned} expired entries")
                 except asyncio.CancelledError:
                     break
                 except Exception as e:

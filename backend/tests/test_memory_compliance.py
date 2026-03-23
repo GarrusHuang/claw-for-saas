@@ -26,7 +26,7 @@ def _make_event(final_answer: str = "", **kwargs) -> HookEvent:
 def _run_with_memory(final_answer: str, memory_content: str) -> tuple[bool, str, str]:
     """Helper: 设置 RequestContext 并运行 check_memory_compliance。"""
     mock_store = MagicMock()
-    mock_store.build_memory_prompt.return_value = memory_content
+    mock_store.build_memory_prompt.return_value = (memory_content, {})
 
     ctx = RequestContext(memory_store=mock_store, tenant_id="default", user_id="U1")
     token = current_request.set(ctx)
