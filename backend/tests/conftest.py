@@ -6,6 +6,15 @@ from pathlib import Path
 
 import pytest
 
+# ── 加载 .env (项目根目录或 backend/) ──
+try:
+    from dotenv import load_dotenv
+    # backend/.env → backend/../.env 都尝试
+    _backend_dir = Path(__file__).resolve().parent.parent
+    load_dotenv(_backend_dir / ".env")
+except ImportError:
+    pass  # python-dotenv 未安装时静默跳过
+
 # ── LLM 配置：统一从环境变量读取，只需改 .env ──
 
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")

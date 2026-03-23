@@ -168,6 +168,9 @@ class AgentGateway:
             summary = summary[:1497] + "..."
         return summary
 
+    # 类级标记: 每个进程只清理一次 thinking 垃圾
+    _garbage_cleaned: set[str] = set()
+
     async def _auto_save_memory(
         self,
         *,
@@ -199,6 +202,15 @@ class AgentGateway:
         if not self.memory_store or not self.llm_client:
             return
 
+        # ── Step 6: 一次性清理 thinking 垃圾数据 ──
+        cleanup_key = f"{tenant_id}/{user_id}"
+        if cleanup_key not in self._garbage_cleaned:
+            self._garbage_cleaned.add(cleanup_key)
+            try:
+                self._cleanup_thinking_garbage(tenant_id, user_id)
+            except Exception as e:
+                logger.debug(f"Thinking garbage cleanup failed (silent): {e}")
+
         # Guard: 消息太短，不值得提取
         if len(message) < 20 and len(answer) < 50:
             return
@@ -214,39 +226,47 @@ class AgentGateway:
                 pass
 
             extract_prompt = (
-                "分析以下对话，提取值得跨会话记住的信息。\n\n"
-                "## No-op Gate (最重要)\n"
-                "问自己: 「未来 Agent 是否真的会因为这条记忆而行为不同？」\n"
-                "如果答案是否，不要提取。大多数对话不需要提取任何内容。\n\n"
-                "## 提取类型\n"
-                "### 1. 用户偏好 (显式 + 隐式)\n"
-                "- 显式: 用户直接说「我喜欢...」「请用...格式」「不要...」\n"
-                "- 隐式: 用户反复选择某种方案、多次修改同一类输出格式\n"
-                "- 标记: `[偏好]`\n\n"
-                "### 2. 纠正反馈 (Failure Shield)\n"
-                "- 用户纠正了 Agent 的行为: 「不是这样的」「应该用...」\n"
-                "- 某种方法行不通的教训: 「用 X 方法不行，因为...」\n"
-                "- 标记: `[纠正]`\n\n"
-                "### 3. 关键决策 (Decision Trigger)\n"
-                "- 用户做出的重要技术/业务决策: 「我们决定用 SQLite」\n"
-                "- 架构选型、工具选择、流程确定\n"
-                "- 标记: `[决策]`\n\n"
-                "### 4. 角色信息\n"
-                "- 用户身份、职责、专业领域: 「我是前端开发」「我负责...」\n"
-                "- 标记: `[角色]`\n\n"
-                "## Task Outcome Triage\n"
-                "- 任务成功 → 只提取偏好/纠正/决策 (不提取任务本身)\n"
-                "- 任务失败 → 额外提取失败教训 (防止重蹈覆辙)\n"
+                "你是一个精确的记忆提取器。分析对话，提取值得跨会话保留的信息。\n\n"
+                "## 第一步: No-op Gate (必须首先执行)\n"
+                "逐项检查以下条件，任意满足则直接输出 NONE:\n"
+                "1. 对话是闲聊/打招呼/感谢/通用问答 → NONE\n"
+                "2. 对话内容是通用知识 (任何人都知道的事) → NONE\n"
+                "3. 对话仅涉及临时性数据 (一次性文件名、临时数值、特定 session 的细节) → NONE\n"
+                "4. 所有可能的提取项都已存在于 <existing_memory> 中 → NONE\n"
+                "5. 未来 Agent 不会因为这条记忆而行为不同 → NONE\n"
+                "大多数对话 (>80%) 不需要提取任何内容。宁可漏掉也不要提取垃圾。\n\n"
+                "## 第二步: Task Outcome Triage\n"
+                "判断本次任务结果:\n"
+                "- 成功 → 只提取用户偏好/纠正/决策/角色 (不提取任务本身的具体内容)\n"
+                "- 失败 → 额外提取失败教训 (防止重蹈覆辙): when <situation>, <what failed> because <why>\n"
                 "- 部分成功 → 提取哪些有效、哪些无效\n\n"
-                "## 绝对不提取\n"
-                "- 对话的具体内容摘要\n"
-                "- 临时的、一次性的任务细节 (文件名、具体数值)\n"
-                "- 已经在 <existing_memory> 中存在的信息 (去重!)\n"
-                "- Agent 的能力描述或通用知识\n\n"
-                "## 输出格式\n"
-                "如果有值得记忆的信息，每条一行:\n"
-                "`- [类型] 具体内容`\n"
-                "如果没有值得提取的内容，只输出 `NONE`。\n\n"
+                "## 第三步: 提取 (仅在通过 No-op Gate 且确有提取项时)\n"
+                "### 类型\n"
+                "- [偏好] 用户对输出格式/风格/方法的偏好\n"
+                "  - 显式: 「我喜欢...」「请用...」「不要...」\n"
+                "  - 隐式: 用户反复选择某方案、多次修改同一类输出\n"
+                "- [纠正] 用户纠正了 Agent 行为，或某方法行不通的教训\n"
+                "  - 格式: when <situation>, user said: '<原文引用>' -> <启示>\n"
+                "- [决策] 重要的技术/业务选型 (架构、工具、流程)\n"
+                "- [角色] 用户身份、职责、专业领域\n\n"
+                "### Evidence-first 原则\n"
+                "- 区分「用户明确说的」vs「Agent 推断的」\n"
+                "- 优先引用用户原话作为依据\n"
+                "- 不确定时不提取\n\n"
+                "## 绝对禁止提取\n"
+                "- 对话的具体内容摘要或总结\n"
+                "- 临时任务细节 (文件名、具体数值、session ID)\n"
+                "- 已在 <existing_memory> 中的信息\n"
+                "- Agent 能力描述或通用知识\n"
+                "- Agent 的思考过程、推理步骤\n\n"
+                "## 输出格式 (严格)\n"
+                "有提取项时，每条一行，格式必须为:\n"
+                "- [偏好] 具体内容\n"
+                "- [纠正] 具体内容\n"
+                "- [决策] 具体内容\n"
+                "- [角色] 具体内容\n"
+                "无提取项时，只输出: NONE\n"
+                "不要输出任何其他格式、解释或前言。\n\n"
                 f"<existing_memory>\n{existing_memory[:2000]}\n</existing_memory>\n\n"
                 f"<conversation>\n"
                 f"用户: {message[:1000]}\n"
@@ -275,6 +295,18 @@ class AgentGateway:
 
             extracted = llm_resp.content.strip()
 
+            # 脱敏: 移除可能泄露的 secret
+            if self.secret_redactor:
+                extracted = self.secret_redactor.redact(extracted)
+
+            # 格式校验: 每行应以 "- [" 开头
+            lines = [l.strip() for l in extracted.splitlines() if l.strip()]
+            valid_lines = [l for l in lines if l.startswith("- [")]
+            if not valid_lines:
+                logger.info("Auto-extract: no valid memory lines, discarding")
+                return
+            extracted = "\n".join(valid_lines)
+
             # 保存到 auto-learning.md (独立文件，不与 Agent 手动管理的文件冲突)
             import time as _time
             date_str = _time.strftime("%Y-%m-%d %H:%M")
@@ -292,6 +324,39 @@ class AgentGateway:
             logger.debug("Auto memory extraction timed out")
         except Exception as e:
             logger.debug(f"Auto memory extraction failed (silent): {e}")
+
+    def _cleanup_thinking_garbage(self, tenant_id: str, user_id: str) -> None:
+        """
+        清理 auto-learning.md 中的 thinking 垃圾数据。
+
+        如果文件内容包含 thinking 特征字符串，说明是旧版未分离 thinking 时写入的垃圾，
+        直接清空文件内容，让后续对话重新积累干净的记忆。
+        """
+        GARBAGE_MARKERS = ("Thinking Process:", "<think>", "</think>", "**Thinking")
+        try:
+            content = self.memory_store.read_file(
+                scope="user",
+                filename="auto-learning.md",
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if not content:
+                return
+            if any(marker in content for marker in GARBAGE_MARKERS):
+                logger.warning(
+                    f"Detected thinking garbage in auto-learning.md for {tenant_id}/{user_id}, "
+                    f"clearing {len(content)} chars"
+                )
+                self.memory_store.write_file(
+                    scope="user",
+                    filename="auto-learning.md",
+                    content="# Auto Learning\n\n",
+                    mode="rewrite",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+        except Exception:
+            pass  # 文件不存在或读取失败，静默跳过
 
     def _setup_context_vars(
         self, *, tenant_id: str, user_id: str, event_bus: EventBus | None,

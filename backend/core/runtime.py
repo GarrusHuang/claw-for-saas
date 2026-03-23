@@ -372,10 +372,12 @@ class AgenticRuntime:
             # ─── 2. 解析工具调用 ───
             parsed = self.tool_parser.parse(llm_response.to_message_dict())
 
-            # 收集 thinking (流式模式下已在流中处理，跳过重复)
-            if parsed.thinking and not self.config.stream:
-                self._thinking_parts.append(parsed.thinking)
-                self._emit("thinking", {"content": parsed.thinking, "iteration": iteration + 1})
+            # 收集 thinking: 非流式路径优先用 llm_response.thinking_content (llm_client 层已分离)
+            if not self.config.stream:
+                thinking_text = llm_response.thinking_content or parsed.thinking
+                if thinking_text:
+                    self._thinking_parts.append(thinking_text)
+                    self._emit("thinking", {"content": thinking_text, "iteration": iteration + 1})
 
             # ─── 3. 判断是否为 final answer ───
             if parsed.is_final_answer:

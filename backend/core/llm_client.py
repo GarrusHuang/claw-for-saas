@@ -49,6 +49,7 @@ class TokenUsage:
 class LLMResponse:
     """LLM 响应封装"""
     content: str | None = None
+    thinking_content: str | None = None  # thinking 内容 (已从 content 中分离)
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
     usage: TokenUsage = field(default_factory=TokenUsage)
@@ -434,7 +435,7 @@ class LLMGatewayClient:
         return payload
 
     def _parse_response(self, data: dict, latency_ms: float) -> LLMResponse:
-        """解析 API 响应。"""
+        """解析 API 响应，分离 thinking 内容。"""
         choices = data.get("choices", [])
         if not choices:
             return LLMResponse(content="", latency_ms=latency_ms, raw_response=data)
@@ -442,8 +443,25 @@ class LLMGatewayClient:
         message = choices[0].get("message", {})
         usage_data = data.get("usage", {})
 
+        raw_content = message.get("content")
+        thinking = None
+        content = raw_content
+
+        # 1. OpenAI 原生 reasoning_content (DeepSeek/o1 等)
+        if message.get("reasoning_content"):
+            thinking = message["reasoning_content"]
+
+        # 2. vLLM <think> 标签
+        elif content and "<think>" in content:
+            import re
+            match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+            if match:
+                thinking = match.group(1).strip()
+                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
         return LLMResponse(
-            content=message.get("content"),
+            content=content,
+            thinking_content=thinking,
             tool_calls=message.get("tool_calls"),
             finish_reason=choices[0].get("finish_reason"),
             usage=TokenUsage(

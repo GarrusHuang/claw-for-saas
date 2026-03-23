@@ -18,6 +18,7 @@ def _make_gateway(memory_store=None, llm_client=None):
     gw = AgentGateway.__new__(AgentGateway)
     gw.memory_store = memory_store
     gw.llm_client = llm_client
+    gw.secret_redactor = None
     return gw
 
 
@@ -87,12 +88,13 @@ class TestAutoSaveMemoryExtraction:
         store.append_memory.return_value = True
 
         llm_resp = MagicMock()
-        llm_resp.content = "- 用户偏好表格格式输出\n- 用户是数据分析师"
+        llm_resp.content = "- [偏好] 用户偏好表格格式输出\n- [角色] 用户是数据分析师"
 
         llm = MagicMock()
         llm.chat_completion = AsyncMock(return_value=llm_resp)
 
         gw = _make_gateway(store, llm_client=llm)
+        gw.secret_redactor = None
         with patch("config.settings") as mock_settings:
             mock_settings.memory_auto_extract_enabled = True
             mock_settings.memory_auto_extract_max_tokens = 300
@@ -106,7 +108,7 @@ class TestAutoSaveMemoryExtraction:
         call_kwargs = store.append_memory.call_args
         assert call_kwargs[1]["scope"] == "user"
         assert call_kwargs[1]["filename"] == "auto-learning.md"
-        assert "用户偏好" in call_kwargs[1]["content"]
+        assert "偏好" in call_kwargs[1]["content"]
 
     @pytest.mark.asyncio
     async def test_none_response_skips(self):
