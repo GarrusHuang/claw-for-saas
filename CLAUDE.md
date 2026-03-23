@@ -49,9 +49,9 @@ backend/
     tool_protocol.py   — ToolCallParser: 原生 tool_calls + Hermes XML 双模式解析
     context.py         — RequestContext 统一上下文 (含 deferred_tools, subagent_depth, memory_id_map)
     tracing.py         — OpenTelemetry 分布式追踪 (opt-in, NoOp fallback)
-    sandbox.py         — 文件沙箱 + Docker 沙箱
+    sandbox.py         — 文件沙箱 + Docker 沙箱 + symlink TOCTOU 防护
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
-    exec_policy.py     — ExecPolicy: 命令执行安全策略 (三层防御: 复合命令拆分+CommandRule规则表+全局黑名单)
+    exec_policy.py     — ExecPolicy: 命令执行安全策略 (三层防御 + per-user 审批持久化)
     secret_redactor.py — SecretRedactor: Secret 输出脱敏
     data_lock.py       — 字段锁定 (防止 Agent 覆盖关键数据)
     token_estimator.py — Token 估算
@@ -104,7 +104,7 @@ backend/
     response.py        — API 响应模型
     usage.py           — 用量数据模型
   plugins/             — 插件目录
-  tests/               — 76+ 测试文件
+  tests/               — 77+ 测试文件
   data/                — 运行时数据 (gitignored)
 
 frontend/
@@ -273,6 +273,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `GUARDIAN_API_KEY` — Guardian LLM API Key (空=复用主 key)
 - `GUARDIAN_RISK_THRESHOLD` — 风险评分阈值 (默认 80, 0-100)
 - `GUARDIAN_TIMEOUT_S` — Guardian LLM 超时秒数 (默认 30)
+- `LLM_FALLBACK_CONTEXT_WINDOW` — Fallback 模型上下文窗口 (0=与主模型相同，小于主模型时自动使用较小值)
 - `MEMORY_RETENTION_DAYS` — 记忆条目过期天数 (默认 30, 0=不清理, 仅清理 usage_count==0)
 - `MEMORY_WORKFLOW_TRACKING_ENABLED` — 启用工作流指纹追踪 (默认 true)
 - `MEMORY_WORKFLOW_REPEAT_THRESHOLD` — 工作流重复触发 Skill 建议的阈值 (默认 3)
@@ -300,6 +301,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 | Webhook | JSON | data/webhooks/ |
 | Hook 规则 | JSON | data/hook_rules/ |
 | 用量统计 | SQLite | data/claw.db (usage 表) |
+| 命令审批 | JSON | data/exec_approvals/{tenant}/{user}.json |
 | 工作空间 | 文件系统 (沙箱) | data/workspace/ |
 
 ## 内置工具列表
@@ -332,7 +334,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `agent_stop` — Agent 完成前质量门控 (可 block 触发自我纠正)
 - `pre_compact` — 压缩前保护关键信息
 
-内置安全 Hook: PII 检测、SSRF DNS 检查、路径穿越防护、速率限制、ExecPolicy 三层命令防御 (复合命令拆分+CommandRule 规则表+管道末端检查)、apply_patch 敏感文件检查、Guardian AI 风险评估 (可选，含对话上下文注入)。安全阻止消息附 request_permissions 工具提示。
+内置安全 Hook: PII 检测、SSRF DNS 检查、路径穿越防护 + symlink TOCTOU 防护、速率限制、ExecPolicy 三层命令防御 (复合命令拆分+CommandRule 规则表+管道末端检查 + per-user 审批持久化)、apply_patch 敏感文件检查、Guardian AI 风险评估 (可选，含对话上下文注入)、SecretRedactor (GitHub/GitLab/Google/Slack/npm 等 10+ 模式)。安全阻止消息附 request_permissions 工具提示。
 
 ## 插件系统
 

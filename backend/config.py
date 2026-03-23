@@ -59,6 +59,10 @@ class Settings(BaseSettings):
         default="",
         description="Fallback LLM API key (空=复用主 key)",
     )
+    llm_fallback_context_window: int = Field(
+        default=0,
+        description="Fallback 模型上下文窗口 (0=与主模型相同)。若更小，runtime 自动使用较小值确保不溢出",
+    )
 
     # ─── Agent Runtime ───
     agent_max_iterations: int = Field(

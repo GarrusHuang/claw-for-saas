@@ -116,22 +116,39 @@ class SandboxManager:
         """
         验证路径是否在 workspace 内。
 
+        包含 symlink TOCTOU 防护: 检查路径中是否有指向 workspace 外的符号链接。
+
         Returns:
             解析后的安全路径
 
         Raises:
-            PermissionError: 路径不在 workspace 内
+            PermissionError: 路径不在 workspace 内 或包含危险 symlink
         """
         resolved = os.path.realpath(os.path.expanduser(path))
         ws_real = os.path.realpath(workspace)
 
-        if resolved == ws_real or resolved.startswith(ws_real + os.sep):
-            return resolved
+        if not (resolved == ws_real or resolved.startswith(ws_real + os.sep)):
+            raise PermissionError(
+                f"路径 {path} 不在工作空间内。"
+                f"允许的目录: {workspace}"
+            )
 
-        raise PermissionError(
-            f"路径 {path} 不在工作空间内。"
-            f"允许的目录: {workspace}"
-        )
+        # Symlink TOCTOU 防护: 逐级检查路径组件是否为指向 workspace 外的符号链接
+        rel = os.path.relpath(resolved, ws_real)
+        if rel != ".":
+            check = ws_real
+            for part in rel.split(os.sep):
+                if part in (".", ".."):
+                    continue
+                check = os.path.join(check, part)
+                if os.path.islink(check):
+                    link_target = os.path.realpath(check)
+                    if not (link_target == ws_real or link_target.startswith(ws_real + os.sep)):
+                        raise PermissionError(
+                            f"路径包含指向工作空间外的符号链接: {check} → {link_target}"
+                        )
+
+        return resolved
 
     def validate_writable(self, path: str, workspace: str) -> str | None:
         """

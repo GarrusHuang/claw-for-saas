@@ -78,6 +78,14 @@ async def lifespan(app: FastAPI):
         init_tracing(service_name=_s.otel_service_name, endpoint=_s.otel_endpoint)
         logger.info(f"OpenTelemetry enabled: {_s.otel_endpoint}")
 
+    # LLM connection warmup (5.4: #25 减少首轮延迟)
+    try:
+        from dependencies import get_llm_client
+        llm = get_llm_client()
+        await llm.warmup()
+    except Exception as e:
+        logger.debug(f"LLM warmup skipped: {e}")
+
     # Start file cleanup background task
     file_cleanup_task = None
     if s.file_retention_days > 0:

@@ -109,6 +109,19 @@ def get_data_lock_registry():
 @lru_cache()
 def get_runtime_config() -> RuntimeConfig:
     s = get_settings()
+    # 5.4#31: 如果 fallback 模型上下文窗口更小，使用较小值确保不溢出
+    effective_window = s.agent_model_context_window
+    if (
+        s.llm_fallback_model
+        and s.llm_fallback_context_window > 0
+        and s.llm_fallback_context_window < effective_window
+    ):
+        effective_window = s.llm_fallback_context_window
+        logger.info(
+            f"Using fallback context window ({effective_window}) as budget basis "
+            f"(smaller than primary {s.agent_model_context_window})"
+        )
+
     return RuntimeConfig(
         max_iterations=s.agent_max_iterations,
         max_tokens_per_turn=s.llm_default_max_tokens,
@@ -116,7 +129,7 @@ def get_runtime_config() -> RuntimeConfig:
         tool_call_timeout_s=s.agent_tool_timeout_s,
         parallel_tool_calls=s.agent_parallel_tool_calls,
         context_budget_tokens=s.agent_context_budget_tokens,
-        model_context_window=s.agent_model_context_window,
+        model_context_window=effective_window,
         context_budget_ratio=s.agent_context_budget_ratio,
         compress_threshold_ratio=s.agent_compress_threshold_ratio,
         context_budget_min=s.agent_context_budget_min,

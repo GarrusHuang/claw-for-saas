@@ -14,8 +14,14 @@ Usage:
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -307,6 +313,7 @@ class ExecPolicy:
         self,
         extra_dangerous: list[str] | None = None,
         extra_safe: list[str] | None = None,
+        approvals_dir: str = "data/exec_approvals",
     ) -> None:
         patterns = list(_GLOBAL_DANGEROUS_PATTERNS)
         if extra_dangerous:
@@ -319,6 +326,9 @@ class ExecPolicy:
             for prefix in extra_safe:
                 if prefix not in self._rules:
                     self._rules[prefix] = CommandRule()
+
+        # 5.6#16: per-user 命令审批持久化
+        self._approvals_dir = approvals_dir
 
     def check_command(self, command: str) -> tuple[bool, str]:
         """
@@ -352,6 +362,58 @@ class ExecPolicy:
                 return False, reason
 
         return True, ""
+
+    # ── 5.6#16: per-user 命令审批持久化 ──
+
+    def _approvals_path(self, tenant_id: str, user_id: str) -> str:
+        return os.path.join(self._approvals_dir, tenant_id, f"{user_id}.json")
+
+    def load_approvals(self, tenant_id: str, user_id: str) -> list[str]:
+        """加载用户已审批的命令模式列表。"""
+        path = self._approvals_path(tenant_id, user_id)
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            return [e["pattern"] for e in data.get("approved_commands", [])]
+        except (json.JSONDecodeError, OSError, KeyError):
+            return []
+
+    def approve_command(self, tenant_id: str, user_id: str, pattern: str) -> None:
+        """持久化一条用户审批的命令模式。"""
+        path = self._approvals_path(tenant_id, user_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        data: dict = {"approved_commands": []}
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        entries = data.setdefault("approved_commands", [])
+        if not any(e["pattern"] == pattern for e in entries):
+            entries.append({
+                "pattern": pattern,
+                "approved_at": datetime.now(timezone.utc).isoformat(),
+            })
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def is_approved(self, tenant_id: str, user_id: str, command: str) -> bool:
+        """检查命令是否已被用户审批。"""
+        for pattern in self.load_approvals(tenant_id, user_id):
+            if command.strip().startswith(pattern):
+                return True
+        return False
+
+    def check_command_with_approval(
+        self, command: str, tenant_id: str = "", user_id: str = "",
+    ) -> tuple[bool, str]:
+        """check_command 增强版: 先查审批缓存，再走三层防御。"""
+        if tenant_id and user_id and self.is_approved(tenant_id, user_id, command):
+            return True, ""
+        return self.check_command(command)
 
     def is_sensitive_file(self, path: str) -> bool:
         """检查文件名是否为敏感文件。"""

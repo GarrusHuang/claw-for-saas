@@ -25,6 +25,16 @@ class SecretRedactor:
         (r"sk-[A-Za-z0-9]{20,}", "[REDACTED_API_KEY]"),
         # AWS access key
         (r"AKIA[0-9A-Z]{16}", "[REDACTED_AWS_KEY]"),
+        # GitHub personal access token (ghp_, gho_, ghu_, ghs_, ghr_)
+        (r"gh[pousr]_[A-Za-z0-9_]{36,}", "[REDACTED_GITHUB_TOKEN]"),
+        # GitLab personal access token
+        (r"glpat-[A-Za-z0-9\-_]{20,}", "[REDACTED_GITLAB_TOKEN]"),
+        # Google API key
+        (r"AIza[A-Za-z0-9\-_]{35}", "[REDACTED_GOOGLE_KEY]"),
+        # Slack tokens (xoxb-, xoxp-, xoxs-, xoxa-)
+        (r"xox[bpsa]-[A-Za-z0-9\-]{10,}", "[REDACTED_SLACK_TOKEN]"),
+        # npm token
+        (r"npm_[A-Za-z0-9]{36,}", "[REDACTED_NPM_TOKEN]"),
         # Generic key=value patterns for sensitive keys
         (r"(?i)(password|passwd|secret|api_key|apikey|access_token)\s*[=:]\s*\S+",
          r"\1=[REDACTED]"),

@@ -42,7 +42,7 @@
 | **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
 | **WebSocket 实时推送** | 15+ 事件类型，实时展示思考过程和工具执行，指数退避重连 |
 | **Collaboration Mode** | plan 模式 (只读分析 + 提出计划) / execute 模式 (全能力执行)，复杂任务先看计划再确认 |
-| **运行时安全围栏** | 文件沙箱 · 命令三层防御 (复合命令拆分+规则表+管道检查) · Secrets 脱敏 · Guardian AI 风险评估 (含对话上下文) · 权限请求 (request_permissions) · bcrypt · SSRF 检查 · 速率限制 · PII 检测 |
+| **运行时安全围栏** | 文件沙箱 (symlink TOCTOU 防护) · 命令三层防御 + per-user 审批持久化 · Secrets 脱敏 (10+ 模式: GitHub/GitLab/Google/Slack/npm) · Guardian AI 风险评估 · 权限请求 · bcrypt · SSRF 检查 · 速率限制 · PII 检测 |
 | **Multi-Agent 生命周期** | spawn + wait + send 三阶段管理，深度限制 (3层)，per-user 并发控制 (3个) |
 | **邀请码注册** | 管理员生成邀请码 → 用户自助注册，支持多次使用/过期/撤销 |
 | **OpenTelemetry 追踪** | opt-in 分布式追踪，4 个关键 span (gateway/runtime/tool/llm)，禁用时零开销 |
@@ -295,6 +295,7 @@ request_confirmation → Agent 请求用户确认/权限授权
 | `OTEL_ENABLED` | `False` | 启用 OpenTelemetry 分布式追踪 |
 | `OTEL_ENDPOINT` | `http://localhost:4317` | OTLP gRPC 端点 |
 | `LLM_FALLBACK_MODEL` | *(空)* | 备用模型 (主模型不可用时切换) |
+| `LLM_FALLBACK_CONTEXT_WINDOW` | `0` | Fallback 模型上下文窗口 (0=同主模型) |
 | `MEMORY_AUTO_EXTRACT_ENABLED` | `True` | 自动提取跨会话记忆 |
 | `MEMORY_RETENTION_DAYS` | `30` | 记忆过期天数 (0=不清理, 仅清理 usage_count==0) |
 | `MEMORY_WORKFLOW_TRACKING_ENABLED` | `True` | 启用工作流指纹追踪 (Skill 建议) |

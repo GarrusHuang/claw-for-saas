@@ -488,6 +488,21 @@ class LLMGatewayClient:
     def call_count(self) -> int:
         return self._call_count
 
+    async def warmup(self) -> None:
+        """
+        预热 HTTP 连接池，减少首次请求延迟。
+
+        创建 httpx 客户端并发送一个轻量 HEAD 请求探测连通性 (忽略失败)。
+        """
+        try:
+            client = await self._get_client()
+            # 轻量探测 — 只测连通性，不消耗 token
+            await client.head(f"{self.config.base_url}/models", timeout=5.0)
+            logger.info(f"LLM connection warmup OK: {self.config.base_url}")
+        except Exception as e:
+            # 预热失败不影响后续正常调用
+            logger.debug(f"LLM warmup probe failed (non-fatal): {e}")
+
     async def close(self) -> None:
         """关闭 HTTP 客户端。"""
         if self._client and not self._client.is_closed:
