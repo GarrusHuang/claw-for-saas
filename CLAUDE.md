@@ -48,7 +48,7 @@ backend/
     tool_registry.py   — 工具注册表 (schema + 执行 + search_tools + subset)
     tool_protocol.py   — ToolCallParser: 原生 tool_calls + Hermes XML 双模式解析
     context.py         — RequestContext 统一上下文 (含 deferred_tools, subagent_depth, memory_id_map)
-    tracing.py         — OpenTelemetry 分布式追踪 (opt-in, NoOp fallback)
+    tracing.py         — OpenTelemetry 分布式追踪 (opt-in) + MetricsCollector (counter/histogram)
     sandbox.py         — 文件沙箱 + Docker 沙箱 + symlink TOCTOU 防护
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
     exec_policy.py     — ExecPolicy: 命令执行安全策略 (三层防御 + per-user 审批持久化)
@@ -313,7 +313,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - browser: open_url, page_screenshot, page_extract_text
 - code: read_source_file
 - memory: recall_memory, search_memory
-- tool_search: tool_search (延迟工具搜索，工具数>30时自动启用)
+- tool_search: tool_search (BM25 延迟搜索), tool_suggest (任务描述→推荐工具)
 - search_tools: grep_files, list_dir (工作空间文件搜索/目录列出)
 
 **能力 (串行执行)**:

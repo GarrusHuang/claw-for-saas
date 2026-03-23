@@ -52,7 +52,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     # interaction
     "request_user_input", "request_permissions",
     # tool_search (self)
-    "tool_search",
+    "tool_search", "tool_suggest",
 })
 
 

@@ -53,6 +53,7 @@ class RequestContext:
     deferred_tools: list = field(default_factory=list)  # list[RegisteredTool]
     subagent_depth: int = 0  # 3.3: 子 Agent 嵌套深度
     memory_id_map: dict = field(default_factory=dict)  # 5.3: mem ID → (scope, entry_key)
+    cancellation_token: Any = None  # #11: CancellationToken (工具可检查是否被取消)
 
 
 current_request: contextvars.ContextVar[RequestContext | None] = contextvars.ContextVar(

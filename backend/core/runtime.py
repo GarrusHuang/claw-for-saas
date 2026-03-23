@@ -37,6 +37,40 @@ from .tracing import get_tracer
 logger = logging.getLogger(__name__)
 
 
+class CancellationToken:
+    """
+    #11: 工具取消令牌 — 允许中断长时间运行的工具。
+
+    工具实现可通过 RequestContext 获取 token 并定期检查 is_cancelled。
+    Runtime 在 abort 时设置 cancel。
+    """
+
+    def __init__(self) -> None:
+        self._cancelled = False
+        self._event = asyncio.Event()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        self._event.set()
+
+    async def wait(self, timeout: float | None = None) -> bool:
+        """等待取消事件。返回 True 如果被取消。"""
+        try:
+            await asyncio.wait_for(self._event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    def check(self) -> None:
+        """检查是否被取消，是则抛出 asyncio.CancelledError。"""
+        if self._cancelled:
+            raise asyncio.CancelledError("Tool execution cancelled")
+
+
 class StepType(str, Enum):
     """Runtime 步骤类型"""
     LLM_CALL = "llm_call"
@@ -191,10 +225,17 @@ class AgenticRuntime:
         self._checkpoint_rolled_back: bool = False
         # ── 3.3: 外部消息收件箱 (子 Agent send_to_subagent) ──
         self._message_inbox = message_inbox
+        # ── #11: CancellationToken ──
+        self._cancellation_token = CancellationToken()
+
+    @property
+    def cancellation_token(self) -> CancellationToken:
+        return self._cancellation_token
 
     def request_abort(self) -> None:
         """Request the runtime to abort the ReAct loop at the next iteration."""
         self._abort_requested = True
+        self._cancellation_token.cancel()
         logger.info("Abort requested for runtime", extra={"trace_id": self.trace_id})
 
     def _get_llm_schemas(self) -> list[dict] | None:
@@ -271,6 +312,9 @@ class AgenticRuntime:
                 f"ReAct iteration {iteration + 1}/{self.config.max_iterations}",
                 extra={"trace_id": self.trace_id},
             )
+            # #19: per-turn counter
+            from core.tracing import get_metrics
+            get_metrics().increment("runtime.turns")
 
             # ─── 0. 上下文预算检查 + 中间压缩 ───
             messages = await self._compact_messages(messages)
@@ -1157,6 +1201,14 @@ class AgenticRuntime:
                 else self._summarize_result(result)
             ),
         })
+
+        # #19: per-tool metrics
+        from core.tracing import get_metrics as _get_metrics
+        _m = _get_metrics()
+        _m.increment("tool.calls")
+        _m.increment(f"tool.calls.{tool_call.name}")
+        _m.record("tool.latency_ms", latency_ms)
+        _m.record(f"tool.latency_ms.{tool_call.name}", latency_ms)
 
         logger.info(
             f"Tool executed: {tool_call.name}",
