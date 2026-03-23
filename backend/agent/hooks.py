@@ -234,6 +234,10 @@ def build_default_hooks() -> HookRegistry:
             guardian_handler = build_guardian_hook(_guardian_settings)
             if guardian_handler:
                 registry.register("pre_tool_use", guardian_handler)
+            # #43: 语义质量检查 (复用 Guardian 开关 — 同样需要 LLM，同一个成本决策)
+            from agent.quality_gate import semantic_quality_hook
+            registry.register("agent_stop", semantic_quality_hook)
+            logger.info("Semantic quality check enabled (guardian_enabled=True)")
     except Exception as e:
         logger.debug(f"Guardian hook registration skipped: {e}")
 

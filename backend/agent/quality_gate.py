@@ -356,3 +356,112 @@ def quality_gate_hook(event: HookEvent) -> HookResult:
 def reset_correction_count(session_key: str) -> None:
     """重置自迭代计数 (用于测试或会话结束时清理)。"""
     _correction_counts.pop(session_key, None)
+
+
+# ── #43: 语义质量检查 (独立 async hook，guardian_enabled 时注册) ──
+
+# 复用 quality_gate_hook 的自迭代计数器，避免两个 hook 各自计数导致双倍修正
+_SEMANTIC_CHECK_MIN_ANSWER_LEN = 50
+_SEMANTIC_CHECK_MIN_TOOLS = 1
+
+
+async def semantic_quality_hook(event: HookEvent) -> HookResult:
+    """
+    agent_stop async hook: LLM 语义质量检查。
+
+    检查 Agent 回复是否与工具结果一致，检测幻觉。
+    仅在 guardian_enabled=True 时注册，fail-open (出错则放行)。
+    """
+    import asyncio
+    import time as _time
+
+    final_answer = event.context.get("final_answer", "")
+    if not final_answer or len(final_answer) < _SEMANTIC_CHECK_MIN_ANSWER_LEN:
+        return HookResult(action="allow")
+
+    # 提取工具调用历史
+    tool_steps = [s for s in event.runtime_steps if s.get("tool")]
+    if len(tool_steps) < _SEMANTIC_CHECK_MIN_TOOLS:
+        return HookResult(action="allow")
+
+    # 自迭代超限检查 (复用同一计数器)
+    session_key = f"{event.user_id}:{event.session_id}"
+    entry = _correction_counts.get(session_key)
+    if entry:
+        count, ts = entry
+        if _time.time() - ts < _CORRECTION_TTL_S and count >= MAX_SELF_CORRECTIONS:
+            return HookResult(action="allow")
+
+    # 构建工具结果摘要 (最近 5 个)
+    tool_summaries = []
+    for step in tool_steps[-5:]:
+        result_preview = str(step.get("result", ""))[:150]
+        tool_summaries.append(f"- {step['tool']}: {result_preview}")
+
+    try:
+        from dependencies import get_llm_client
+        from config import settings
+
+        # 使用 Guardian LLM 配置 (可能是更便宜的模型)
+        llm = get_llm_client()
+        # 如果有独立 Guardian 配置，构建专用 client
+        if settings.guardian_model and settings.guardian_base_url:
+            from core.llm_client import LLMGatewayClient, LLMClientConfig
+            llm = LLMGatewayClient(LLMClientConfig(
+                base_url=settings.guardian_base_url or settings.llm_base_url,
+                model=settings.guardian_model or settings.llm_model,
+                api_key=settings.guardian_api_key or settings.llm_api_key,
+                max_retries=0,
+            ))
+
+        prompt = (
+            "检查 AI 回复的事实准确性。只关注以下两点:\n"
+            "1. 回复中的具体数据/结论是否能在工具结果中找到依据？\n"
+            "2. 回复中是否有工具结果中不存在的捏造信息？\n\n"
+            f"工具返回的结果:\n{''.join(tool_summaries)}\n\n"
+            f"AI 回复:\n{final_answer[:500]}\n\n"
+            "如果回复准确，只输出: PASS\n"
+            "如果发现问题，输出: FAIL|具体哪句话有问题|应该如何修正"
+        )
+
+        resp = await asyncio.wait_for(
+            llm.chat_completion(
+                messages=[
+                    {"role": "system", "content": "你是事实核查器。只判断回复是否与工具结果一致。"},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=150,
+                temperature=0.2,
+            ),
+            timeout=float(settings.guardian_timeout_s),
+        )
+
+        if not resp.content:
+            return HookResult(action="allow")
+
+        text = resp.content.strip()
+        if text.upper().startswith("PASS"):
+            return HookResult(action="allow")
+
+        # FAIL — 提取修正建议
+        parts = text.split("|", 2)
+        if len(parts) >= 3:
+            issue = parts[1].strip()
+            correction = parts[2].strip()
+        elif len(parts) == 2:
+            issue = parts[1].strip()
+            correction = "请检查回复中的事实准确性"
+        else:
+            issue = text[:200]
+            correction = "请核对工具返回的结果，确保回复内容有据可查"
+
+        logger.info(f"Semantic check failed: {issue[:100]}")
+        return HookResult(
+            action="block",
+            message=f"[语义检查] 发现事实性问题: {issue}\n修正建议: {correction}",
+        )
+
+    except Exception as e:
+        # fail-open: 出错放行
+        logger.debug(f"Semantic quality check skipped (fail-open): {e}")
+        return HookResult(action="allow")
