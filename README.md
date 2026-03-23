@@ -34,18 +34,18 @@
 | 特性 | 说明 |
 |:-----|:-----|
 | **ReAct 循环引擎** | 最多 25 轮迭代，支持并行工具调用，LLM 自动重试 + Fallback 降级 |
-| **40 个内置工具** | 计算 · 文件 · 知识库 · 浏览器 · 代码执行 · 记忆搜索 · 技能 · 子 Agent · 定时任务 · 工具搜索 · 文件搜索 |
-| **Tool Search 延迟加载** | 工具数超过阈值时自动切换延迟模式，prompt 只含核心工具，Agent 按需搜索 |
+| **40+ 内置工具** | 计算 · 文件 · 知识库搜索 · 浏览器 · 代码执行 (缩进读取) · 记忆搜索 · 技能 · 子 Agent (fork 历史) · 定时任务 · 工具搜索/推荐 · 文件搜索 · 批量处理 |
+| **Tool Search 延迟加载** | BM25 评分 (含 CJK 子串匹配)，tool_suggest 任务推荐，工具数超阈值自动延迟 |
 | **8 层提示词架构** | Identity → Soul → Safety → Tools → Skills → Memory → Runtime → Extra |
 | **跨会话记忆** | LLM 自动提取偏好/纠正/决策 + 引用追踪 (usage_count 排序) + 过期清理 + 关键词搜索 + 合并索引 + 三层 Markdown 笔记 + 重复工作流 Skill 建议 |
-| **四阶段上下文压缩** | 截断 → 摘要 → 元数据 → 逐条删 + 1.2x token 安全边距 + 动态工具结果上限 |
-| **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
+| **四阶段上下文压缩** | 截断 → 摘要 (含 Context Diff) → 元数据 → 逐条删 + 动态工具结果上限 |
+| **20 个领域 Skill** | 合同 · 报销 · 审计等，YAML frontmatter (含 env_requires/permissions 声明) + 热重载 |
 | **WebSocket 实时推送** | 15+ 事件类型，实时展示思考过程和工具执行，指数退避重连 |
-| **Collaboration Mode** | plan 模式 (只读分析 + 提出计划) / execute 模式 (全能力执行)，复杂任务先看计划再确认 |
+| **Collaboration Mode** | plan/execute 模式 + 命名预设 (quick/deep/creative) + Prompt 模板复用 |
 | **运行时安全围栏** | 文件沙箱 (symlink TOCTOU 防护) · 命令三层防御 + per-user 审批持久化 · Secrets 脱敏 (10+ 模式: GitHub/GitLab/Google/Slack/npm) · Guardian AI 风险评估 · 权限请求 · bcrypt · SSRF 检查 · 速率限制 · PII 检测 |
-| **Multi-Agent 生命周期** | spawn + wait + send 三阶段管理，深度限制 (3层)，per-user 并发控制 (3个) |
+| **Multi-Agent 生命周期** | spawn + wait + send + fork 父历史，深度限制 (3层)，per-user 并发控制 (3个) |
 | **邀请码注册** | 管理员生成邀请码 → 用户自助注册，支持多次使用/过期/撤销 |
-| **OpenTelemetry 追踪** | opt-in 分布式追踪，4 个关键 span (gateway/runtime/tool/llm)，禁用时零开销 |
+| **OpenTelemetry + Metrics** | OTel 分布式追踪 (opt-in) + MetricsCollector (counter/histogram/snapshot) |
 | **MCP 标准工具接口** | 条件注册（mcp_enabled=True），6 个标准工具，HTTP 转发到宿主 |
 | **定时调度 + Webhook** | Cron 定时任务 · 一次性任务 · Webhook HMAC 签名回调 |
 | **全格式文件预览** | DOCX · PDF · Excel · 图片 · HTML · 代码 · Markdown |
@@ -140,9 +140,9 @@ claw-for-saas/
 ├── backend/
 │   ├── core/               # Agent 引擎 (runtime, tools, llm, events, sandbox, tracing)
 │   ├── agent/              # Gateway + 编排 (prompt, session, hooks, subagent, quality_gate)
-│   ├── memory/             # 三层 Markdown 记忆 (global/tenant/user)
+│   ├── memory/             # 三层 Markdown 记忆 (引用追踪 + usage 排序 + 过期清理)
 │   ├── tools/
-│   │   ├── builtin/        # 34 个内置工具 (含 tool_search + search_tools)
+│   │   ├── builtin/        # 40+ 内置工具 (含 tool_search/suggest + search_knowledge)
 │   │   └── mcp/            # MCP 标准工具接口
 │   ├── skills/builtin/     # 20 个内置 Skill
 │   ├── services/           # 文件 / 知识库 / 浏览器 / 用量统计
@@ -200,7 +200,7 @@ function MyPage() {
 | **自定义工具** | 给 Agent 新能力 | `@registry.tool()` 装饰器，通过 `build_gateway()` 注入 |
 | **自定义 Soul** | 改变 Agent 角色和行为 | 替换 `prompts/soul.md` |
 | **自定义 Skill** | 注入领域知识 | 放入 `skills/` 目录，YAML frontmatter + Markdown body |
-| **自定义 Hook** | 拦截/审计工具调用 | `HookRegistry.register()` 或 Hook Rule CRUD API |
+| **自定义 Hook** | 拦截/审计/注入指令 | `HookRegistry.register()` (6 种事件 + inject action) 或 Hook Rule API |
 | **Quality Gate** | 业务校验 Agent 输出 | 注册 `agent_stop` hook |
 | **BusinessContext** | 传入业务上下文 | 请求中传入 opaque dict，prompt builder 自动序列化为 XML |
 
@@ -263,6 +263,9 @@ plan_proposed      → 执行计划
 step_started       → 步骤开始
 step_completed     → 步骤完成
 tool_executed      → 工具执行结果
+item_started       → 通用项目开始
+item_updated       → 通用项目进度
+item_completed     → 通用项目完成
 pipeline_complete  → 会话结束 (duration, summary)
 skill_suggestion   → Skill 自动建议 (重复工作流检测)
 error              → 错误 (category, recoverable, suggested_action)
@@ -299,6 +302,7 @@ request_confirmation → Agent 请求用户确认/权限授权
 | `MEMORY_AUTO_EXTRACT_ENABLED` | `True` | 自动提取跨会话记忆 |
 | `MEMORY_RETENTION_DAYS` | `30` | 记忆过期天数 (0=不清理, 仅清理 usage_count==0) |
 | `MEMORY_WORKFLOW_TRACKING_ENABLED` | `True` | 启用工作流指纹追踪 (Skill 建议) |
+| `MODE_PRESETS` | *(JSON)* | 命名模式预设 (quick/deep/creative) |
 | `SANDBOX_MAX_DISK_QUOTA_MB` | `500` | 单用户磁盘配额 |
 | `SANDBOX_WRITABLE_ROOTS` | `""` | 沙箱可写子目录 (逗号分隔，空=整个 workspace) |
 | `MAX_FILE_UPLOAD_MB` | `100` | 文件上传大小限制 |

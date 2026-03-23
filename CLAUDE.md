@@ -100,6 +100,7 @@ backend/
     content_processor.py — 文件内容处理 (PDF/DOCX/图片压缩)
     usage_service.py   — 用量统计服务
     knowledge_service.py — 知识库服务 (元数据缓存 + _index.md 自动生成 + search_knowledge)
+    batch_service.py   — 批量任务服务 (并发执行 + 汇总)
     browser_service.py — Playwright 浏览器自动化
   models/
     request.py         — API 请求模型
