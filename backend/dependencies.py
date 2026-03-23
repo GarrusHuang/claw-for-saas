@@ -84,9 +84,11 @@ def get_sandbox_manager():
     from core.sandbox import SandboxManager, SandboxConfig
     s = get_settings()
     whitelist = [w.strip() for w in s.sandbox_network_whitelist.split(",") if w.strip()] if s.sandbox_network_whitelist else []
+    writable_roots = [r.strip() for r in s.sandbox_writable_roots.split(",") if r.strip()] if s.sandbox_writable_roots else []
     config = SandboxConfig(
         workspace_base_dir=s.sandbox_workspace_dir,
         max_disk_quota_mb=s.sandbox_max_disk_quota_mb,
+        writable_roots=writable_roots,
         network_whitelist=whitelist,
         block_private_networks=s.sandbox_block_private_networks,
         rate_limit_per_minute=s.sandbox_rate_limit_per_minute,

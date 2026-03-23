@@ -50,7 +50,7 @@ backend/
     tracing.py         — OpenTelemetry 分布式追踪 (opt-in, NoOp fallback)
     sandbox.py         — 文件沙箱 + Docker 沙箱
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
-    exec_policy.py     — ExecPolicy: 命令执行安全策略 (白名单+黑名单)
+    exec_policy.py     — ExecPolicy: 命令执行安全策略 (三层防御: 复合命令拆分+CommandRule规则表+全局黑名单)
     secret_redactor.py — SecretRedactor: Secret 输出脱敏
     data_lock.py       — 字段锁定 (防止 Agent 覆盖关键数据)
     token_estimator.py — Token 估算
@@ -258,6 +258,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `MCP_ENABLED` — 启用 MCP 工具接口
 - `SCHEDULER_ENABLED` — 启用定时调度 (默认 true)
 - `SANDBOX_DOCKER_ENABLED` — 启用 Docker 沙箱
+- `SANDBOX_WRITABLE_ROOTS` — 沙箱可写子目录 (逗号分隔，空=整个 workspace 可写)
 - `AGENT_TOOL_DEFERRED_THRESHOLD` — 工具延迟加载阈值 (默认 30)
 - `OTEL_ENABLED` — 启用 OpenTelemetry 追踪 (默认 false)
 - `OTEL_ENDPOINT` — OTLP gRPC 端点 (默认 http://localhost:4317)
@@ -313,7 +314,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - plan: propose_plan, update_plan_step
 - subagent: spawn_subagent, spawn_subagents, wait_subagent, send_to_subagent
 - schedule: create_schedule, list_schedules, delete_schedule
-- interaction: request_user_input
+- interaction: request_user_input, request_permissions
 - mcp (条件注册): get_form_schema, get_business_rules, get_candidate_types, get_protected_values, submit_form_data, query_data
 
 ## Hook 系统
@@ -324,7 +325,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `agent_stop` — Agent 完成前质量门控 (可 block 触发自我纠正)
 - `pre_compact` — 压缩前保护关键信息
 
-内置安全 Hook: PII 检测、SSRF DNS 检查、路径穿越防护、速率限制、Guardian AI 风险评估 (可选)。
+内置安全 Hook: PII 检测、SSRF DNS 检查、路径穿越防护、速率限制、ExecPolicy 三层命令防御 (复合命令拆分+CommandRule 规则表+管道末端检查)、apply_patch 敏感文件检查、Guardian AI 风险评估 (可选，含对话上下文注入)。安全阻止消息附 request_permissions 工具提示。
 
 ## 插件系统
 

@@ -22,6 +22,7 @@ from tools.builtin.apply_patch import (
     PatchApplyError,
     _seek_sequence,
     _apply_update,
+    _normalize_unicode,
 )
 
 
@@ -452,3 +453,67 @@ class TestApplyPatchTool:
             current_request.reset(token)
         assert "error" in result
         assert "escapes" in result["error"]
+
+
+# ── Unicode 归一化测试 ──
+
+
+class TestNormalizeUnicode:
+    def test_fancy_quotes(self):
+        assert _normalize_unicode('\u201cHello\u201d') == '"Hello"'
+        assert _normalize_unicode('\u2018world\u2019') == "'world'"
+
+    def test_em_en_dash(self):
+        assert _normalize_unicode('a\u2014b') == 'a-b'
+        assert _normalize_unicode('a\u2013b') == 'a-b'
+
+    def test_nbsp(self):
+        assert _normalize_unicode('a\u00a0b') == 'a b'
+
+    def test_bom_zws(self):
+        assert _normalize_unicode('\ufeffhello\u200b') == 'hello'
+
+    def test_normal_ascii(self):
+        text = 'def foo():\n    return "bar"'
+        assert _normalize_unicode(text) == text
+
+    def test_cjk_not_affected(self):
+        text = '这是中文'
+        assert _normalize_unicode(text) == text
+
+    def test_emoji_not_affected(self):
+        text = 'hello 🎉 world'
+        assert _normalize_unicode(text) == text
+
+
+class TestUnicodePatching:
+    """Patch 含花式引号时能匹配源文件中的 ASCII 引号。"""
+
+    def test_parse_patch_with_fancy_quotes(self):
+        """parse_patch 入口处的 Unicode 归一化。"""
+        # 使用花式引号的 patch
+        patch_text = (
+            '*** Begin Patch\n'
+            '*** Add File: test.txt\n'
+            '+print(\u201chello\u201d)\n'
+            '*** End Patch\n'
+        )
+        hunks = parse_patch(patch_text)
+        assert len(hunks) == 1
+        h = hunks[0]
+        assert isinstance(h, AddFile)
+        # 归一化后应为 ASCII 引号
+        assert h.contents == 'print("hello")\n'
+
+    def test_seek_sequence_unicode_match(self, tmp_path):
+        """_seek_sequence Pass 4: Unicode 归一化匹配。"""
+        # 源文件用 ASCII 引号
+        f = tmp_path / "test.py"
+        f.write_text('def foo():\n    return "bar"\n')
+        # patch 的 old_lines 用花式引号
+        chunks = [UpdateChunk(
+            old_lines=['    return \u201cbar\u201d'],
+            new_lines=['    return "baz"'],
+        )]
+        result = _apply_update(str(f), chunks)
+        assert 'return "baz"' in result

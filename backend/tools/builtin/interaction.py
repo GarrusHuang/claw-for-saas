@@ -57,3 +57,49 @@ def request_user_input(
         })
 
     return {"status": "waiting_for_user", "question": question}
+
+
+@interaction_capability_registry.tool(
+    description=(
+        "向用户请求执行特定操作的权限。"
+        "当工具调用被安全策略阻止时，可通过此工具获取用户一次性授权。"
+        "permissions 参数为逗号分隔的权限描述列表 (如 '写入 .env 文件, 执行 git reset --hard')。"
+        "调用后应停止输出，等待用户确认 (确认会作为下一轮用户消息出现)。"
+        "授权仅当次有效，不持久化。"
+    ),
+    read_only=False,
+)
+def request_permissions(
+    permissions: str,    # 逗号分隔的权限描述列表
+    reason: str = "",    # 请求原因说明
+) -> dict:
+    """向用户请求执行特定操作的权限，通过 EventBus 发射交互事件。"""
+    if not permissions or not permissions.strip():
+        return {"error": "permissions 参数不能为空"}
+
+    ctx = get_request_context()
+    bus = ctx.event_bus
+
+    if bus is None:
+        return {"error": "EventBus not available — cannot request permissions"}
+
+    perm_list = [p.strip() for p in permissions.split(",") if p.strip()]
+    options = [
+        {"label": "授权执行", "value": "approved"},
+        {"label": "拒绝", "value": "denied"},
+    ]
+
+    message = f"Agent 请求以下权限:\n"
+    for p in perm_list:
+        message += f"• {p}\n"
+    if reason:
+        message += f"\n原因: {reason}"
+
+    bus.emit("request_confirmation", {
+        "message": message,
+        "options": options,
+        "permission_request": True,
+        "permissions": perm_list,
+    })
+
+    return {"status": "waiting_for_permission", "permissions": perm_list}

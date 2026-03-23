@@ -509,7 +509,7 @@ class AgenticRuntime:
                     })
                     await asyncio.sleep(0)
 
-                observations = await self._execute_tool_calls(parsed.tool_calls, iteration)
+                observations = await self._execute_tool_calls(parsed.tool_calls, iteration, messages)
 
                 # ─── 5. 构建消息追加 ───
                 # 追加 assistant 消息（含 tool_calls）
@@ -869,10 +869,31 @@ class AgenticRuntime:
             latency_ms=latency_ms,
         )
 
+    @staticmethod
+    def _get_recent_transcript(messages: list[dict], max_chars: int = 1000) -> str:
+        """提取最近几轮对话摘要，供 Guardian 等 hook 使用。"""
+        parts: list[str] = []
+        total = 0
+        for msg in reversed(messages):
+            role = msg.get("role", "")
+            if role in ("system", "tool"):
+                continue
+            content = str(msg.get("content", ""))[:200]
+            if not content:
+                continue
+            line = f"{role}: {content}"
+            if total + len(line) > max_chars:
+                break
+            parts.append(line)
+            total += len(line)
+        parts.reverse()
+        return "\n".join(parts)
+
     async def _execute_tool_calls(
         self,
         tool_calls: list[ParsedToolCall],
         iteration: int,
+        messages: list[dict] | None = None,
     ) -> list[ToolResult]:
         """
         执行工具调用。只读工具并行，写入工具串行。
@@ -887,7 +908,7 @@ class AgenticRuntime:
             # 并行执行只读工具
             if read_only_calls:
                 parallel_tasks = [
-                    self._execute_single_tool(tc, iteration) for tc in read_only_calls
+                    self._execute_single_tool(tc, iteration, messages) for tc in read_only_calls
                 ]
                 parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
                 for tc, result in zip(read_only_calls, parallel_results):
@@ -897,12 +918,12 @@ class AgenticRuntime:
 
             # 串行执行写入工具
             for tc in write_calls:
-                result = await self._execute_single_tool(tc, iteration)
+                result = await self._execute_single_tool(tc, iteration, messages)
                 result_map[tc.id] = result
         else:
             # 全部串行
             for tc in tool_calls:
-                result = await self._execute_single_tool(tc, iteration)
+                result = await self._execute_single_tool(tc, iteration, messages)
                 result_map[tc.id] = result
 
         # 按原始 tool_calls 顺序返回结果
@@ -918,6 +939,7 @@ class AgenticRuntime:
         self,
         tool_call: ParsedToolCall,
         iteration: int,
+        messages: list[dict] | None = None,
     ) -> ToolResult:
         """执行单个工具调用（带超时 + Hook 集成 + 只读缓存）。"""
         # ── 只读工具结果缓存: 相同调用不重复执行 ──
@@ -976,12 +998,18 @@ class AgenticRuntime:
         # ── PRE hook: 工具调用前检查 ──
         if self.hooks:
             from agent.hooks import HookEvent
+            hook_context: dict = {}
+            if messages:
+                transcript = self._get_recent_transcript(messages)
+                if transcript:
+                    hook_context["recent_messages"] = transcript
             pre_event = HookEvent(
                 event_type="pre_tool_use",
                 tool_name=tool_call.name,
                 tool_input=tool_call.arguments,
                 session_id=_ctx.session_id if _ctx else "",
                 user_id=_ctx.user_id if _ctx else "anonymous",
+                context=hook_context,
             )
             try:
                 pre_result = await self.hooks.fire(pre_event)

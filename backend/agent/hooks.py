@@ -10,6 +10,7 @@ Hooks 系统 — 对标 Claude Code 的 PreToolUse / PostToolUse / Stop。
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -151,32 +152,50 @@ from core.exec_policy import ExecPolicy
 _exec_policy = ExecPolicy()
 
 
+_PATCH_FILE_RE = re.compile(r"\*\*\*\s+(?:Add|Update|Delete)\s+File:\s+(.+)")
+
+
 def code_safety_hook(event: HookEvent) -> HookResult:
     """
     编码工具安全检查 (pre_tool_use)。
 
-    - write_source_file / apply_patch: 敏感文件保护
-    - run_command: 命令安全策略 (白名单 + 黑名单)
+    - write_source_file: 敏感文件保护
+    - apply_patch: 从 patch 内容提取所有文件路径，逐一检查敏感文件
+    - run_command: 命令安全策略 (三层防御)
     """
     tool = event.tool_name
     if tool not in ("read_source_file", "write_source_file", "run_command", "apply_patch"):
         return HookResult(action="allow")
 
+    _REQUEST_PERMISSIONS_HINT = "如果确需执行，请先调用 request_permissions 工具获取用户授权。"
+
     # ── 写入敏感文件检查 ──
-    if tool in ("write_source_file", "apply_patch"):
+    if tool == "write_source_file":
         path = event.tool_input.get("path", "")
         if path and _exec_policy.is_sensitive_file(path):
             return HookResult(
                 action="block",
-                message=f"安全检查: 禁止写入敏感文件 {path}",
+                message=f"安全检查: 禁止写入敏感文件 {path}。{_REQUEST_PERMISSIONS_HINT}",
             )
+
+    # ── apply_patch: 提取 patch 内所有文件路径，逐一检查 ──
+    if tool == "apply_patch":
+        patch_text = event.tool_input.get("patch", "")
+        if patch_text:
+            for match in _PATCH_FILE_RE.finditer(patch_text):
+                file_path = match.group(1).strip()
+                if _exec_policy.is_sensitive_file(file_path):
+                    return HookResult(
+                        action="block",
+                        message=f"安全检查: 禁止通过 apply_patch 修改敏感文件 {file_path}。{_REQUEST_PERMISSIONS_HINT}",
+                    )
 
     # ── 命令安全策略检查 ──
     if tool == "run_command":
         command = event.tool_input.get("command", "")
         safe, reason = _exec_policy.check_command(command)
         if not safe:
-            return HookResult(action="block", message=reason)
+            return HookResult(action="block", message=f"{reason}。{_REQUEST_PERMISSIONS_HINT}")
 
     return HookResult(action="allow")
 

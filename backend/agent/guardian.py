@@ -10,6 +10,7 @@
 - risk_score >= threshold → 阻止
 - 任何异常 → 阻止 (fail closed)
 - 独立 LLM client (可配置用更便宜的模型)
+- 对话上下文: 注入最近几轮对话摘要，辅助风险判定
 """
 
 from __future__ import annotations
@@ -29,16 +30,34 @@ logger = logging.getLogger(__name__)
 # 高风险工具: 需要 Guardian 评估
 _HIGH_RISK_TOOLS = frozenset({"run_command", "write_source_file", "apply_patch"})
 
-_GUARDIAN_PROMPT = (
-    "你是安全审查系统。评估以下工具调用的风险。\n\n"
-    "规则:\n"
-    "- 只输出 JSON: {\"risk_score\": 0-100, \"reason\": \"简短原因\"}\n"
-    "- 0=完全安全, 100=极度危险\n"
-    "- 高风险: 删除文件/数据、修改系统配置、执行未知脚本、网络攻击\n"
-    "- 中风险: 覆盖重要文件、执行可信但有副作用的命令\n"
-    "- 低风险: 读取文件、运行测试、写入临时文件\n"
-    "- 只输出 JSON，不要其他内容"
-)
+_GUARDIAN_PROMPT = """\
+你是一个安全审查系统。评估以下工具调用的风险。
+
+## 评估维度
+
+1. **破坏性** — 操作是否会删除、覆盖或损坏数据/文件/系统配置？
+2. **越权性** — 操作是否超出用户 workspace 的合理范围？(如修改系统文件、访问其他用户数据)
+3. **数据泄露** — 操作是否可能导致敏感信息外泄？(如读取密钥并写入日志/发送到外部)
+4. **系统影响** — 操作是否影响系统可用性？(如耗尽资源、启动后台进程、修改网络配置)
+
+## 量化判定规则
+
+- 0-20: 完全安全 — 读取文件、运行测试、写入临时文件、常见开发操作
+- 21-50: 低风险 — 创建/修改普通项目文件、运行标准构建命令
+- 51-79: 中风险 — 覆盖重要配置文件、执行有副作用但可信的命令
+- 80-100: 高风险 — 删除文件/数据、修改系统配置、执行未知脚本、网络攻击、访问密钥
+
+## 用户意图降分原则
+
+如果对话上下文表明用户主动要求执行该操作 (如"帮我删除这个文件"、"运行这个脚本")，
+风险评分可适当降低 10-20 分，因为这是用户知情的有意行为。
+但涉及系统级操作 (sudo、rm -rf /、修改 /etc) 的降分上限为 5 分。
+
+## 输出格式 (严格)
+
+只输出 JSON，不要其他内容:
+{"risk_score": 0-100, "reason": "简短原因"}
+"""
 
 
 class GuardianAssessor:
@@ -68,6 +87,11 @@ class GuardianAssessor:
 
         # 构建评估 prompt
         tool_desc = f"工具: {event.tool_name}\n参数: {json.dumps(event.tool_input, ensure_ascii=False)[:500]}"
+
+        # 注入对话上下文 (如果有)
+        recent_context = event.context.get("recent_messages", "")
+        if recent_context:
+            tool_desc += f"\n\n最近对话上下文:\n{recent_context}"
 
         try:
             resp = await asyncio.wait_for(
@@ -104,7 +128,11 @@ class GuardianAssessor:
             if risk_score >= self._threshold:
                 return HookResult(
                     action="block",
-                    message=f"Guardian 阻止: 风险评分 {risk_score}/100 (阈值 {self._threshold})。原因: {reason}",
+                    message=(
+                        f"Guardian 阻止: 风险评分 {risk_score}/100 (阈值 {self._threshold})。"
+                        f"原因: {reason}。"
+                        f"如果确需执行，请先调用 request_permissions 工具获取用户授权。"
+                    ),
                 )
 
             return HookResult(action="allow")

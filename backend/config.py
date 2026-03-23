@@ -181,6 +181,10 @@ class Settings(BaseSettings):
         default="512m",
         description="Docker memory limit",
     )
+    sandbox_writable_roots: str = Field(
+        default="",
+        description="Comma-separated writable sub-directories within workspace (empty=entire workspace writable)",
+    )
 
     # ─── File Upload ───
     max_file_upload_mb: int = Field(

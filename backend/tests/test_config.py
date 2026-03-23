@@ -2,32 +2,49 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import Settings
 
+# 测试默认值时需要清除的环境变量 (防止系统 .env 或 shell env 干扰)
+_ENV_KEYS_TO_CLEAR = [
+    "LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY", "LLM_ENABLE_THINKING",
+    "AUTH_ENABLED", "AUTH_JWT_SECRET", "AUTH_MODE",
+    "APP_DEBUG", "APP_PORT", "APP_HOST",
+    "AGENT_MODEL_CONTEXT_WINDOW",
+]
 
-def test_default_llm_base_url():
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    """清除可能干扰默认值测试的环境变量。"""
+    for key in _ENV_KEYS_TO_CLEAR:
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_default_llm_base_url(clean_env):
     s = Settings(_env_file=None)
     assert s.llm_base_url == "http://localhost:11434/v1"
 
 
-def test_default_llm_model():
+def test_default_llm_model(clean_env):
     s = Settings(_env_file=None)
     assert s.llm_model == ""
 
 
-def test_default_auth_enabled():
+def test_default_auth_enabled(clean_env):
     s = Settings(_env_file=None)
     assert s.auth_enabled is False
 
 
-def test_default_agent_max_iterations():
+def test_default_agent_max_iterations(clean_env):
     s = Settings(_env_file=None)
     assert s.agent_max_iterations == 25
 
 
-def test_default_log_level():
+def test_default_log_level(clean_env):
     s = Settings(_env_file=None)
     assert s.log_level == "INFO"
 
@@ -50,7 +67,6 @@ def test_model_config_has_env_file():
 
 def test_jwt_secret_required_when_auth_enabled(monkeypatch):
     """auth_enabled=True + auth_mode='jwt' 但缺 jwt_secret 时应抛 ValueError。"""
-    import pytest
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_MODE", "jwt")
     # 不设置 AUTH_JWT_SECRET
@@ -78,7 +94,7 @@ def test_auth_disabled_no_jwt_secret_required(monkeypatch):
 
 # ── A3: CORS 配置 ──
 
-def test_cors_allowed_origins_default():
+def test_cors_allowed_origins_default(clean_env):
     """默认 cors_allowed_origins 为 '*'。"""
     s = Settings(_env_file=None)
     assert s.cors_allowed_origins == "*"
@@ -94,7 +110,7 @@ def test_cors_allowed_origins_comma_parsing(monkeypatch):
 
 # ── A5: app_debug 默认值 ──
 
-def test_app_debug_defaults_false():
+def test_app_debug_defaults_false(clean_env):
     """app_debug 默认应为 False (而非 True)。"""
     s = Settings(_env_file=None)
     assert s.app_debug is False
@@ -150,7 +166,6 @@ def test_budget_ratio_boundaries(monkeypatch):
 
 def test_invalid_type_raises(monkeypatch):
     """非数字值应抛出验证错误。"""
-    import pytest
     monkeypatch.setenv("AGENT_MAX_ITERATIONS", "not_a_number")
     with pytest.raises(Exception):
         Settings(_env_file=None)

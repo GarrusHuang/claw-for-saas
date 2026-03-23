@@ -50,7 +50,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     # subagent
     "spawn_subagent", "spawn_subagents", "wait_subagent", "send_to_subagent",
     # interaction
-    "request_user_input",
+    "request_user_input", "request_permissions",
     # tool_search (self)
     "tool_search",
 })

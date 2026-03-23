@@ -4,10 +4,13 @@
 覆盖:
 - 非高风险工具 → 跳过 (不调 LLM)
 - risk_score < threshold → allow
-- risk_score >= threshold → block
+- risk_score >= threshold → block (含 request_permissions 提示)
 - LLM 超时 → block (fail closed)
 - LLM 返回非法 JSON → block
 - guardian_enabled=False → build_guardian_hook 返回 None
+- 新 prompt 被使用
+- 对话上下文传入影响评估
+- context 为空时不崩溃
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import dataclass
 
-from agent.guardian import GuardianAssessor, build_guardian_hook, _HIGH_RISK_TOOLS
+from agent.guardian import GuardianAssessor, build_guardian_hook, _HIGH_RISK_TOOLS, _GUARDIAN_PROMPT
 from agent.hooks import HookEvent
 
 
@@ -39,12 +42,13 @@ def _make_assessor(threshold=80, timeout_s=30.0):
     ), mock_client
 
 
-def _make_event(tool_name="run_command", tool_input=None):
+def _make_event(tool_name="run_command", tool_input=None, context=None):
     """创建测试 HookEvent。"""
     return HookEvent(
         event_type="pre_tool_use",
         tool_name=tool_name,
         tool_input=tool_input or {"command": "ls -la"},
+        context=context or {},
     )
 
 
@@ -92,6 +96,20 @@ class TestGuardianAssessor:
         assert result.action == "block"
         assert "90" in result.message
         assert "dangerous command" in result.message
+
+    @pytest.mark.asyncio
+    async def test_block_message_includes_request_permissions(self):
+        """阻止消息应包含 request_permissions 提示。"""
+        assessor, mock_client = _make_assessor(threshold=80)
+        mock_client.chat_completion.return_value = FakeLLMResponse(
+            content='{"risk_score": 95, "reason": "very risky"}'
+        )
+
+        event = _make_event()
+        result = await assessor.assess(event)
+
+        assert result.action == "block"
+        assert "request_permissions" in result.message
 
     @pytest.mark.asyncio
     async def test_exact_threshold_blocks(self):
@@ -199,6 +217,72 @@ class TestGuardianAssessor:
         event = _make_event()
         result = await assessor.assess(event)
 
+        assert result.action == "allow"
+
+    # ── 新增: prompt 和 context 测试 ──
+
+    @pytest.mark.asyncio
+    async def test_new_prompt_is_used(self):
+        """验证新的结构化 prompt 被使用。"""
+        assessor, mock_client = _make_assessor()
+        mock_client.chat_completion.return_value = FakeLLMResponse(
+            content='{"risk_score": 10, "reason": "safe"}'
+        )
+
+        event = _make_event()
+        await assessor.assess(event)
+
+        call_args = mock_client.chat_completion.call_args
+        system_msg = call_args.kwargs["messages"][0]["content"]
+        assert "评估维度" in system_msg
+        assert "破坏性" in system_msg
+        assert "用户意图降分原则" in system_msg
+
+    @pytest.mark.asyncio
+    async def test_context_passed_to_llm(self):
+        """对话上下文应传入 LLM 评估。"""
+        assessor, mock_client = _make_assessor()
+        mock_client.chat_completion.return_value = FakeLLMResponse(
+            content='{"risk_score": 15, "reason": "user requested"}'
+        )
+
+        event = _make_event(
+            context={"recent_messages": "user: 请帮我删除 tmp 文件\nassistant: 好的，我来执行删除。"}
+        )
+        await assessor.assess(event)
+
+        call_args = mock_client.chat_completion.call_args
+        user_msg = call_args.kwargs["messages"][1]["content"]
+        assert "请帮我删除 tmp 文件" in user_msg
+        assert "对话上下文" in user_msg
+
+    @pytest.mark.asyncio
+    async def test_empty_context_no_crash(self):
+        """context 为空时不崩溃。"""
+        assessor, mock_client = _make_assessor()
+        mock_client.chat_completion.return_value = FakeLLMResponse(
+            content='{"risk_score": 10, "reason": "safe"}'
+        )
+
+        event = _make_event(context={})
+        result = await assessor.assess(event)
+
+        assert result.action == "allow"
+
+    @pytest.mark.asyncio
+    async def test_no_context_no_crash(self):
+        """HookEvent 无 context 字段时不崩溃。"""
+        assessor, mock_client = _make_assessor()
+        mock_client.chat_completion.return_value = FakeLLMResponse(
+            content='{"risk_score": 10, "reason": "safe"}'
+        )
+
+        event = HookEvent(
+            event_type="pre_tool_use",
+            tool_name="run_command",
+            tool_input={"command": "ls"},
+        )
+        result = await assessor.assess(event)
         assert result.action == "allow"
 
 

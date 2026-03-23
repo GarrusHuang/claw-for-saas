@@ -10,7 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-2120+_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-2170+_passed-brightgreen?logo=pytest&logoColor=white)](#测试)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache&logoColor=white)](LICENSE)
 
 </div>
@@ -42,7 +42,7 @@
 | **20 个领域 Skill** | 合同 · 报销 · 审计 · 文件分析 · 文档生成等，YAML frontmatter + Markdown |
 | **WebSocket 实时推送** | 15+ 事件类型，实时展示思考过程和工具执行，指数退避重连 |
 | **Collaboration Mode** | plan 模式 (只读分析 + 提出计划) / execute 模式 (全能力执行)，复杂任务先看计划再确认 |
-| **运行时安全围栏** | 文件沙箱 · 命令安全策略 · Secrets 脱敏 · Guardian AI 风险评估 · bcrypt · SSRF 检查 · 速率限制 · PII 检测 |
+| **运行时安全围栏** | 文件沙箱 · 命令三层防御 (复合命令拆分+规则表+管道检查) · Secrets 脱敏 · Guardian AI 风险评估 (含对话上下文) · 权限请求 (request_permissions) · bcrypt · SSRF 检查 · 速率限制 · PII 检测 |
 | **Multi-Agent 生命周期** | spawn + wait + send 三阶段管理，深度限制 (3层)，per-user 并发控制 (3个) |
 | **邀请码注册** | 管理员生成邀请码 → 用户自助注册，支持多次使用/过期/撤销 |
 | **OpenTelemetry 追踪** | opt-in 分布式追踪，4 个关键 span (gateway/runtime/tool/llm)，禁用时零开销 |
@@ -267,6 +267,7 @@ pipeline_complete  → 会话结束 (duration, summary)
 error              → 错误 (category, recoverable, suggested_action)
 request_upload     → Agent 请求用户上传文件
 request_input      → Agent 请求用户输入
+request_confirmation → Agent 请求用户确认/权限授权
 ```
 
 ---
@@ -295,6 +296,7 @@ request_input      → Agent 请求用户输入
 | `LLM_FALLBACK_MODEL` | *(空)* | 备用模型 (主模型不可用时切换) |
 | `MEMORY_AUTO_EXTRACT_ENABLED` | `True` | 自动提取跨会话记忆 |
 | `SANDBOX_MAX_DISK_QUOTA_MB` | `500` | 单用户磁盘配额 |
+| `SANDBOX_WRITABLE_ROOTS` | `""` | 沙箱可写子目录 (逗号分隔，空=整个 workspace) |
 | `MAX_FILE_UPLOAD_MB` | `100` | 文件上传大小限制 |
 
 完整配置项见 [`backend/config.py`](backend/config.py)。

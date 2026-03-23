@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import unicodedata
 from dataclasses import dataclass, field
 
 from core.context import get_request_context
@@ -30,6 +31,38 @@ from core.tool_registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 apply_patch_registry = ToolRegistry()
+
+
+# ── Unicode 归一化 ──
+
+
+# 花式引号 → ASCII 引号, em/en dash → -, 特殊空格 → 普通空格
+_UNICODE_REPLACEMENTS: dict[str, str] = {
+    "\u201c": '"',  # "
+    "\u201d": '"',  # "
+    "\u2018": "'",  # '
+    "\u2019": "'",  # '
+    "\u2014": "-",  # em dash
+    "\u2013": "-",  # en dash
+    "\u00a0": " ",  # NBSP
+    "\u2003": " ",  # em space
+    "\u2002": " ",  # en space
+    "\ufeff": "",   # BOM
+    "\u200b": "",   # zero-width space
+    "\u200c": "",   # zero-width non-joiner
+    "\u200d": "",   # zero-width joiner
+}
+
+_UNICODE_TABLE = str.maketrans(_UNICODE_REPLACEMENTS)
+
+
+def _normalize_unicode(text: str) -> str:
+    """
+    Unicode 归一化: 花式引号→ASCII, em/en dash→-, NBSP→空格, BOM/ZWS→删除。
+
+    不影响 CJK 字符和 emoji。
+    """
+    return text.translate(_UNICODE_TABLE)
 
 
 # ── Patch 数据结构 ──
@@ -74,6 +107,7 @@ class PatchParseError(Exception):
 
 def parse_patch(text: str) -> list[Hunk]:
     """解析 patch 文本，返回操作列表。"""
+    text = _normalize_unicode(text)
     lines = text.strip().splitlines()
     if not lines:
         raise PatchParseError("Empty patch")
@@ -253,6 +287,14 @@ def _seek_sequence(
     for i in range(search_start, len(lines) - len(pattern) + 1):
         if all(
             lines[i + j].strip() == pattern[j].strip()
+            for j in range(len(pattern))
+        ):
+            return i
+
+    # Pass 4: Unicode 归一化匹配
+    for i in range(search_start, len(lines) - len(pattern) + 1):
+        if all(
+            _normalize_unicode(lines[i + j].strip()) == _normalize_unicode(pattern[j].strip())
             for j in range(len(pattern))
         ):
             return i

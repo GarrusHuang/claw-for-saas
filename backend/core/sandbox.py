@@ -36,6 +36,9 @@ class SandboxConfig:
     max_disk_quota_mb: int = 500  # 单用户最大磁盘配额 (MB)
     temp_file_ttl_s: int = 86400  # 临时文件 TTL (默认 24 小时)
 
+    # 可写子目录 (空=整个 workspace 可写)
+    writable_roots: list[str] = field(default_factory=list)
+
     # 网络白名单
     network_whitelist: list[str] = field(default_factory=list)  # 允许的域名/URL 前缀
     block_private_networks: bool = True  # 阻止内网地址
@@ -129,6 +132,29 @@ class SandboxManager:
             f"路径 {path} 不在工作空间内。"
             f"允许的目录: {workspace}"
         )
+
+    def validate_writable(self, path: str, workspace: str) -> str | None:
+        """
+        检查路径是否在 writable_roots 配置的子目录内。
+
+        空配置 = 整个 workspace 可写。
+
+        Returns:
+            None 如果允许写入, 否则返回拒绝原因字符串。
+        """
+        writable_roots = self.config.writable_roots
+        if not writable_roots:
+            return None  # 未配置 → 整个 workspace 可写
+
+        resolved = os.path.realpath(os.path.join(workspace, path)) if not os.path.isabs(path) else os.path.realpath(path)
+        ws_real = os.path.realpath(workspace)
+
+        for root in writable_roots:
+            allowed = os.path.realpath(os.path.join(ws_real, root))
+            if resolved == allowed or resolved.startswith(allowed + os.sep):
+                return None
+
+        return f"路径 {path} 不在可写区域内。允许的可写目录: {', '.join(writable_roots)}"
 
     def check_disk_quota(self, tenant_id: str, user_id: str) -> dict:
         """
