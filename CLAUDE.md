@@ -31,7 +31,8 @@ backend/
     hooks.py           — Hook 系统 (pre_tool_use / post_tool_use / agent_stop / pre_compact)
     hook_rules.py      — 可配置 Hook 规则引擎
     security_hooks.py  — PII 检测 / SSRF 防护等安全 Hook
-    subagent.py        — 子 Agent 派发
+    subagent.py        — 子 Agent 派发 + 生命周期管理 (start/wait/send + depth/并发控制)
+    guardian.py        — Guardian AI 风险评估 (高风险工具 LLM 审查)
     plan_tracker.py    — 执行计划进度追踪
     quality_gate.py    — 输出质量门控
     safe_eval.py       — 安全表达式求值
@@ -45,7 +46,7 @@ backend/
     text_utils.py      — 文本处理工具 (smart_truncate head+tail 截断)
     tool_registry.py   — 工具注册表 (schema + 执行 + search_tools + subset)
     tool_protocol.py   — ToolCallParser: 原生 tool_calls + Hermes XML 双模式解析
-    context.py         — RequestContext 统一上下文 (含 deferred_tools)
+    context.py         — RequestContext 统一上下文 (含 deferred_tools, subagent_depth)
     tracing.py         — OpenTelemetry 分布式追踪 (opt-in, NoOp fallback)
     sandbox.py         — 文件沙箱 + Docker 沙箱
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
@@ -254,6 +255,12 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `OTEL_ENDPOINT` — OTLP gRPC 端点 (默认 http://localhost:4317)
 - `OTEL_SERVICE_NAME` — OTel 服务名 (默认 claw-for-saas)
 - `APP_DEBUG` — 启用 debug/reload 模式
+- `GUARDIAN_ENABLED` — 启用 Guardian AI 风险评估 (默认 false)
+- `GUARDIAN_MODEL` — Guardian LLM 模型名 (空=复用主模型)
+- `GUARDIAN_BASE_URL` — Guardian LLM API 地址 (空=复用主地址)
+- `GUARDIAN_API_KEY` — Guardian LLM API Key (空=复用主 key)
+- `GUARDIAN_RISK_THRESHOLD` — 风险评分阈值 (默认 80, 0-100)
+- `GUARDIAN_TIMEOUT_S` — Guardian LLM 超时秒数 (默认 30)
 
 ## 开发注意事项
 
@@ -296,7 +303,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - memory: save_memory
 - skill: create_skill, update_skill
 - plan: propose_plan, update_plan_step
-- subagent: spawn_subagent, spawn_subagents
+- subagent: spawn_subagent, spawn_subagents, wait_subagent, send_to_subagent
 - schedule: create_schedule, list_schedules, delete_schedule
 - interaction: request_user_input
 - mcp (条件注册): get_form_schema, get_business_rules, get_candidate_types, get_protected_values, submit_form_data, query_data
@@ -309,7 +316,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 - `agent_stop` — Agent 完成前质量门控 (可 block 触发自我纠正)
 - `pre_compact` — 压缩前保护关键信息
 
-内置安全 Hook: PII 检测、SSRF DNS 检查、路径穿越防护、速率限制。
+内置安全 Hook: PII 检测、SSRF DNS 检查、路径穿越防护、速率限制、Guardian AI 风险评估 (可选)。
 
 ## 插件系统
 

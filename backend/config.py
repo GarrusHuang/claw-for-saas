@@ -318,6 +318,32 @@ class Settings(BaseSettings):
         description="OTel service name",
     )
 
+    # ─── Guardian (3.4: AI 风险评估) ───
+    guardian_enabled: bool = Field(
+        default=False,
+        description="启用 Guardian AI 风险评估 (高风险工具调用前 LLM 审查)",
+    )
+    guardian_model: str = Field(
+        default="",
+        description="Guardian LLM 模型名 (空=复用主模型)",
+    )
+    guardian_base_url: str = Field(
+        default="",
+        description="Guardian LLM API 地址 (空=复用主地址)",
+    )
+    guardian_api_key: str = Field(
+        default="",
+        description="Guardian LLM API Key (空=复用主 key)",
+    )
+    guardian_risk_threshold: int = Field(
+        default=80,
+        description="风险评分阈值 (0-100)，>= 此值则阻止",
+    )
+    guardian_timeout_s: float = Field(
+        default=30.0,
+        description="Guardian LLM 调用超时秒数",
+    )
+
     # ─── Logging ───
     log_level: str = Field(default="INFO")
     log_format: str = Field(

@@ -155,6 +155,7 @@ class AgenticRuntime:
         hooks: Any | None = None,
         secret_redactor: Any | None = None,
         llm_tool_registry: ToolRegistry | None = None,
+        message_inbox: asyncio.Queue | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.tool_registry = tool_registry
@@ -188,6 +189,8 @@ class AgenticRuntime:
         # ── 5C: 连续无意义输出计数 + checkpoint 回退标志 ──
         self._consecutive_empty_count: int = 0
         self._checkpoint_rolled_back: bool = False
+        # ── 3.3: 外部消息收件箱 (子 Agent send_to_subagent) ──
+        self._message_inbox = message_inbox
 
     def request_abort(self) -> None:
         """Request the runtime to abort the ReAct loop at the next iteration."""
@@ -250,6 +253,19 @@ class AgenticRuntime:
                             "status": "message_injected",
                             "iteration": iteration + 1,
                         })
+
+            # ─── 3.3: Check message_inbox (子 Agent send_to_subagent) ───
+            if self._message_inbox:
+                while not self._message_inbox.empty():
+                    try:
+                        inbox_msg = self._message_inbox.get_nowait()
+                        messages.append({"role": "user", "content": inbox_msg})
+                        logger.info(
+                            f"Inbox message injected at iteration {iteration + 1}",
+                            extra={"trace_id": self.trace_id},
+                        )
+                    except asyncio.QueueEmpty:
+                        break
 
             logger.info(
                 f"ReAct iteration {iteration + 1}/{self.config.max_iterations}",

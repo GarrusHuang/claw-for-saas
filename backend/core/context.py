@@ -51,6 +51,7 @@ class RequestContext:
     plan_tracker: Any = None  # PlanTracker | None
     diff_tracker: Any = None  # TurnDiffTracker | None
     deferred_tools: list = field(default_factory=list)  # list[RegisteredTool]
+    subagent_depth: int = 0  # 3.3: 子 Agent 嵌套深度
 
 
 current_request: contextvars.ContextVar[RequestContext | None] = contextvars.ContextVar(

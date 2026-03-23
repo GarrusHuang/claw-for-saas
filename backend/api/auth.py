@@ -2,6 +2,7 @@
 认证端点。
 
 - POST /api/auth/login     — 用户名+密码登录 → JWT
+- POST /api/auth/register  — 邀请码注册
 - GET  /api/auth/me        — 返回当前用户
 - POST /api/auth/refresh   — 刷新 token
 - POST /api/auth/dev-token — 签发测试 JWT (仅 debug)
@@ -9,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -94,6 +96,79 @@ async def login(req: LoginRequest, request: Request):
     )
 
     logger.info(f"Login success: tenant={user.tenant_id}")
+    return {
+        "token": token,
+        "token_type": "bearer",
+        "expires_in": settings.auth_session_expire_s,
+        "user_id": user.user_id,
+        "tenant_id": user.tenant_id,
+    }
+
+
+class RegisterRequest(BaseModel):
+    """用户注册请求 (邀请码制)。"""
+    invite_code: str = Field(..., description="邀请码")
+    username: str = Field(..., min_length=2, max_length=50, description="用户名")
+    password: str = Field(..., min_length=6, max_length=128, description="密码")
+
+
+# ── 注册限速 (IP 级) ──
+_REGISTER_MAX_PER_IP = 5  # 每 IP 最多 5 次/5min
+
+
+@router.post("/register")
+async def register(req: RegisterRequest, request: Request):
+    """邀请码注册，返回 JWT token。"""
+    from config import settings
+    from dependencies import get_database
+
+    if not settings.auth_enabled:
+        raise HTTPException(status_code=403, detail="Registration requires auth to be enabled")
+
+    if not settings.auth_jwt_secret:
+        raise HTTPException(status_code=500, detail="JWT secret not configured")
+
+    # 限速检查: IP 级
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_login_rate(f"reg_ip:{client_ip}", _REGISTER_MAX_PER_IP):
+        logger.warning(f"Register rate limit exceeded for IP {client_ip}")
+        raise HTTPException(status_code=429, detail="Too many registration attempts, please try again later")
+
+    db = get_database()
+
+    # 消费邀请码
+    result = db.consume_invite_code(req.invite_code)
+    if result is None:
+        raise HTTPException(status_code=400, detail="Invalid, expired, or exhausted invite code")
+
+    tenant_id, roles = result
+    user_id = f"U{secrets.token_hex(4).upper()}"
+
+    # 创建用户
+    try:
+        user = db.create_user(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            username=req.username,
+            password=req.password,
+            roles=roles,
+        )
+    except ValueError as e:
+        if "already exists" in str(e).lower() or "username" in str(e).lower():
+            raise HTTPException(status_code=409, detail=f"Username already exists: {req.username}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 签发 JWT
+    token = issue_session_token(
+        user_id=user.user_id,
+        tenant_id=user.tenant_id,
+        roles=user.roles,
+        secret=settings.auth_jwt_secret,
+        algorithm=settings.auth_jwt_algorithm,
+        expires_in=settings.auth_session_expire_s,
+    )
+
+    logger.info(f"Registration success: tenant={user.tenant_id}, user={user.user_id}")
     return {
         "token": token,
         "token_type": "bearer",

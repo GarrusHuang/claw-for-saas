@@ -201,6 +201,17 @@ def build_default_hooks() -> HookRegistry:
     # Phase 27: 编码工具安全 Hook (no matcher — checks tool_name internally)
     registry.register("pre_tool_use", code_safety_hook)
 
+    # 3.4: Guardian AI 风险评估 (排在规则 Hook 之后，只评估规则放行的高风险调用)
+    try:
+        from config import settings as _guardian_settings
+        if _guardian_settings.guardian_enabled:
+            from agent.guardian import build_guardian_hook
+            guardian_handler = build_guardian_hook(_guardian_settings)
+            if guardian_handler:
+                registry.register("pre_tool_use", guardian_handler)
+    except Exception as e:
+        logger.debug(f"Guardian hook registration skipped: {e}")
+
     # 声明式规则引擎: 加载 data/hook_rules/*.json 中用户定义的规则
     try:
         from agent.hook_rules import HookRuleEngine

@@ -674,3 +674,255 @@ class TestSubagentContextIsolation:
         # 验证 ToolCallParser 被传入
         from core.tool_protocol import ToolCallParser
         assert isinstance(tool_parser, ToolCallParser)
+
+
+# ── 3.3 Multi-Agent 生命周期增强 Tests ──
+
+
+class TestSubagentLifecycle:
+    """3.3: start/wait/send + depth limit + 并发控制。"""
+
+    @pytest.mark.asyncio
+    async def test_depth_limit(self):
+        """depth >= MAX_DEPTH 时拒绝。"""
+        runner = _make_runner()
+        result = await runner.start_subagent(
+            task="深层任务", depth=3, user_id="test_user_depth",
+        )
+        assert "错误" in result
+        assert "深度" in result
+
+    @pytest.mark.asyncio
+    async def test_depth_within_limit(self):
+        """depth < MAX_DEPTH 时正常启动。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult(final_answer="OK")
+            MockRuntime.return_value = mock_runtime
+
+            result = await runner.start_subagent(
+                task="浅层任务", depth=2, user_id="test_user_shallow",
+            )
+        assert result.startswith("sa_")
+
+    @pytest.mark.asyncio
+    async def test_concurrent_guard(self):
+        """同用户第 4 个并发 subagent 被拒绝。"""
+        from agent.subagent import _user_semaphores, _MAX_CONCURRENT_PER_USER
+        runner = _make_runner()
+        user_id = "test_user_concurrent"
+
+        # 清理可能残留的信号量
+        _user_semaphores.pop(user_id, None)
+
+        started_ids = []
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+
+            async def slow_run(*args, **kwargs):
+                await asyncio.sleep(10)  # 保持运行
+                return FakeRuntimeResult(final_answer="done")
+
+            mock_runtime.run.side_effect = slow_run
+            MockRuntime.return_value = mock_runtime
+
+            # 启动 3 个 (应成功)
+            for i in range(3):
+                aid = await runner.start_subagent(
+                    task=f"任务{i}", depth=0, user_id=user_id,
+                )
+                assert aid.startswith("sa_"), f"第 {i+1} 个应成功: {aid}"
+                started_ids.append(aid)
+
+            # 第 4 个应失败
+            result = await runner.start_subagent(
+                task="任务3", depth=0, user_id=user_id,
+            )
+            assert "错误" in result
+            assert "上限" in result
+
+        # 清理: 取消运行中的任务
+        for aid in started_ids:
+            running = runner._running.get(aid)
+            if running:
+                running.task.cancel()
+        await asyncio.sleep(0.1)
+
+    @pytest.mark.asyncio
+    async def test_wait_subagent_success(self):
+        """wait_subagent 成功获取结果。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+            mock_runtime.run.return_value = FakeRuntimeResult(final_answer="完成结果")
+            MockRuntime.return_value = mock_runtime
+
+            agent_id = await runner.start_subagent(
+                task="快速任务", depth=0, user_id="test_wait_ok",
+            )
+            assert agent_id.startswith("sa_")
+
+            result = await runner.wait_subagent(agent_id, timeout_s=5)
+            assert result == "完成结果"
+
+    @pytest.mark.asyncio
+    async def test_wait_subagent_not_found(self):
+        """wait_subagent 找不到 agent_id。"""
+        runner = _make_runner()
+        result = await runner.wait_subagent("sa_nonexistent", timeout_s=1)
+        assert "错误" in result
+        assert "不存在" in result
+
+    @pytest.mark.asyncio
+    async def test_wait_subagent_timeout(self):
+        """wait_subagent 超时。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+
+            async def slow_run(*args, **kwargs):
+                await asyncio.sleep(10)
+                return FakeRuntimeResult()
+
+            mock_runtime.run.side_effect = slow_run
+            MockRuntime.return_value = mock_runtime
+
+            agent_id = await runner.start_subagent(
+                task="慢任务", depth=0, user_id="test_wait_timeout",
+            )
+
+            result = await runner.wait_subagent(agent_id, timeout_s=0.1)
+            assert "超时" in result
+
+        # 清理
+        running = runner._running.get(agent_id)
+        if running:
+            running.task.cancel()
+        await asyncio.sleep(0.1)
+
+    @pytest.mark.asyncio
+    async def test_send_to_subagent_success(self):
+        """send_to_subagent 成功发送消息。"""
+        runner = _make_runner()
+
+        with patch("agent.subagent.AgenticRuntime") as MockRuntime:
+            mock_runtime = AsyncMock()
+
+            async def slow_run(*args, **kwargs):
+                await asyncio.sleep(5)
+                return FakeRuntimeResult()
+
+            mock_runtime.run.side_effect = slow_run
+            MockRuntime.return_value = mock_runtime
+
+            agent_id = await runner.start_subagent(
+                task="交互任务", depth=0, user_id="test_send_ok",
+            )
+
+            result = await runner.send_to_subagent(agent_id, "新指令")
+            assert "已发送" in result
+
+        # 清理
+        running = runner._running.get(agent_id)
+        if running:
+            running.task.cancel()
+        await asyncio.sleep(0.1)
+
+    @pytest.mark.asyncio
+    async def test_send_to_subagent_not_found(self):
+        """send_to_subagent 找不到 agent_id。"""
+        runner = _make_runner()
+        result = await runner.send_to_subagent("sa_nonexistent", "消息")
+        assert "错误" in result
+        assert "不存在" in result
+
+
+# ── 3.3 spawn_subagent wait=False Tests ──
+
+
+class TestSpawnSubagentWaitFalse:
+
+    @pytest.mark.asyncio
+    async def test_spawn_wait_true_compat(self):
+        """wait=True (默认) 行为不变。"""
+        from tools.builtin.subagent_tools import spawn_subagent
+        from core.context import RequestContext, current_request
+
+        mock_runner = AsyncMock()
+        mock_runner.run_subagent.return_value = "同步结果"
+
+        ctx = RequestContext(subagent_runner=mock_runner)
+        token = current_request.set(ctx)
+        try:
+            result = await spawn_subagent(task="测试", wait=True)
+        finally:
+            current_request.reset(token)
+
+        assert result == "同步结果"
+        mock_runner.run_subagent.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_spawn_wait_false(self):
+        """wait=False 返回 agent_id。"""
+        from tools.builtin.subagent_tools import spawn_subagent
+        from core.context import RequestContext, current_request
+
+        mock_runner = AsyncMock()
+        mock_runner.start_subagent.return_value = "sa_abc123"
+
+        ctx = RequestContext(subagent_runner=mock_runner, user_id="U001", subagent_depth=0)
+        token = current_request.set(ctx)
+        try:
+            result = await spawn_subagent(task="测试", wait=False)
+        finally:
+            current_request.reset(token)
+
+        assert result == "sa_abc123"
+        mock_runner.start_subagent.assert_called_once()
+
+
+# ── 3.3 wait_subagent / send_to_subagent Tool Tests ──
+
+
+class TestWaitSendTools:
+
+    @pytest.mark.asyncio
+    async def test_wait_subagent_tool(self):
+        """wait_subagent 工具调用。"""
+        from tools.builtin.subagent_tools import wait_subagent
+        from core.context import RequestContext, current_request
+
+        mock_runner = AsyncMock()
+        mock_runner.wait_subagent.return_value = "子任务完成"
+
+        ctx = RequestContext(subagent_runner=mock_runner)
+        token = current_request.set(ctx)
+        try:
+            result = await wait_subagent(agent_id="sa_test", timeout_s=30)
+        finally:
+            current_request.reset(token)
+
+        assert result == "子任务完成"
+
+    @pytest.mark.asyncio
+    async def test_send_to_subagent_tool(self):
+        """send_to_subagent 工具调用。"""
+        from tools.builtin.subagent_tools import send_to_subagent
+        from core.context import RequestContext, current_request
+
+        mock_runner = AsyncMock()
+        mock_runner.send_to_subagent.return_value = "消息已发送"
+
+        ctx = RequestContext(subagent_runner=mock_runner)
+        token = current_request.set(ctx)
+        try:
+            result = await send_to_subagent(agent_id="sa_test", message="新指令")
+        finally:
+            current_request.reset(token)
+
+        assert result == "消息已发送"

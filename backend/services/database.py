@@ -104,15 +104,42 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+@dataclass
+class InviteCodeRecord:
+    """邀请码记录。"""
+    code: str
+    tenant_id: str
+    roles: list[str] = field(default_factory=list)
+    max_uses: int = 1
+    used_count: int = 0
+    expires_at: float | None = None
+    created_by: str = ""
+    created_at: float = 0.0
+    status: str = "active"  # active | revoked
+
+
 def hash_api_key(key: str) -> str:
     """Hash API key with SHA-256."""
     return hashlib.sha256(key.encode()).hexdigest()
 
 
 # Schema 版本 — 新增迁移时在此追加 (version, sql) 元组
-_CURRENT_SCHEMA_VERSION = 1
+_CURRENT_SCHEMA_VERSION = 2
 _MIGRATIONS: list[tuple[int, str]] = [
-    # (1, "ALTER TABLE users ADD COLUMN last_login_at REAL;"),  # 示例: 未来迁移
+    (2, """
+        CREATE TABLE IF NOT EXISTS invite_codes (
+            code        TEXT PRIMARY KEY,
+            tenant_id   TEXT NOT NULL,
+            roles       TEXT NOT NULL DEFAULT '[]',
+            max_uses    INTEGER NOT NULL DEFAULT 1,
+            used_count  INTEGER NOT NULL DEFAULT 0,
+            expires_at  REAL,
+            created_by  TEXT NOT NULL,
+            created_at  REAL NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'active',
+            FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
+        );
+    """),
 ]
 
 
@@ -239,6 +266,20 @@ class DatabaseService:
             );
             CREATE INDEX IF NOT EXISTS idx_daily_tenant_date
                 ON usage_daily(tenant_id, date);
+
+            -- 4.6: 邀请码
+            CREATE TABLE IF NOT EXISTS invite_codes (
+                code        TEXT PRIMARY KEY,
+                tenant_id   TEXT NOT NULL,
+                roles       TEXT NOT NULL DEFAULT '[]',
+                max_uses    INTEGER NOT NULL DEFAULT 1,
+                used_count  INTEGER NOT NULL DEFAULT 0,
+                expires_at  REAL,
+                created_by  TEXT NOT NULL,
+                created_at  REAL NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'active',
+                FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
+            );
         """)
         conn.commit()
         logger.info(f"Database initialized: {self.db_path}")
@@ -586,6 +627,89 @@ class DatabaseService:
         conn = self._get_conn()
         cursor = conn.execute(
             "DELETE FROM api_keys WHERE key_id = ?", (key_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ── Invite Code CRUD (4.6) ──
+
+    def create_invite_code(
+        self,
+        tenant_id: str,
+        roles: list[str] | None = None,
+        max_uses: int = 1,
+        expires_at: float | None = None,
+        created_by: str = "",
+    ) -> str:
+        """创建邀请码，返回邀请码字符串。"""
+        import json
+
+        code = f"inv_{secrets.token_urlsafe(16)}"
+        now = time.time()
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO invite_codes (code, tenant_id, roles, max_uses, expires_at, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (code, tenant_id, json.dumps(roles or []), max_uses, expires_at, created_by, now),
+        )
+        conn.commit()
+        return code
+
+    def consume_invite_code(self, code: str) -> tuple[str, list[str]] | None:
+        """
+        消费邀请码。校验有效+未过期+未用完，原子递增 used_count。
+
+        Returns:
+            (tenant_id, roles) 或 None (无效/过期/用完/已撤销)
+        """
+        import json
+
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM invite_codes WHERE code = ?", (code,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        if d["status"] != "active":
+            return None
+        if d["used_count"] >= d["max_uses"]:
+            return None
+        if d["expires_at"] is not None and time.time() > d["expires_at"]:
+            return None
+        # 原子递增
+        cursor = conn.execute(
+            "UPDATE invite_codes SET used_count = used_count + 1 "
+            "WHERE code = ? AND status = 'active' AND used_count < max_uses",
+            (code,),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return None
+        return d["tenant_id"], json.loads(d["roles"])
+
+    def list_invite_codes(self, tenant_id: str) -> list[InviteCodeRecord]:
+        """列出租户的所有邀请码。"""
+        import json
+
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM invite_codes WHERE tenant_id = ? ORDER BY created_at DESC",
+            (tenant_id,),
+        ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["roles"] = json.loads(d["roles"])
+            results.append(InviteCodeRecord(**d))
+        return results
+
+    def revoke_invite_code(self, code: str) -> bool:
+        """撤销邀请码。"""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "UPDATE invite_codes SET status = 'revoked' WHERE code = ?",
+            (code,),
         )
         conn.commit()
         return cursor.rowcount > 0
