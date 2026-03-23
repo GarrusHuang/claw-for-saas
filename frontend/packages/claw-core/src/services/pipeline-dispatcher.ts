@@ -256,6 +256,13 @@ export function dispatchPipelineEvent(
       store.addEvent({ type: eventType, data, timestamp: Date.now() });
       break;
 
+    case 'code_file_written':
+    case 'code_patch_applied':
+    case 'command_executed':
+    case 'memory_saved':
+      store.addEvent({ type: eventType, data, timestamp: Date.now() });
+      break;
+
     case 'file_artifact':
       store.addFileArtifact({
         path: (data.path as string) || '',

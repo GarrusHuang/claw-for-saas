@@ -34,6 +34,8 @@ class SessionManager:
     def __init__(self, base_dir: str = "data/sessions") -> None:
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        # #46: 搜索索引缓存 (key → (dir_mtime, index))
+        self._search_index_cache: dict[str, tuple[float, list[dict]]] = {}
 
     def _session_dir(self, tenant_id: str, user_id: str) -> Path:
         """获取 tenant/user 级会话目录。"""
@@ -336,12 +338,22 @@ class SessionManager:
 
     def _build_search_index(self, tenant_id: str, user_id: str) -> list[dict]:
         """
-        #46: 构建会话搜索索引 (metadata + 首条用户消息)，避免全量扫描 JSONL。
+        #46: 构建会话搜索索引 (metadata + 首条用户消息)。
+
+        带缓存: 目录 mtime 不变时复用上次结果。
 
         Returns:
             [{session_id, title, business_type, first_user_msg, mtime}, ...]
         """
         session_dir = self._session_dir(tenant_id, user_id)
+        cache_key = f"{tenant_id}:{user_id}"
+        try:
+            dir_mtime = session_dir.stat().st_mtime if session_dir.exists() else 0
+        except OSError:
+            dir_mtime = 0
+        cached = self._search_index_cache.get(cache_key)
+        if cached and cached[0] >= dir_mtime:
+            return cached[1]
         if not session_dir.exists():
             return []
 
@@ -368,6 +380,7 @@ class SessionManager:
             except OSError:
                 continue
             index.append(entry)
+        self._search_index_cache[cache_key] = (dir_mtime, index)
         return index
 
     def search_sessions(
@@ -393,9 +406,15 @@ class SessionManager:
             if query_lower in title or query_lower in bt or query_lower in first_msg:
                 snippet = ""
                 if query_lower in first_msg:
+                    raw_msg = entry.get("first_user_msg", "")
                     pos = first_msg.find(query_lower)
                     start = max(0, pos - 30)
-                    snippet = entry.get("first_user_msg", "")[start:start + 80]
+                    end = min(len(raw_msg), pos + len(query_lower) + 50)
+                    snippet = raw_msg[start:end].replace("\n", " ")
+                    if start > 0:
+                        snippet = "..." + snippet
+                    if end < len(raw_msg):
+                        snippet = snippet + "..."
                 fast_results.append({
                     "session_id": entry["session_id"],
                     "title": entry.get("title", ""),

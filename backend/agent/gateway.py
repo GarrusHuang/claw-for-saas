@@ -40,7 +40,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     # skill
     "read_reference", "create_skill", "update_skill",
     # file
-    "read_uploaded_file", "list_user_files", "analyze_file", "read_knowledge_file",
+    "read_uploaded_file", "list_user_files", "analyze_file", "read_knowledge_file", "search_knowledge",
     # code
     "read_source_file", "write_source_file", "apply_patch", "run_command",
     # memory
@@ -614,10 +614,11 @@ class AgentGateway:
 
         if len(all_tools) > _cfg.agent_tool_deferred_threshold:
             # 延迟模式: prompt 只注入核心工具 + tool_search
+            # #26: 也检查 per-tool defer_loading 标志
             core_summaries = []
             deferred = []
             for t in all_tools:
-                if t.name in CORE_TOOL_NAMES:
+                if t.name in CORE_TOOL_NAMES and not getattr(t, 'defer_loading', False):
                     core_summaries.append(ToolSummary(
                         name=t.name, description=t.description, read_only=t.read_only,
                     ))
@@ -799,7 +800,7 @@ class AgentGateway:
                 timeline_entries=timeline_entries or None,
             )
 
-            # ── 5.3: 记忆引用追踪 — 解析 [mem:ID] 递增 usage_count ──
+            # ── 5.3: 记忆引用追踪 — 解析 [mem:ID] 递增 usage_count，然后从回复中移除标记 ──
             if result.final_answer and ctx.memory_id_map and self.memory_store:
                 import re as _re
                 refs = _re.findall(r"\[mem:(m\d+)\]", result.final_answer)
@@ -813,6 +814,18 @@ class AgentGateway:
                             )
                         except Exception as e:
                             logger.debug(f"Memory usage tracking failed for {mid}: {e}")
+                # 从回复中剥离 [mem:ID] 标记，不暴露给用户
+                answer = _re.sub(r"\s*\[mem:m\d+\]", "", answer).strip()
+                result = RuntimeResult(
+                    final_answer=answer,
+                    steps=result.steps,
+                    token_usage=result.token_usage,
+                    iterations=result.iterations,
+                    max_iterations_reached=result.max_iterations_reached,
+                    error=result.error,
+                    thinking=result.thinking,
+                    compact_stats=result.compact_stats,
+                )
 
             # ── 5.3: 工作流指纹记录 + Skill 建议 ──
             from config import settings as _cfg
@@ -1065,6 +1078,8 @@ class AgentGateway:
             secret_redactor=self.secret_redactor,
             llm_tool_registry=llm_tool_registry,
         )
+        # #11: 将 CancellationToken 挂到 RequestContext，工具可通过 ctx.cancellation_token 检查
+        ctx.cancellation_token = runtime.cancellation_token
 
         initial_messages = history_messages if history_messages else None
         result: RuntimeResult | None = None

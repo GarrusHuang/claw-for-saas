@@ -256,17 +256,6 @@ class Settings(BaseSettings):
         description="Workflow repeat count threshold to trigger Skill suggestion",
     )
 
-    # ─── Collaboration Mode Presets (#28) ───
-    mode_presets: str = Field(
-        default='{"quick":{"max_iterations":10,"temperature":0.5},"deep":{"max_iterations":25,"temperature":0.7},"creative":{"max_iterations":15,"temperature":0.9}}',
-        description="JSON: 命名模式预设 (quick/deep/creative → RuntimeConfig 覆盖)",
-    )
-
-    # ─── Prompt Templates (#27) ───
-    prompt_templates_dir: str = Field(
-        default="data/prompt_templates",
-        description="用户级 Prompt 模板存储目录",
-    )
 
     # ─── Scheduler (A9) ───
     scheduler_enabled: bool = Field(

@@ -52,13 +52,11 @@ backend/
     sandbox.py         — 文件沙箱 + Docker 沙箱 + symlink TOCTOU 防护
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
     exec_policy.py     — ExecPolicy: 命令执行安全策略 (三层防御 + per-user 审批持久化)
-    tool_orchestrator.py — ToolOrchestrator: 统一工具执行编排 (approval→sandbox→execute→retry)
     secret_redactor.py — SecretRedactor: Secret 输出脱敏
     data_lock.py       — 字段锁定 (防止 Agent 覆盖关键数据)
     token_estimator.py — Token 估算
     scheduler.py       — Cron 定时调度引擎
     webhook.py         — Webhook HMAC 签名回调
-    prompt_templates.py — Prompt 模板 CRUD (per-user JSON)
     notification.py    — WebSocket 通知管理
     plugin.py          — 插件系统 (目录加载 + entry_points)
     errors.py          — 错误分类 (RATE_LIMIT/OVERLOADED/NETWORK/CONTEXT_OVERFLOW 等)
@@ -100,7 +98,6 @@ backend/
     content_processor.py — 文件内容处理 (PDF/DOCX/图片压缩)
     usage_service.py   — 用量统计服务
     knowledge_service.py — 知识库服务 (元数据缓存 + _index.md 自动生成 + search_knowledge)
-    batch_service.py   — 批量任务服务 (并发执行 + 汇总)
     browser_service.py — Playwright 浏览器自动化
   models/
     request.py         — API 请求模型
