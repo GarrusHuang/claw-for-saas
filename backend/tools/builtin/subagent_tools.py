@@ -29,6 +29,7 @@ subagent_capability_registry = ToolRegistry()
         "tools: 工具白名单，逗号分隔（可选，不填则继承全部工具）。"
         "timeout_s: 超时秒数（默认 120）。"
         "wait: 是否等待完成（默认 True）。False 时立即返回 agent_id，后续用 wait_subagent 获取结果。"
+        "inherit_context: 是否继承父对话历史（默认 False）。True 时子 Agent 可看到之前的对话内容。"
     ),
     read_only=False,
 )
@@ -38,6 +39,7 @@ async def spawn_subagent(
     tools: str = "",  # 工具白名单，逗号分隔
     timeout_s: int = 120,  # 超时秒数
     wait: bool = True,  # 3.3: 是否等待完成
+    inherit_context: bool = False,  # #8: fork 父对话历史
 ) -> str:
     """派遣子智能体执行子任务。wait=True 返回结果，wait=False 返回 agent_id。"""
     ctx = get_request_context()
@@ -46,16 +48,15 @@ async def spawn_subagent(
         return "错误: SubagentRunner 未初始化。"
 
     if wait:
-        # 向下兼容: 同步等待
         result = await runner.run_subagent(
             task=task,
             prompt=prompt,
             tools=tools,
             timeout_s=timeout_s,
+            inherit_context=inherit_context,
         )
         return result
     else:
-        # 3.3: 非阻塞启动
         agent_id = await runner.start_subagent(
             task=task,
             prompt=prompt,
@@ -63,6 +64,7 @@ async def spawn_subagent(
             timeout_s=timeout_s,
             depth=ctx.subagent_depth + 1,
             user_id=ctx.user_id,
+            inherit_context=inherit_context,
         )
         return agent_id
 
@@ -80,12 +82,12 @@ async def spawn_subagents(
     tasks: str,  # JSON 数组
     timeout_s: int = 120,
 ) -> str:
-    """批量并行派遣多个子智能体，返回汇总结果。"""
-    runner = get_request_context().subagent_runner
+    """批量并行派遣多个子智能体 (内部使用 start+wait 模式)，返回汇总结果。"""
+    ctx = get_request_context()
+    runner = ctx.subagent_runner
     if runner is None:
         return "错误: SubagentRunner 未初始化。"
 
-    # 解析 tasks JSON
     try:
         task_list = json.loads(tasks)
         if not isinstance(task_list, list) or len(task_list) == 0:
@@ -93,32 +95,35 @@ async def spawn_subagents(
     except json.JSONDecodeError as e:
         return f"错误: tasks JSON 解析失败: {e}"
 
-    # 并行执行
-    coros = []
+    # #B: 用 start+wait 替代直接 run_subagent，复用并发控制
+    agent_ids: list[tuple[str, dict]] = []
     for item in task_list:
         if isinstance(item, str):
             item = {"task": item}
         if not isinstance(item, dict) or "task" not in item:
             return "错误: tasks 数组每项必须包含 task 字段。"
-        coros.append(
-            runner.run_subagent(
-                task=item["task"],
-                prompt=item.get("prompt", ""),
-                tools=item.get("tools", ""),
-                timeout_s=timeout_s,
-            )
+        agent_id = await runner.start_subagent(
+            task=item["task"],
+            prompt=item.get("prompt", ""),
+            tools=item.get("tools", ""),
+            timeout_s=timeout_s,
+            depth=ctx.subagent_depth + 1,
+            user_id=ctx.user_id,
         )
+        agent_ids.append((agent_id, item))
 
-    results = await asyncio.gather(*coros, return_exceptions=True)
+    # 并行等待所有结果
+    async def _wait(aid: str) -> str:
+        if aid.startswith("错误:"):
+            return aid
+        return await runner.wait_subagent(aid, timeout_s=timeout_s)
 
-    # 格式化结果
+    results = await asyncio.gather(*[_wait(aid) for aid, _ in agent_ids])
+
     parts = []
-    for i, (item, result) in enumerate(zip(task_list, results)):
+    for i, ((aid, item), result) in enumerate(zip(agent_ids, results)):
         task_desc = item["task"] if isinstance(item, dict) else item
-        if isinstance(result, Exception):
-            parts.append(f"## 子任务 {i+1}: {task_desc}\n**错误**: {result}")
-        else:
-            parts.append(f"## 子任务 {i+1}: {task_desc}\n{result}")
+        parts.append(f"## 子任务 {i+1}: {task_desc}\n{result}")
 
     return "\n\n".join(parts)
 

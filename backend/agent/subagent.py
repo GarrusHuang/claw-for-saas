@@ -92,6 +92,8 @@ class SubagentRunner:
         self.secret_redactor = secret_redactor
         # 3.3: 运行中子 Agent 状态
         self._running: dict[str, _RunningAgent] = {}
+        # #C: ToolRegistry 缓存 — 避免每次 merge
+        self._merged_registry_cache: ToolRegistry | None = None
 
     async def run_subagent(
         self,
@@ -99,6 +101,7 @@ class SubagentRunner:
         prompt: str = "",
         tools: str = "",
         timeout_s: int = 120,
+        inherit_context: bool = False,
     ) -> str:
         """
         执行子智能体 (同步等待模式，向下兼容)。
@@ -108,17 +111,15 @@ class SubagentRunner:
             prompt: 动态角色 prompt（空则用默认）
             tools: 工具白名单，逗号分隔（空则继承全部）
             timeout_s: 超时秒数
+            inherit_context: #8 是否 fork 父对话历史作为初始消息
 
         Returns:
             子智能体的最终回答文本
         """
-        # 构建工具集
         tool_registry = self._build_tool_registry(tools)
-
-        # 构建系统 prompt
         system_prompt = self._build_system_prompt(prompt, tool_registry)
+        initial_messages = self._get_parent_history() if inherit_context else None
 
-        # 运行
         config = RuntimeConfig(
             max_iterations=15,
             max_tokens_per_turn=4096,
@@ -128,12 +129,12 @@ class SubagentRunner:
             tool_registry=tool_registry,
             tool_parser=ToolCallParser(),
             config=config,
-            hooks=self.hooks,  # 继承父级安全 hooks (pre_tool_use / post_tool_use)
+            hooks=self.hooks,
             secret_redactor=self.secret_redactor,
         )
 
         try:
-            coro = runtime.run(system_prompt, task)
+            coro = runtime.run(system_prompt, task, initial_messages=initial_messages)
             result = await asyncio.wait_for(coro, timeout=timeout_s)
             logger.info(
                 f"Subagent completed: {result.iterations} iterations, "
@@ -157,6 +158,7 @@ class SubagentRunner:
         timeout_s: int = 120,
         depth: int = 0,
         user_id: str = "anonymous",
+        inherit_context: bool = False,
     ) -> str:
         """
         非阻塞启动子 Agent，返回 agent_id。
@@ -168,6 +170,7 @@ class SubagentRunner:
             timeout_s: 超时秒数
             depth: 当前嵌套深度
             user_id: 用于 per-user 并发控制
+            inherit_context: #8 是否 fork 父对话历史
 
         Returns:
             agent_id 或错误信息 (以 "错误:" 开头)
@@ -186,6 +189,7 @@ class SubagentRunner:
 
         agent_id = f"sa_{secrets.token_hex(6)}"
         inbox: asyncio.Queue = asyncio.Queue()
+        parent_history = self._get_parent_history() if inherit_context else None
 
         async def _run() -> str:
             try:
@@ -201,7 +205,7 @@ class SubagentRunner:
                     secret_redactor=self.secret_redactor,
                     message_inbox=inbox,
                 )
-                coro = runtime.run(system_prompt, task)
+                coro = runtime.run(system_prompt, task, initial_messages=parent_history)
                 result = await asyncio.wait_for(coro, timeout=timeout_s)
                 return result.final_answer
             except asyncio.TimeoutError:
@@ -267,6 +271,29 @@ class SubagentRunner:
         logger.info(f"Sent message to subagent {agent_id}")
         return f"消息已发送到子 Agent {agent_id}"
 
+    def _get_parent_history(self) -> list[dict] | None:
+        """
+        #8: 获取父对话历史 (最近 10 轮 user/assistant 消息) 作为子 Agent 初始上下文。
+        """
+        try:
+            from core.context import current_request
+            ctx = current_request.get()
+            if not ctx or not ctx.session_id:
+                return None
+            from dependencies import get_session_manager
+            sm = get_session_manager()
+            messages = sm.load_messages(ctx.tenant_id, ctx.user_id, ctx.session_id)
+            # 过滤: 只保留 user/assistant 消息，跳过 system/tool
+            filtered = [
+                m for m in messages
+                if m.get("role") in ("user", "assistant") and m.get("content")
+            ]
+            # 最近 10 轮
+            return filtered[-20:] if len(filtered) > 20 else filtered
+        except Exception as e:
+            logger.debug(f"Failed to get parent history: {e}")
+            return None
+
     def _build_tool_registry(self, tools: str) -> ToolRegistry:
         """
         构建子智能体的工具注册表。
@@ -274,7 +301,10 @@ class SubagentRunner:
         Args:
             tools: 逗号分隔的工具白名单，空则继承全部工具
         """
-        all_tools = self.shared_registry.merge(self.capability_registry)
+        # #C: 缓存 merged registry
+        if self._merged_registry_cache is None:
+            self._merged_registry_cache = self.shared_registry.merge(self.capability_registry)
+        all_tools = self._merged_registry_cache
 
         if not tools.strip():
             return all_tools

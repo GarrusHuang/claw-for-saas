@@ -31,7 +31,7 @@ backend/
     hooks.py           — Hook 系统 (pre_tool_use / post_tool_use / agent_stop / pre_compact / user_prompt_submit / session_start + inject action)
     hook_rules.py      — 可配置 Hook 规则引擎
     security_hooks.py  — PII 检测 / SSRF 防护等安全 Hook
-    subagent.py        — 子 Agent 派发 + 生命周期管理 (start/wait/send + depth/并发控制)
+    subagent.py        — 子 Agent 派发 + 生命周期管理 (start/wait/send + depth/并发控制 + fork 父历史 + registry 缓存)
     guardian.py        — Guardian AI 风险评估 (高风险工具 LLM 审查)
     plan_tracker.py    — 执行计划进度追踪
     quality_gate.py    — 输出质量门控

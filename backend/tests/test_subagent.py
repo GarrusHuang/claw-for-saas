@@ -308,6 +308,7 @@ class TestSpawnSubagentTool:
             prompt="你是验证专家",
             tools="arithmetic",
             timeout_s=60,
+            inherit_context=False,
         )
 
 
@@ -318,7 +319,7 @@ class TestSpawnSubagentsTool:
 
     def _set_runner(self, runner):
         from core.context import RequestContext, current_request
-        ctx = RequestContext(subagent_runner=runner)
+        ctx = RequestContext(subagent_runner=runner, user_id="U1", subagent_depth=0)
         return current_request.set(ctx)
 
     def _reset(self, token):
@@ -363,18 +364,23 @@ class TestSpawnSubagentsTool:
 
     @pytest.mark.asyncio
     async def test_spawn_subagents_parallel(self):
-        """并行执行多个子任务。"""
+        """并行执行多个子任务 (start+wait 模式)。"""
         from tools.builtin.subagent_tools import spawn_subagents
 
         call_count = 0
 
-        async def mock_run(**kwargs):
+        async def mock_start(**kwargs):
             nonlocal call_count
             call_count += 1
-            return f"结果{call_count}"
+            return f"sa_{call_count}"
+
+        async def mock_wait(agent_id, timeout_s=120):
+            idx = agent_id.split("_")[1]
+            return f"结果{idx}"
 
         mock_runner = AsyncMock()
-        mock_runner.run_subagent.side_effect = mock_run
+        mock_runner.start_subagent.side_effect = mock_start
+        mock_runner.wait_subagent.side_effect = mock_wait
 
         token = self._set_runner(mock_runner)
         try:
@@ -387,7 +393,7 @@ class TestSpawnSubagentsTool:
         finally:
             self._reset(token)
 
-        assert mock_runner.run_subagent.call_count == 3
+        assert mock_runner.start_subagent.call_count == 3
         assert "任务1" in result
         assert "任务2" in result
         assert "任务3" in result
@@ -398,7 +404,8 @@ class TestSpawnSubagentsTool:
         from tools.builtin.subagent_tools import spawn_subagents
 
         mock_runner = AsyncMock()
-        mock_runner.run_subagent.return_value = "OK"
+        mock_runner.start_subagent.return_value = "sa_1"
+        mock_runner.wait_subagent.return_value = "OK"
 
         token = self._set_runner(mock_runner)
         try:
@@ -406,20 +413,28 @@ class TestSpawnSubagentsTool:
         finally:
             self._reset(token)
 
-        assert mock_runner.run_subagent.call_count == 2
+        assert mock_runner.start_subagent.call_count == 2
 
     @pytest.mark.asyncio
     async def test_spawn_subagents_handles_exception(self):
-        """某个子任务异常不影响其他。"""
+        """某个子任务异常不影响其他 (start+wait 模式)。"""
         from tools.builtin.subagent_tools import spawn_subagents
 
-        async def mock_run(**kwargs):
-            if kwargs["task"] == "失败任务":
-                raise RuntimeError("boom")
+        call_idx = 0
+
+        async def mock_start(**kwargs):
+            nonlocal call_idx
+            call_idx += 1
+            return f"sa_{call_idx}"
+
+        async def mock_wait(agent_id, timeout_s=120):
+            if agent_id == "sa_2":
+                return "子智能体执行失败: boom"
             return "成功"
 
         mock_runner = AsyncMock()
-        mock_runner.run_subagent.side_effect = mock_run
+        mock_runner.start_subagent.side_effect = mock_start
+        mock_runner.wait_subagent.side_effect = mock_wait
 
         token = self._set_runner(mock_runner)
         try:
