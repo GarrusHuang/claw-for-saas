@@ -115,7 +115,7 @@ frontend/
         stores/
           ai-chat.ts   — 对话状态 (Zustand)
           pipeline.ts  — Pipeline 状态
-          auth.ts      — 认证状态
+          auth.ts      — 认证状态 (含 roles/isAdmin)
           session-status.ts — 会话状态
           pipeline-cache.ts — 会话快照缓存
         hooks/
@@ -143,8 +143,16 @@ frontend/
         shared/              — 共享组件 (代码高亮/Markdown 渲染)
   app/                 — 示例宿主应用
     src/
-      App.tsx          — 入口 (LoginPage → AIChatDialog + ClawFloatingButton)
+      App.tsx          — 入口 (顶部 Tab 切换对话/管理 + LoginPage)
       LoginPage.tsx    — 登录页
+      admin/
+        AdminPage.tsx      — 管理后台主页 (租户选择器 + Tabs)
+        TenantManager.tsx  — 租户 CRUD
+        UserManager.tsx    — 用户 CRUD
+        ApiKeyManager.tsx  — API Key 管理
+        InviteCodeManager.tsx — 邀请码管理
+        UsageDashboard.tsx — 用量统计面板
+        admin-api.ts       — Admin API 调用层 (21 个函数)
     vite.config.ts     — dev server port 3001, proxy /api → localhost:8000
 ```
 

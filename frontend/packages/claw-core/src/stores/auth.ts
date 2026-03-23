@@ -17,6 +17,10 @@ export interface AuthState {
   tenantId: string | null;
   /** token 过期时间戳 (ms) */
   expiresAt: number | null;
+  /** 用户角色 */
+  roles: string[];
+  /** 是否管理员 */
+  isAdmin: boolean;
   /** 登录中 */
   loading: boolean;
   /** 错误信息 */
@@ -70,7 +74,7 @@ function getInitialAuthState() {
     const user = JSON.parse(userStr);
     if (!user.userId || !user.tenantId) return null;
     if (user.expiresAt && Date.now() > user.expiresAt) return null;
-    return { token, userId: user.userId as string, tenantId: user.tenantId as string, expiresAt: user.expiresAt as number };
+    return { token, userId: user.userId as string, tenantId: user.tenantId as string, expiresAt: user.expiresAt as number, roles: (user.roles as string[]) ?? [] };
   } catch {
     return null;
   }
@@ -83,6 +87,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   userId: _initial?.userId ?? null,
   tenantId: _initial?.tenantId ?? null,
   expiresAt: _initial?.expiresAt ?? null,
+  roles: _initial?.roles ?? [],
+  isAdmin: (_initial?.roles ?? []).includes('admin'),
   loading: false,
   error: null,
   isAuthenticated: !!_initial,
@@ -107,12 +113,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const data = await res.json();
       const expiresAt = Date.now() + (data.expires_in || 86400) * 1000;
 
+      const roles: string[] = data.roles ?? [];
+
       // Persist
       localStorage.setItem(TOKEN_KEY, data.token);
       localStorage.setItem(USER_KEY, JSON.stringify({
         userId: data.user_id,
         tenantId: data.tenant_id,
         expiresAt,
+        roles,
       }));
 
       set({
@@ -120,6 +129,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         userId: data.user_id,
         tenantId: data.tenant_id,
         expiresAt,
+        roles,
+        isAdmin: roles.includes('admin'),
         loading: false,
         error: null,
         isAuthenticated: true,
@@ -154,11 +165,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const data = await res.json();
       const expiresAt = Date.now() + (data.expires_in || 86400) * 1000;
 
+      const roles: string[] = data.roles ?? [];
+
       localStorage.setItem(TOKEN_KEY, data.token);
       localStorage.setItem(USER_KEY, JSON.stringify({
         userId: data.user_id,
         tenantId: data.tenant_id,
         expiresAt,
+        roles,
       }));
 
       set({
@@ -166,6 +180,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         userId: data.user_id,
         tenantId: data.tenant_id,
         expiresAt,
+        roles,
+        isAdmin: roles.includes('admin'),
         loading: false,
         error: null,
         isAuthenticated: true,
@@ -183,7 +199,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     _clearRefreshTimer();
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    set({ token: null, userId: null, tenantId: null, expiresAt: null, error: null, isAuthenticated: false });
+    set({ token: null, userId: null, tenantId: null, expiresAt: null, roles: [], isAdmin: false, error: null, isAuthenticated: false });
   },
 
   restore: () => {
@@ -205,19 +221,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ token: null, userId: null, tenantId: null, expiresAt: null, isAuthenticated: false });
         return;
       }
+      const roles: string[] = user.roles ?? [];
       set({
         token,
         userId: user.userId,
         tenantId: user.tenantId,
         expiresAt: user.expiresAt,
+        roles,
+        isAdmin: roles.includes('admin'),
         isAuthenticated: true,
       });
+
+      // 旧数据无 roles 字段时，异步调 /api/auth/me 补全
+      if (!user.roles) {
+        const baseUrl = getAIConfig().aiBaseUrl;
+        fetch(`${baseUrl}/api/auth/me`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        }).then(r => r.ok ? r.json() : null).then(me => {
+          if (me?.roles) {
+            const freshRoles: string[] = me.roles;
+            localStorage.setItem(USER_KEY, JSON.stringify({ ...user, roles: freshRoles }));
+            set({ roles: freshRoles, isAdmin: freshRoles.includes('admin') });
+          }
+        }).catch(() => {});
+      }
 
       _startRefreshTimer(user.expiresAt, get);
     } catch {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
-      set({ token: null, userId: null, tenantId: null, expiresAt: null, isAuthenticated: false });
+      set({ token: null, userId: null, tenantId: null, expiresAt: null, roles: [], isAdmin: false, isAuthenticated: false });
     }
   },
 
@@ -257,6 +290,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         userId: data.user_id || state.userId,
         tenantId: data.tenant_id || state.tenantId,
         expiresAt,
+        roles: state.roles,
       }));
 
       set({
