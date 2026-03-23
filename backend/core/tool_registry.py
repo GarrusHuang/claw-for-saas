@@ -65,6 +65,7 @@ class RegisteredTool:
     func: Callable
     schema: dict
     read_only: bool = False
+    defer_loading: bool = False  # #26: per-tool 延迟加载标志
 
 
 class ToolRegistry:
@@ -122,6 +123,29 @@ class ToolRegistry:
             func=func,
             schema=schema,
             read_only=read_only,
+        )
+
+    def register_dynamic(
+        self,
+        name: str,
+        description: str,
+        schema: dict,
+        func: Callable,
+        read_only: bool = False,
+        defer_loading: bool = False,
+    ) -> None:
+        """
+        #26: 注册外部 DynamicToolSpec (跳过自动 schema 提取)。
+
+        用于插件或外部系统注入工具，schema 由调用方提供。
+        """
+        self._tools[name] = RegisteredTool(
+            name=name,
+            description=description,
+            func=func,
+            schema=schema,
+            read_only=read_only,
+            defer_loading=defer_loading,
         )
 
     def _extract_schema(self, func: Callable, tool_name: str, tool_desc: str) -> dict:

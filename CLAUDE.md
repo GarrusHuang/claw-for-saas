@@ -52,6 +52,7 @@ backend/
     sandbox.py         — 文件沙箱 + Docker 沙箱 + symlink TOCTOU 防护
     file_diff_tracker.py — TurnDiffTracker: 单 turn 文件变更追踪
     exec_policy.py     — ExecPolicy: 命令执行安全策略 (三层防御 + per-user 审批持久化)
+    tool_orchestrator.py — ToolOrchestrator: 统一工具执行编排 (approval→sandbox→execute→retry)
     secret_redactor.py — SecretRedactor: Secret 输出脱敏
     data_lock.py       — 字段锁定 (防止 Agent 覆盖关键数据)
     token_estimator.py — Token 估算

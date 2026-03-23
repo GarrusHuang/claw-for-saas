@@ -334,10 +334,46 @@ class SessionManager:
             sessions.append(metadata)
         return sessions
 
+    def _build_search_index(self, tenant_id: str, user_id: str) -> list[dict]:
+        """
+        #46: 构建会话搜索索引 (metadata + 首条用户消息)，避免全量扫描 JSONL。
+
+        Returns:
+            [{session_id, title, business_type, first_user_msg, mtime}, ...]
+        """
+        session_dir = self._session_dir(tenant_id, user_id)
+        if not session_dir.exists():
+            return []
+
+        index = []
+        for f in sorted(session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+            entry = {"session_id": f.stem, "mtime": f.stat().st_mtime}
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if data.get("type") == "metadata":
+                            entry["title"] = str(data.get("title", ""))
+                            entry["business_type"] = str(data.get("business_type", ""))
+                        elif data.get("role") == "user" and "first_user_msg" not in entry:
+                            entry["first_user_msg"] = str(data.get("content", ""))[:200]
+                        if "title" in entry and "first_user_msg" in entry:
+                            break
+            except OSError:
+                continue
+            index.append(entry)
+        return index
+
     def search_sessions(
         self, tenant_id: str, user_id: str, query: str, limit: int = 20
     ) -> list[dict]:
-        """搜索会话 — 匹配标题和消息内容。"""
+        """搜索会话 — 先搜索索引 (标题+首消息)，未命中再 fallback 全文扫描。"""
         if not query or not query.strip():
             return []
 
@@ -346,12 +382,45 @@ class SessionManager:
         if not session_dir.exists():
             return []
 
-        results = []
-        for f in sorted(
-            session_dir.glob("*.jsonl"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        ):
+        # #46: 快速路径 — 搜索索引 (标题 + 首条消息)
+        index = self._build_search_index(tenant_id, user_id)
+        fast_results = []
+        unmatched_files = []
+        for entry in index:
+            title = entry.get("title", "").lower()
+            bt = entry.get("business_type", "").lower()
+            first_msg = entry.get("first_user_msg", "").lower()
+            if query_lower in title or query_lower in bt or query_lower in first_msg:
+                snippet = ""
+                if query_lower in first_msg:
+                    pos = first_msg.find(query_lower)
+                    start = max(0, pos - 30)
+                    snippet = entry.get("first_user_msg", "")[start:start + 80]
+                fast_results.append({
+                    "session_id": entry["session_id"],
+                    "title": entry.get("title", ""),
+                    "business_type": entry.get("business_type", ""),
+                    "match_snippet": snippet,
+                    "title_match": query_lower in title or query_lower in bt,
+                })
+                if len(fast_results) >= limit:
+                    return fast_results
+            else:
+                unmatched_files.append(entry["session_id"])
+
+        # 快速路径已满足
+        if len(fast_results) >= limit:
+            return fast_results
+
+        # Fallback: 全文扫描未命中的 JSONL (保留旧逻辑)
+        remaining = limit - len(fast_results)
+        results = list(fast_results)
+        for session_id in unmatched_files:
+            if remaining <= 0:
+                break
+            f = session_dir / f"{session_id}.jsonl"
+            if not f.exists():
+                continue
             session_id = f.stem
             metadata: dict[str, object] = {"session_id": session_id}
             matched_snippet = ""

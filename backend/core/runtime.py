@@ -1424,6 +1424,20 @@ class AgenticRuntime:
         if not middle:
             return messages
 
+        # #38: Context Diff — 生成被移除内容的摘要清单
+        removed_summary_parts: list[str] = []
+        for msg in middle:
+            role = msg.get("role", "")
+            if role == "tool":
+                tc_id = msg.get("tool_call_id", "?")
+                removed_summary_parts.append(f"- [removed tool result: {tc_id}]")
+            elif role == "assistant" and msg.get("tool_calls"):
+                names = [tc.get("function", {}).get("name", "?") for tc in msg["tool_calls"]]
+                removed_summary_parts.append(f"- [removed assistant tool_calls: {', '.join(names)}]")
+            elif role == "user":
+                preview = str(msg.get("content", ""))[:60]
+                removed_summary_parts.append(f"- [removed user: {preview}]")
+
         # ── PreCompact Hook: 保护关键信息 ──
         preserved_prefix = ""
         if self.hooks:
@@ -1442,6 +1456,11 @@ class AgenticRuntime:
 
         # 用 LLM 生成摘要 (4d)，失败则 fallback 到启发式
         summary_text = await self._generate_summary(middle, preserved_prefix)
+
+        # #38: 附加 context diff 清单 (被移除的内容)
+        if removed_summary_parts:
+            diff_section = "\n[Context Diff — 以下内容已从上下文中移除:]\n" + "\n".join(removed_summary_parts[:20])
+            summary_text += "\n" + diff_section
 
         return head + [{"role": "user", "content": summary_text}] + tail
 
