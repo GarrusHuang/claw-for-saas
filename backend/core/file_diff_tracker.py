@@ -75,3 +75,34 @@ class TurnDiffTracker:
             })
 
         return results
+
+    def undo_all(self) -> list[dict]:
+        """
+        #20 Undo: 将所有已写入的文件恢复到 baseline 状态。
+
+        Returns:
+            list of {"path": rel, "restored": bool, "detail": str}
+        """
+        results = []
+        for abs_path, operation in self._writes.items():
+            rel = os.path.relpath(abs_path, self._workspace)
+            baseline = self._baselines.get(abs_path)
+            try:
+                if baseline is None:
+                    # 文件在写入前不存在 → 删除
+                    if os.path.exists(abs_path):
+                        os.remove(abs_path)
+                        results.append({"path": rel, "restored": True, "detail": "deleted (was new)"})
+                    else:
+                        results.append({"path": rel, "restored": True, "detail": "already absent"})
+                else:
+                    # 恢复 baseline 内容
+                    with open(abs_path, "w", encoding="utf-8") as f:
+                        f.write(baseline)
+                    results.append({"path": rel, "restored": True, "detail": "restored to baseline"})
+            except OSError as e:
+                results.append({"path": rel, "restored": False, "detail": str(e)})
+
+        # 清除状态
+        self._writes.clear()
+        return results

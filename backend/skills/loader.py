@@ -61,35 +61,61 @@ def _parse_frontmatter(raw: str) -> tuple[dict, str]:
     body = match.group(2).strip()
 
     metadata: dict = {}
-    for line in fm_text.splitlines():
-        line = line.strip()
-        if not line or ":" not in line:
+    current_key: str | None = None
+    current_lines: list[str] = []
+
+    for raw_line in fm_text.splitlines():
+        stripped = raw_line.strip()
+        # #48: 跳过注释行
+        if stripped.startswith("#"):
             continue
-        key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip()
+        if not stripped:
+            # 空行: 如果在多行值中，追加空行
+            if current_key is not None:
+                current_lines.append("")
+            continue
 
-        # 去掉引号
-        if (value.startswith('"') and value.endswith('"')) or \
-           (value.startswith("'") and value.endswith("'")):
-            value = value[1:-1]
+        # 检查是否是新的 key: value 行
+        if ":" in stripped and not stripped.startswith(" ") and not stripped.startswith("\t"):
+            # 先保存上一个 key
+            if current_key is not None:
+                _store_fm_value(metadata, current_key, "\n".join(current_lines))
+            key, _, value = stripped.partition(":")
+            current_key = key.strip()
+            current_lines = [value.strip()]
+        elif current_key is not None:
+            # #48: 多行值的续行 (缩进行)
+            current_lines.append(stripped)
 
-        # 解析 [item1, item2] 列表语法
-        list_match = re.match(r"^\[(.*)\]$", value)
-        if list_match:
-            items = [
-                item.strip().strip('"').strip("'")
-                for item in list_match.group(1).split(",")
-                if item.strip()
-            ]
-            metadata[key] = items
-        else:
-            if value.isdigit():
-                metadata[key] = int(value)
-            else:
-                metadata[key] = value
+    # 保存最后一个 key
+    if current_key is not None:
+        _store_fm_value(metadata, current_key, "\n".join(current_lines))
 
     return metadata, body
+
+
+def _store_fm_value(metadata: dict, key: str, value: str) -> None:
+    """将解析后的 frontmatter 值存入 metadata dict。"""
+    value = value.strip()
+
+    # 去掉引号
+    if len(value) >= 2:
+        if (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'"):
+            value = value[1:-1]
+
+    # 解析 [item1, item2] 列表语法
+    list_match = re.match(r"^\[(.*)\]$", value, re.DOTALL)
+    if list_match:
+        items = [
+            item.strip().strip('"').strip("'")
+            for item in list_match.group(1).split(",")
+            if item.strip()
+        ]
+        metadata[key] = items
+    elif value.isdigit():
+        metadata[key] = int(value)
+    else:
+        metadata[key] = value
 
 
 class SkillLoader:
@@ -626,6 +652,32 @@ class SkillLoader:
         except Exception as e:
             logger.exception("Failed to import skill: %s", name)
             return {"ok": False, "error": str(e)}
+
+    def reload_all(self) -> int:
+        """
+        #30 Skill 热重载: 清除缓存并重新扫描所有 Skill 目录。
+
+        Returns:
+            重新加载的 Skill 总数。
+        """
+        self._registry.clear()
+        self._body_cache.clear()
+        self._build_registry()
+        logger.info(f"Skill hot reload complete: {len(self._registry)} skills")
+        return len(self._registry)
+
+    def invalidate_cache(self, skill_name: str) -> bool:
+        """
+        #30 Skill 缓存失效: 清除单个 Skill 的 body 缓存，下次使用时重新加载。
+
+        Returns:
+            True 如果该 Skill 存在缓存被清除。
+        """
+        if skill_name in self._body_cache:
+            del self._body_cache[skill_name]
+            logger.info(f"Skill cache invalidated: {skill_name}")
+            return True
+        return False
 
     def _register_single(self, skill_dir: str, priority: int = PRIORITY_BUILTIN) -> None:
         """注册/刷新单个 Skill 目录。"""

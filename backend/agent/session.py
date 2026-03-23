@@ -166,6 +166,60 @@ class SessionManager:
             logger.info(f"Cleaned {cleaned} orphan session lock files")
         return cleaned
 
+    def rollback_turns(
+        self, tenant_id: str, user_id: str, session_id: str, n: int = 1,
+    ) -> int:
+        """
+        #15 Thread Rollback: 撤销最近 N 轮对话 (每轮 = 1 user + 1 assistant 消息)。
+
+        从 JSONL 文件末尾移除消息。返回实际移除的消息数。
+        """
+        if n <= 0:
+            return 0
+        messages = self.load_messages(tenant_id, user_id, session_id)
+        if not messages:
+            return 0
+
+        # 从末尾计数: 找到最近 n 轮的起始位置
+        remove_count = 0
+        turns_found = 0
+        for msg in reversed(messages):
+            remove_count += 1
+            if msg.get("role") == "user":
+                turns_found += 1
+                if turns_found >= n:
+                    break
+
+        if remove_count == 0:
+            return 0
+
+        keep = messages[:-remove_count]
+        # 重写 JSONL
+        session_file = self._session_dir(tenant_id, user_id) / f"{session_id}.jsonl"
+        # 保留 metadata 行
+        raw_lines: list[str] = []
+        if session_file.exists():
+            with open(session_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line_s = line.strip()
+                    if not line_s:
+                        continue
+                    try:
+                        entry = json.loads(line_s)
+                        if entry.get("type") in ("metadata", "compaction_marker"):
+                            raw_lines.append(line_s)
+                    except json.JSONDecodeError:
+                        pass
+
+        with open(session_file, "w", encoding="utf-8") as f:
+            for line in raw_lines:
+                f.write(line + "\n")
+            for msg in keep:
+                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+
+        logger.info(f"Rolled back {remove_count} messages ({n} turns) from session {session_id}")
+        return remove_count
+
     def append_message(
         self, tenant_id: str, user_id: str, session_id: str, message: dict
     ) -> None:
