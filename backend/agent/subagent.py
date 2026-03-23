@@ -1,21 +1,23 @@
 """
-子智能体运行器 — A3 动态化重构。
+子智能体运行器 — A3 动态化重构 + 3.3 生命周期增强。
 
 主 Agent 通过 spawn_subagent / spawn_subagents 工具调用子智能体。
 子智能体有独立的 AgenticRuntime 实例 + 独立上下文。
 
-A3 改造:
-- 去掉预定义角色文件 (agents/*.md) 和 AgentRoleLoader
-- 去掉 query/task 双模式
-- 主 Agent 动态传入 prompt 即角色
-- 工具白名单通过逗号分隔字符串指定
-- 支持超时控制
+3.3 增强:
+- start_subagent: 非阻塞启动，返回 agent_id
+- wait_subagent: 等待子 Agent 完成
+- send_to_subagent: 向运行中子 Agent 发送消息
+- per-user 并发限制 (最多 3 个)
+- 嵌套深度限制 (最多 3 层)
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
+from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 from core.llm_client import LLMGatewayClient
@@ -28,6 +30,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── 3.3: 并发/深度限制 ──
+_MAX_CONCURRENT_PER_USER = 3
+_MAX_DEPTH = 3
+_user_semaphores: dict[str, asyncio.Semaphore] = {}
+
 # 默认子智能体系统 prompt
 _DEFAULT_SUBAGENT_PROMPT = (
     "你是一个子智能体，负责执行分配的子任务。\n\n"
@@ -36,6 +43,23 @@ _DEFAULT_SUBAGENT_PROMPT = (
     "2. 使用可用工具高效执行\n"
     "3. 完成后输出清晰的结果\n"
 )
+
+
+@dataclass
+class _RunningAgent:
+    """运行中的子 Agent 状态。"""
+    agent_id: str
+    task: asyncio.Task
+    inbox: asyncio.Queue
+    user_id: str
+    depth: int
+
+
+def _get_user_semaphore(user_id: str) -> asyncio.Semaphore:
+    """获取/创建 per-user 并发信号量。"""
+    if user_id not in _user_semaphores:
+        _user_semaphores[user_id] = asyncio.Semaphore(_MAX_CONCURRENT_PER_USER)
+    return _user_semaphores[user_id]
 
 
 class SubagentRunner:
@@ -48,6 +72,7 @@ class SubagentRunner:
     - 支持工具白名单过滤
     - 支持超时控制
     - 继承父级安全 hooks (pre_tool_use / post_tool_use)
+    - 3.3: start/wait/send 生命周期管理
     """
 
     def __init__(
@@ -65,6 +90,8 @@ class SubagentRunner:
         self.prompt_builder = prompt_builder
         self.hooks = hooks  # 继承父级安全 hooks
         self.secret_redactor = secret_redactor
+        # 3.3: 运行中子 Agent 状态
+        self._running: dict[str, _RunningAgent] = {}
 
     async def run_subagent(
         self,
@@ -74,7 +101,7 @@ class SubagentRunner:
         timeout_s: int = 120,
     ) -> str:
         """
-        执行子智能体。
+        执行子智能体 (同步等待模式，向下兼容)。
 
         Args:
             task: 子任务描述
@@ -119,6 +146,126 @@ class SubagentRunner:
         except Exception as e:
             logger.error(f"Subagent failed: {e}")
             return f"子智能体执行失败: {e}"
+
+    # ── 3.3: 非阻塞生命周期方法 ──
+
+    async def start_subagent(
+        self,
+        task: str,
+        prompt: str = "",
+        tools: str = "",
+        timeout_s: int = 120,
+        depth: int = 0,
+        user_id: str = "anonymous",
+    ) -> str:
+        """
+        非阻塞启动子 Agent，返回 agent_id。
+
+        Args:
+            task: 子任务描述
+            prompt: 动态角色 prompt
+            tools: 工具白名单
+            timeout_s: 超时秒数
+            depth: 当前嵌套深度
+            user_id: 用于 per-user 并发控制
+
+        Returns:
+            agent_id 或错误信息 (以 "错误:" 开头)
+        """
+        # 深度检查
+        if depth >= _MAX_DEPTH:
+            return f"错误: 子 Agent 嵌套深度超限 (当前 {depth}, 最大 {_MAX_DEPTH})"
+
+        # 并发检查
+        sem = _get_user_semaphore(user_id)
+        acquired = sem._value > 0  # 检查是否有可用槽位
+        if not acquired:
+            return f"错误: 用户 {user_id} 同时运行的子 Agent 已达上限 ({_MAX_CONCURRENT_PER_USER})"
+
+        await sem.acquire()
+
+        agent_id = f"sa_{secrets.token_hex(6)}"
+        inbox: asyncio.Queue = asyncio.Queue()
+
+        async def _run() -> str:
+            try:
+                tool_registry = self._build_tool_registry(tools)
+                system_prompt = self._build_system_prompt(prompt, tool_registry)
+                config = RuntimeConfig(max_iterations=15, max_tokens_per_turn=4096)
+                runtime = AgenticRuntime(
+                    llm_client=self.llm_client,
+                    tool_registry=tool_registry,
+                    tool_parser=ToolCallParser(),
+                    config=config,
+                    hooks=self.hooks,
+                    secret_redactor=self.secret_redactor,
+                    message_inbox=inbox,
+                )
+                coro = runtime.run(system_prompt, task)
+                result = await asyncio.wait_for(coro, timeout=timeout_s)
+                return result.final_answer
+            except asyncio.TimeoutError:
+                return f"子智能体执行超时（{timeout_s}秒）。"
+            except Exception as e:
+                return f"子智能体执行失败: {e}"
+            finally:
+                sem.release()
+                self._running.pop(agent_id, None)
+
+        async_task = asyncio.create_task(_run())
+        self._running[agent_id] = _RunningAgent(
+            agent_id=agent_id,
+            task=async_task,
+            inbox=inbox,
+            user_id=user_id,
+            depth=depth,
+        )
+
+        logger.info(f"Started subagent {agent_id} (depth={depth}, user={user_id})")
+        return agent_id
+
+    async def wait_subagent(self, agent_id: str, timeout_s: float = 120) -> str:
+        """
+        等待子 Agent 完成，返回结果。
+
+        Args:
+            agent_id: 子 Agent ID
+            timeout_s: 等待超时
+
+        Returns:
+            子 Agent 的最终回答或错误信息
+        """
+        running = self._running.get(agent_id)
+        if running is None:
+            return f"错误: 子 Agent {agent_id} 不存在或已完成"
+
+        try:
+            result = await asyncio.wait_for(running.task, timeout=timeout_s)
+            return result
+        except asyncio.TimeoutError:
+            return f"等待子 Agent {agent_id} 超时（{timeout_s}秒）"
+
+    async def send_to_subagent(self, agent_id: str, message: str) -> str:
+        """
+        向运行中的子 Agent 发送消息。
+
+        Args:
+            agent_id: 子 Agent ID
+            message: 消息内容
+
+        Returns:
+            确认信息或错误
+        """
+        running = self._running.get(agent_id)
+        if running is None:
+            return f"错误: 子 Agent {agent_id} 不存在或已完成"
+
+        if running.task.done():
+            return f"错误: 子 Agent {agent_id} 已完成执行"
+
+        await running.inbox.put(message)
+        logger.info(f"Sent message to subagent {agent_id}")
+        return f"消息已发送到子 Agent {agent_id}"
 
     def _build_tool_registry(self, tools: str) -> ToolRegistry:
         """

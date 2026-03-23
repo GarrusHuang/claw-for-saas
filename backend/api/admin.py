@@ -61,6 +61,14 @@ class CreateApiKeyRequest(BaseModel):
     expires_in_days: int | None = Field(None, description="过期天数 (空=永不过期)")
 
 
+# ── Invite Code models ──
+
+class CreateInviteCodeRequest(BaseModel):
+    roles: list[str] = Field(default_factory=list, description="注册用户角色")
+    max_uses: int = Field(1, description="最大使用次数")
+    expires_in_days: int | None = Field(None, description="过期天数 (空=永不过期)")
+
+
 # ═══════════════════════════════════════
 # Tenant endpoints
 # ═══════════════════════════════════════
@@ -303,4 +311,78 @@ async def delete_api_key(tenant_id: str, key_id: str, user: AuthUser = Depends(g
     if not any(k.key_id == key_id for k in keys):
         raise HTTPException(status_code=404, detail=f"API key not found: {key_id}")
     db.delete_api_key(key_id)
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════
+# Invite Code endpoints (4.6)
+# ═══════════════════════════════════════
+
+@router.post("/tenants/{tenant_id}/invite-codes")
+async def create_invite_code(
+    tenant_id: str, req: CreateInviteCodeRequest, user: AuthUser = Depends(get_current_user),
+):
+    """生成邀请码。"""
+    _require_admin(user)
+    from dependencies import get_database
+    import time
+
+    db = get_database()
+    if not db.get_tenant(tenant_id):
+        raise HTTPException(status_code=404, detail=f"Tenant not found: {tenant_id}")
+
+    expires_at = (time.time() + req.expires_in_days * 86400) if req.expires_in_days else None
+
+    code = db.create_invite_code(
+        tenant_id=tenant_id,
+        roles=req.roles,
+        max_uses=req.max_uses,
+        expires_at=expires_at,
+        created_by=user.user_id,
+    )
+    return {
+        "code": code,
+        "tenant_id": tenant_id,
+        "roles": req.roles,
+        "max_uses": req.max_uses,
+        "expires_at": expires_at,
+    }
+
+
+@router.get("/tenants/{tenant_id}/invite-codes")
+async def list_invite_codes(tenant_id: str, user: AuthUser = Depends(get_current_user)):
+    """列出租户的所有邀请码。"""
+    _require_admin(user)
+    from dependencies import get_database
+    db = get_database()
+    codes = db.list_invite_codes(tenant_id)
+    return [
+        {
+            "code": c.code,
+            "tenant_id": c.tenant_id,
+            "roles": c.roles,
+            "max_uses": c.max_uses,
+            "used_count": c.used_count,
+            "expires_at": c.expires_at,
+            "created_by": c.created_by,
+            "created_at": c.created_at,
+            "status": c.status,
+        }
+        for c in codes
+    ]
+
+
+@router.post("/tenants/{tenant_id}/invite-codes/{code}/revoke")
+async def revoke_invite_code(
+    tenant_id: str, code: str, user: AuthUser = Depends(get_current_user),
+):
+    """撤销邀请码。"""
+    _require_admin(user)
+    from dependencies import get_database
+    db = get_database()
+    # Verify code belongs to this tenant
+    codes = db.list_invite_codes(tenant_id)
+    if not any(c.code == code for c in codes):
+        raise HTTPException(status_code=404, detail=f"Invite code not found: {code}")
+    db.revoke_invite_code(code)
     return {"ok": True}

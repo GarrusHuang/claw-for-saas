@@ -24,6 +24,8 @@ export interface AuthState {
 
   /** 用户名密码登录 */
   login: (username: string, password: string, tenantId?: string) => Promise<boolean>;
+  /** 邀请码注册 */
+  register: (inviteCode: string, username: string, password: string) => Promise<boolean>;
   /** 登出 */
   logout: () => void;
   /** 从 localStorage 恢复 */
@@ -125,6 +127,51 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       _startRefreshTimer(expiresAt, get);
 
+      return true;
+    } catch (e) {
+      set({ loading: false, error: e instanceof Error ? e.message : 'Network error' });
+      return false;
+    }
+  },
+
+  register: async (inviteCode, username, password) => {
+    set({ loading: true, error: null });
+    try {
+      const baseUrl = getAIConfig().aiBaseUrl;
+      const res = await fetch(`${baseUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invite_code: inviteCode, username, password }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        const msg = body.detail || `Registration failed: ${res.status}`;
+        set({ loading: false, error: msg });
+        return false;
+      }
+
+      const data = await res.json();
+      const expiresAt = Date.now() + (data.expires_in || 86400) * 1000;
+
+      localStorage.setItem(TOKEN_KEY, data.token);
+      localStorage.setItem(USER_KEY, JSON.stringify({
+        userId: data.user_id,
+        tenantId: data.tenant_id,
+        expiresAt,
+      }));
+
+      set({
+        token: data.token,
+        userId: data.user_id,
+        tenantId: data.tenant_id,
+        expiresAt,
+        loading: false,
+        error: null,
+        isAuthenticated: true,
+      });
+
+      _startRefreshTimer(expiresAt, get);
       return true;
     } catch (e) {
       set({ loading: false, error: e instanceof Error ? e.message : 'Network error' });
