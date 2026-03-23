@@ -27,7 +27,7 @@ backend/
   agent/
     gateway.py         — AgentGateway: 单一入口处理所有用户请求
     session.py         — JSONL 会话存储 (data/sessions/{tenant}/{user}/{session}.jsonl)
-    prompt.py          — 8 层模块化系统提示构建器
+    prompt.py          — 8 层模块化系统提示构建器 (含 per-tenant Soul/Personality 覆盖)
     hooks.py           — Hook 系统 (pre_tool_use / post_tool_use / agent_stop / pre_compact / user_prompt_submit / session_start + inject action)
     hook_rules.py      — 可配置 Hook 规则引擎
     security_hooks.py  — PII 检测 / SSRF 防护等安全 Hook
@@ -57,6 +57,7 @@ backend/
     token_estimator.py — Token 估算
     scheduler.py       — Cron 定时调度引擎
     webhook.py         — Webhook HMAC 签名回调
+    prompt_templates.py — Prompt 模板 CRUD (per-user JSON)
     notification.py    — WebSocket 通知管理
     plugin.py          — 插件系统 (目录加载 + entry_points)
     errors.py          — 错误分类 (RATE_LIMIT/OVERLOADED/NETWORK/CONTEXT_OVERFLOW 等)

@@ -105,6 +105,10 @@ class PromptBuilder:
         self._soul_path = soul_path or _SOUL_PATH
         self._soul_cache: str | None = None
         self._sections: dict[str, PromptSection] = {}
+        # #42: per-tenant Soul 覆盖缓存
+        self._tenant_soul_cache: dict[str, str] = {}
+        # #29: per-tenant personality 缓存
+        self._tenant_personality_cache: dict[str, str] = {}
         self._register_defaults()
 
     # ── 注册 / 注销 ──
@@ -282,6 +286,12 @@ class PromptBuilder:
                 name="plan_guidance",
                 builder_fn=self._build_plan_guidance_section,
             ),
+            PromptSection(
+                layer=PromptLayer.EXTRA,
+                priority=5,
+                name="personality",
+                builder_fn=self._build_personality,
+            ),
         ]
         for sec in defaults:
             self._sections[sec.name] = sec
@@ -293,6 +303,13 @@ class PromptBuilder:
         return "<identity>Claw AI Agent Runtime</identity>"
 
     def _build_soul(self, _ctx: PromptContext) -> str:
+        # #42: 检查 per-tenant Soul 覆盖
+        from core.context import current_request
+        ctx = current_request.get()
+        if ctx:
+            tenant_soul = self._load_tenant_soul(ctx.tenant_id)
+            if tenant_soul:
+                return tenant_soul
         return self._load_soul()
 
     @staticmethod
@@ -379,6 +396,17 @@ class PromptBuilder:
     def _build_runtime(self, ctx: PromptContext) -> str:
         return self._format_runtime_context(ctx.user_id, ctx.session_id)
 
+    def _build_personality(self, _ctx: PromptContext) -> str:
+        """#29: 注入租户级 Personality 预设。"""
+        from core.context import current_request
+        ctx = current_request.get()
+        if not ctx:
+            return ""
+        content = self._load_tenant_personality(ctx.tenant_id)
+        if content:
+            return f"\n<personality>\n{content}\n</personality>"
+        return ""
+
     @staticmethod
     def _build_plan_guidance_section(_ctx: PromptContext) -> str:
         from core.context import current_request
@@ -455,6 +483,49 @@ class PromptBuilder:
                 logger.warning(f"Soul file not found: {self._soul_path}")
                 self._soul_cache = "You are an AI assistant powered by Claw."
         return self._soul_cache
+
+    def _load_tenant_soul(self, tenant_id: str) -> str:
+        """
+        #42: 加载租户级 Soul 覆盖。
+
+        路径: data/souls/{tenant_id}/soul.md (不存在则返回空字符串)。
+        """
+        if tenant_id in self._tenant_soul_cache:
+            return self._tenant_soul_cache[tenant_id]
+        import os
+        soul_dir = self._soul_path.parent.parent / "data" / "souls" / tenant_id
+        soul_file = soul_dir / "soul.md"
+        content = ""
+        if soul_file.exists():
+            try:
+                content = soul_file.read_text(encoding="utf-8")
+            except OSError:
+                pass
+        self._tenant_soul_cache[tenant_id] = content
+        return content
+
+    def _load_tenant_personality(self, tenant_id: str) -> str:
+        """
+        #29: 加载租户级 Personality 预设。
+
+        路径: data/personalities/{tenant_id}.md (不存在则返回空字符串)。
+        """
+        if tenant_id in self._tenant_personality_cache:
+            return self._tenant_personality_cache[tenant_id]
+        personality_file = self._soul_path.parent.parent / "data" / "personalities" / f"{tenant_id}.md"
+        content = ""
+        if personality_file.exists():
+            try:
+                content = personality_file.read_text(encoding="utf-8")
+            except OSError:
+                pass
+        self._tenant_personality_cache[tenant_id] = content
+        return content
+
+    def invalidate_tenant_cache(self, tenant_id: str) -> None:
+        """清除租户级 Soul/Personality 缓存。"""
+        self._tenant_soul_cache.pop(tenant_id, None)
+        self._tenant_personality_cache.pop(tenant_id, None)
 
     @staticmethod
     def _format_runtime_context(user_id: str, session_id: str) -> str:

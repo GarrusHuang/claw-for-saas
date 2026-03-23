@@ -167,3 +167,17 @@ class EventBus:
     @property
     def event_count(self) -> int:
         return len(self._history)
+
+    # ── #14: Item Lifecycle 三态追踪 ──
+
+    def emit_item_started(self, item_id: str, item_type: str, detail: str = "") -> None:
+        """发射 item_started 事件 (通用三态生命周期)。"""
+        self.emit("item_started", {"item_id": item_id, "item_type": item_type, "detail": detail})
+
+    def emit_item_updated(self, item_id: str, progress: float = 0, detail: str = "") -> None:
+        """发射 item_updated 事件 (progress: 0.0 ~ 1.0)。"""
+        self.emit("item_updated", {"item_id": item_id, "progress": progress, "detail": detail})
+
+    def emit_item_completed(self, item_id: str, success: bool = True, detail: str = "") -> None:
+        """发射 item_completed 事件。"""
+        self.emit("item_completed", {"item_id": item_id, "success": success, "detail": detail})

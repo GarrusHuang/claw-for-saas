@@ -455,6 +455,26 @@ class SandboxManager:
         except Exception as e:
             return {"exit_code": -1, "stdout": "", "stderr": str(e), "sandbox": "docker"}
 
+    # ── #24: Network Policy Amendment ──
+
+    def amend_network_whitelist(self, domains: list[str]) -> int:
+        """
+        动态添加域名到网络白名单 (用户批准后调用)。
+
+        Returns:
+            新增的域名数量。
+        """
+        existing = set(self.config.network_whitelist)
+        added = 0
+        for domain in domains:
+            domain = domain.strip().lower()
+            if domain and domain not in existing:
+                self.config.network_whitelist.append(domain)
+                existing.add(domain)
+                added += 1
+                logger.info(f"Network whitelist amended: {domain}")
+        return added
+
     # ── 速率限制 ──
 
     def cleanup_stale_counters(self) -> int:
