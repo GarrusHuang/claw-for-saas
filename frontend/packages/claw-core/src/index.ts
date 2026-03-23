@@ -68,7 +68,7 @@ export type {
   KBFileInfo,
   PipelineSnapshot,
 } from './services/ai-api.ts';
-export { fetchPipelineSnapshot, fetchRunningSessions } from './services/ai-api.ts';
+export { apiFetch, fetchPipelineSnapshot, fetchRunningSessions } from './services/ai-api.ts';
 
 // ── Hooks ──
 export { usePipeline } from './hooks/usePipeline.ts';

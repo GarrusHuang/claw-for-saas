@@ -102,6 +102,7 @@ async def login(req: LoginRequest, request: Request):
         "expires_in": settings.auth_session_expire_s,
         "user_id": user.user_id,
         "tenant_id": user.tenant_id,
+        "roles": user.roles,
     }
 
 
@@ -175,6 +176,7 @@ async def register(req: RegisterRequest, request: Request):
         "expires_in": settings.auth_session_expire_s,
         "user_id": user.user_id,
         "tenant_id": user.tenant_id,
+        "roles": user.roles,
     }
 
 

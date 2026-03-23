@@ -291,16 +291,21 @@
 - 初始加载时如有有效 token 也自动启动定时器
 - 6 个测试通过
 
-### 4.5 管理后台 UI
+### 4.5 管理后台 UI ✅
 
-**现状**: 租户/用户/API Key/配额管理只有后端 API (`api/admin.py`)，没有前端管理界面。管理员只能用 curl 或 Postman。
+**已完成** (2026-03-23): 完整管理后台 UI，顶部 Tab 切换对话/管理页面。
 
-**要做的事**:
-- 新增 `frontend/app/src/AdminPage.tsx`
-- 页面: 租户管理 / 用户管理 / 用量仪表盘 / Skill 管理 / 系统设置
-- 基于角色的路由守卫 (admin role)
-
-**收益**: 管理员操作效率提升，不依赖开发者协助配置。
+1. **后端** — login/register 响应加 `roles` 字段，前端可感知用户角色。
+2. **Auth Store** — 新增 `roles: string[]` + `isAdmin: boolean`，login/register/restore 均写入 roles，旧数据自动调 `/api/auth/me` 补全。
+3. **App.tsx** — admin 用户顶部显示 [对话] [管理] Tab bar，非 admin 无感知。AdminPage 使用 lazy 加载。
+4. **Admin API 层** — `admin-api.ts` 封装 21 个 API 函数 (租户 5 + 用户 4 + API Key 4 + 邀请码 3 + 用量 5)，复用 `apiFetch` 认证逻辑。
+5. **五个管理模块**:
+   - TenantManager: 租户 CRUD (Table + Modal + Form)
+   - UserManager: 用户 CRUD (密码/角色/状态编辑)
+   - ApiKeyManager: Key 创建(一次性显示) + 撤销 + 删除
+   - InviteCodeManager: 邀请码生成(copyable) + 撤销
+   - UsageDashboard: 汇总卡片 + 日明细 + 用户排名 + 工具排名 + 存储用量
+6. **超级管理员**: 顶部租户选择器可切换管理任意租户。
 
 ### 4.6 用户注册流程 ✅
 
@@ -399,6 +404,6 @@ Phase 4 (产品完整性)      ← 项目自身需求，非 Codex 对比
 ├── 4.2 SQLite 并发优化 ✅ (2026-03-22)
 ├── 4.3 Session 自动过期清理 ✅ (2026-03-22)
 ├── 4.4 Token 自动刷新 ✅ (2026-03-22)
-├── 4.5 管理后台 UI
+├── 4.5 管理后台 UI ✅ (2026-03-23)
 └── 4.6 用户注册流程 (邀请码制) ✅ (2026-03-23)
 ```

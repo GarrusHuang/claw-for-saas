@@ -37,7 +37,7 @@ async function _tryRefreshToken(): Promise<boolean> {
   }
 }
 
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const authHeaders = await getAuthHeaders();
   const { headers: optionHeaders, ...restOptions } = options || {};
   const mergedHeaders = {

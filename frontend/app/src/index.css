@@ -1,6 +1,128 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 
+/* ── App root + Admin Tab bar ── */
+
+.app-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-tab-bar {
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  z-index: 100;
+}
+
+.admin-tab-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #f0f0f0;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.admin-tab-btn {
+  border: none;
+  background: transparent;
+  padding: 5px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #8c8c8c;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.admin-tab-btn:hover {
+  color: #333;
+}
+
+.admin-tab-btn--active {
+  background: #fff;
+  color: #1a1a1a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.app-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* admin 模式下 chat dialog 适配 tab bar 高度 */
+.app-root--admin .ai-chat-dialog--fullscreen {
+  height: calc(100vh - 44px);
+}
+
+.app-content--admin {
+  overflow-y: auto;
+  padding: 24px 32px;
+  background: #f7f8fa;
+}
+
+/* ── Admin page styles ── */
+
+.admin-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.admin-page .ant-tabs-nav {
+  margin-bottom: 20px;
+}
+
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.admin-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.admin-stat-card {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.admin-tables-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.admin-table-section {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.admin-table-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 12px;
+}
+
 /* ── Base ── */
 
 body {
