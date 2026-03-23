@@ -99,7 +99,7 @@ backend/
     file_service.py    — 文件服务 (上传/下载/过期清理)
     content_processor.py — 文件内容处理 (PDF/DOCX/图片压缩)
     usage_service.py   — 用量统计服务
-    knowledge_service.py — 知识库服务
+    knowledge_service.py — 知识库服务 (元数据缓存 + _index.md 自动生成 + search_knowledge)
     browser_service.py — Playwright 浏览器自动化
   models/
     request.py         — API 请求模型
@@ -311,7 +311,7 @@ cd frontend && npm run test:e2e         # E2E 测试 (Playwright)
 **只读 (可并行)**:
 - calculator: numeric_compare, sum_values, calculate_ratio, arithmetic, date_diff
 - skill_reference: read_reference (read_skill)
-- file: read_uploaded_file, list_user_files, analyze_file, read_knowledge_file
+- file: read_uploaded_file, list_user_files, analyze_file, read_knowledge_file, search_knowledge
 - browser: open_url, page_screenshot, page_extract_text
 - code: read_source_file
 - memory: recall_memory, search_memory

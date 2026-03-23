@@ -189,6 +189,30 @@ def read_knowledge_file(
 
 @file_capability_registry.tool(
     description=(
+        "搜索知识库文件。按关键词搜索文件名和描述，返回匹配的文件列表。"
+        "适用于不确定该读哪个知识库文件时。"
+        "query: 搜索关键词。limit: 最多返回条数 (默认 10)。"
+    ),
+    read_only=True,
+)
+def search_knowledge(
+    query: str,       # 搜索关键词
+    limit: int = 10,  # 最多返回条数
+) -> dict:
+    """搜索知识库文件 (文件名 + 描述匹配)。"""
+    ctx = get_request_context()
+    try:
+        from dependencies import get_knowledge_service
+        kb = get_knowledge_service()
+        results = kb.search_knowledge(ctx.tenant_id, ctx.user_id, query, limit)
+        return {"results": results, "total": len(results)}
+    except Exception as e:
+        logger.error(f"search_knowledge error: {e}")
+        return {"error": str(e)}
+
+
+@file_capability_registry.tool(
+    description=(
         "将内容添加到知识库。"
         "可以传入文本内容 (text_content + filename)，或传入已上传文件的 file_id 将其复制到知识库。"
         "文件会自动创建元数据并更新知识库索引。"

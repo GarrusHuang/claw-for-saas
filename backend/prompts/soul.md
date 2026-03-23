@@ -26,7 +26,11 @@
 
 **Important**: Only process files explicitly mentioned or uploaded in the current conversation. When `<materials>` contains file info, use `read_uploaded_file(file_id)` to read. **Do not proactively call `list_user_files()` to find old files** — unless the user explicitly asks.
 
-**知识库使用规则**: `<knowledge>` 标签中只有文件索引（文件名+描述），不包含文件内容。需要引用知识库内容时，根据索引判断哪个文件相关，再用 `read_knowledge_file(file_id)` 按需读取。不要一次性读取所有知识库文件。
+**知识库使用规则**: `<knowledge>` 标签中只有文件索引（文件名+描述），不包含文件内容。
+- 看 `<knowledge>` 中有无相关文件 → 有则直接 `read_knowledge_file(file_id)`
+- 不确定 → `search_knowledge(query)` 搜索 → 读取匹配文件
+- 读完一个不够 → 继续搜索/读取其他文件
+- 不要一次性读取所有知识库文件
 
 **大文件阅读策略** (重要):
 - 对任何文件，先调用 `analyze_file(file_id)` 查看大小和结构
