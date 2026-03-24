@@ -196,12 +196,25 @@ def code_safety_hook(event: HookEvent) -> HookResult:
                         message=f"安全检查: 禁止通过 apply_patch 修改敏感文件 {file_path}。{_REQUEST_PERMISSIONS_HINT}",
                     )
 
-    # ── 命令安全策略检查 ──
+    # ── 命令安全策略检查 (含 per-user 审批持久化 #16) ──
     if tool == "run_command":
         command = event.tool_input.get("command", "")
-        safe, reason = _exec_policy.check_command(command)
+        from core.context import current_request as _cr
+        _ctx = _cr.get()
+        _tid = _ctx.tenant_id if _ctx else ""
+        _uid = _ctx.user_id if _ctx else event.user_id
+        safe, reason = _exec_policy.check_command_with_approval(command, _tid, _uid)
         if not safe:
-            return HookResult(action="block", message=f"{reason}。{_REQUEST_PERMISSIONS_HINT}")
+            # 检查对话中是否有近期用户授权 → 持久化审批并放行
+            recent = event.context.get("recent_messages", "")
+            if recent and any(kw in recent for kw in ("approved", "授权执行", "允许执行", "确认执行")):
+                pattern = " ".join(command.strip().split()[:2]) if command.strip() else ""
+                if pattern:
+                    _exec_policy.approve_command(_tid, _uid, pattern)
+                    logger.info(f"Command approved and persisted: {pattern}")
+                # 放行
+            else:
+                return HookResult(action="block", message=f"{reason}。{_REQUEST_PERMISSIONS_HINT}")
 
     return HookResult(action="allow")
 

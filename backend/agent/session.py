@@ -347,12 +347,14 @@ class SessionManager:
         """
         session_dir = self._session_dir(tenant_id, user_id)
         cache_key = f"{tenant_id}:{user_id}"
+        # 用所有 JSONL 文件的最大 mtime（追加消息会更新文件 mtime，但不更新目录 mtime）
         try:
-            dir_mtime = session_dir.stat().st_mtime if session_dir.exists() else 0
+            files = list(session_dir.glob("*.jsonl")) if session_dir.exists() else []
+            max_mtime = max((f.stat().st_mtime for f in files), default=0)
         except OSError:
-            dir_mtime = 0
+            max_mtime = 0
         cached = self._search_index_cache.get(cache_key)
-        if cached and cached[0] >= dir_mtime:
+        if cached and cached[0] >= max_mtime and max_mtime > 0:
             return cached[1]
         if not session_dir.exists():
             return []
@@ -380,7 +382,7 @@ class SessionManager:
             except OSError:
                 continue
             index.append(entry)
-        self._search_index_cache[cache_key] = (dir_mtime, index)
+        self._search_index_cache[cache_key] = (max_mtime, index)
         return index
 
     def search_sessions(

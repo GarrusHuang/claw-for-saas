@@ -339,12 +339,14 @@ def _build_pipeline_snapshot(bus: EventBus, session_id: str) -> dict:
 
 @router.get("/health")
 async def health_check():
-    """Health check."""
+    """Health check + runtime metrics (#19)。"""
+    from core.tracing import get_metrics
     return {
         "status": "ok",
         "service": "claw-agent",
         "version": "0.1.0",
         "architecture": "agent-gateway",
+        "metrics": get_metrics().snapshot(),
     }
 
 

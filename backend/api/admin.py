@@ -386,3 +386,72 @@ async def revoke_invite_code(
         raise HTTPException(status_code=404, detail=f"Invite code not found: {code}")
     db.revoke_invite_code(code)
     return {"ok": True}
+
+
+# ── #42/#29: Soul / Personality 租户级管理 ──
+
+class SoulUpdateRequest(BaseModel):
+    content: str = Field(..., description="Soul.md 内容")
+
+
+@router.get("/tenant/{tenant_id}/soul")
+async def get_tenant_soul(tenant_id: str, user: AuthUser = Depends(get_current_user)):
+    """获取租户 Soul 覆盖内容。"""
+    _require_admin(user)
+    import os
+    from pathlib import Path
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    soul_path = Path(backend_root) / "data" / "souls" / tenant_id / "soul.md"
+    if not soul_path.exists():
+        return {"tenant_id": tenant_id, "content": "", "exists": False}
+    return {"tenant_id": tenant_id, "content": soul_path.read_text(encoding="utf-8"), "exists": True}
+
+
+@router.put("/tenant/{tenant_id}/soul")
+async def update_tenant_soul(tenant_id: str, req: SoulUpdateRequest, user: AuthUser = Depends(get_current_user)):
+    """更新租户 Soul 覆盖。"""
+    _require_admin(user)
+    import os
+    from pathlib import Path
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    soul_dir = Path(backend_root) / "data" / "souls" / tenant_id
+    soul_dir.mkdir(parents=True, exist_ok=True)
+    (soul_dir / "soul.md").write_text(req.content, encoding="utf-8")
+    # 清除 PromptBuilder 缓存
+    try:
+        from dependencies import get_prompt_builder
+        get_prompt_builder().invalidate_tenant_cache(tenant_id)
+    except Exception:
+        pass
+    return {"ok": True, "tenant_id": tenant_id}
+
+
+@router.get("/tenant/{tenant_id}/personality")
+async def get_tenant_personality(tenant_id: str, user: AuthUser = Depends(get_current_user)):
+    """获取租户 Personality 预设。"""
+    _require_admin(user)
+    import os
+    from pathlib import Path
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = Path(backend_root) / "data" / "personalities" / f"{tenant_id}.md"
+    if not path.exists():
+        return {"tenant_id": tenant_id, "content": "", "exists": False}
+    return {"tenant_id": tenant_id, "content": path.read_text(encoding="utf-8"), "exists": True}
+
+
+@router.put("/tenant/{tenant_id}/personality")
+async def update_tenant_personality(tenant_id: str, req: SoulUpdateRequest, user: AuthUser = Depends(get_current_user)):
+    """更新租户 Personality 预设。"""
+    _require_admin(user)
+    import os
+    from pathlib import Path
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pdir = Path(backend_root) / "data" / "personalities"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / f"{tenant_id}.md").write_text(req.content, encoding="utf-8")
+    try:
+        from dependencies import get_prompt_builder
+        get_prompt_builder().invalidate_tenant_cache(tenant_id)
+    except Exception:
+        pass
+    return {"ok": True, "tenant_id": tenant_id}

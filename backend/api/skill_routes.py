@@ -200,3 +200,12 @@ async def import_skill(req: SkillImportRequest, _user: AuthUser = Depends(get_cu
     if not result["ok"]:
         return JSONResponse(status_code=400, content=result)
     return result
+
+
+@router.post("/reload")
+async def reload_skills(_user: AuthUser = Depends(get_current_user)):
+    """#30 Skill 热重载: 清除缓存并重新扫描所有 Skill 目录。"""
+    from dependencies import get_skill_loader
+    loader = get_skill_loader()
+    count = loader.reload_all()
+    return {"ok": True, "reloaded": count}

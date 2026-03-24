@@ -298,6 +298,28 @@ def write_source_file(
 
 @code_capability_registry.tool(
     description=(
+        "撤销本轮对话中所有文件修改，恢复到修改前的状态。"
+        "基于 TurnDiffTracker 的 baseline 快照恢复。"
+        "仅在本轮有文件修改时有效。"
+    ),
+    read_only=False,
+)
+def undo_file_changes() -> dict:
+    """#20 Undo: 恢复本轮修改的所有文件到 baseline 状态。"""
+    ctx = get_request_context()
+    if not ctx.diff_tracker:
+        return {"error": "当前会话没有文件变更追踪器"}
+    results = ctx.diff_tracker.undo_all()
+    if not results:
+        return {"message": "本轮没有文件修改需要撤销"}
+    return {
+        "undone": len(results),
+        "details": results,
+    }
+
+
+@code_capability_registry.tool(
+    description=(
         "在沙箱中执行 Shell 命令。"
         "timeout 指定超时秒数 (默认 30, 最大 120)。"
         "输出超过 10KB 会被截断。"
@@ -311,6 +333,14 @@ def run_command(
 ) -> dict:
     """在沙箱中执行 Shell 命令。"""
     import subprocess
+
+    # #11: 执行前检查 CancellationToken
+    try:
+        ctx = get_request_context()
+        if ctx.cancellation_token and ctx.cancellation_token.is_cancelled:
+            return {"error": "命令执行已被取消", "cancelled": True}
+    except Exception:
+        pass
 
     sandbox, workspace = _get_workspace()
 

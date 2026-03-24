@@ -183,9 +183,17 @@ export function dispatchPipelineEvent(
       store.addEvent({ type: eventType, data, timestamp: Date.now() });
       break;
 
-    case 'skill_suggestion':
+    case 'skill_suggestion': {
       store.addEvent({ type: 'skill_suggestion', data, timestamp: Date.now() });
+      // 展示通知给用户 (通过 agentMessage 渠道)
+      const draft = data.draft as Record<string, string> | undefined;
+      const toolNames = (data.tools as string[]) || [];
+      const msg = draft
+        ? `💡 检测到重复工作流 (${toolNames.slice(0, 3).join('→')}...)，建议创建 Skill "${draft.name}": ${draft.description || ''}`
+        : `💡 检测到重复工作流，建议创建 Skill 来自动化此流程`;
+      store.setAgentMessage(msg);
       break;
+    }
 
     case 'pipeline_complete': {
       store.completePipeline(data.status as string, (data.duration_ms as number) || 0);

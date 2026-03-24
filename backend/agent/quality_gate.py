@@ -398,21 +398,23 @@ async def semantic_quality_hook(event: HookEvent) -> HookResult:
         result_preview = str(step.get("result", ""))[:150]
         tool_summaries.append(f"- {step['tool']}: {result_preview}")
 
+    _temp_llm = None
     try:
         from dependencies import get_llm_client
         from config import settings
 
         # 使用 Guardian LLM 配置 (可能是更便宜的模型)
         llm = get_llm_client()
-        # 如果有独立 Guardian 配置，构建专用 client
+        _temp_llm = None  # 标记是否创建了临时 client (需要关闭)
         if settings.guardian_model and settings.guardian_base_url:
             from core.llm_client import LLMGatewayClient, LLMClientConfig
-            llm = LLMGatewayClient(LLMClientConfig(
+            _temp_llm = LLMGatewayClient(LLMClientConfig(
                 base_url=settings.guardian_base_url or settings.llm_base_url,
                 model=settings.guardian_model or settings.llm_model,
                 api_key=settings.guardian_api_key or settings.llm_api_key,
                 max_retries=0,
             ))
+            llm = _temp_llm
 
         prompt = (
             "检查 AI 回复的事实准确性。只关注以下两点:\n"
@@ -465,3 +467,10 @@ async def semantic_quality_hook(event: HookEvent) -> HookResult:
         # fail-open: 出错放行
         logger.debug(f"Semantic quality check skipped (fail-open): {e}")
         return HookResult(action="allow")
+    finally:
+        # 关闭临时创建的 LLM client，防止资源泄漏
+        if _temp_llm is not None:
+            try:
+                await _temp_llm.close()
+            except Exception:
+                pass

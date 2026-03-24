@@ -613,12 +613,16 @@ class AgentGateway:
         deferred_tool_count = 0
 
         if len(all_tools) > _cfg.agent_tool_deferred_threshold:
-            # 延迟模式: prompt 只注入核心工具 + tool_search
-            # #26: 也检查 per-tool defer_loading 标志
+            # 延迟模式: prompt 注入核心工具 + 明确标记 defer_loading=False 的非核心工具
+            # #26: per-tool defer_loading 标志: True → 强制延迟, False → 保留在 prompt
             core_summaries = []
             deferred = []
             for t in all_tools:
-                if t.name in CORE_TOOL_NAMES and not getattr(t, 'defer_loading', False):
+                force_defer = getattr(t, 'defer_loading', False)
+                is_core = t.name in CORE_TOOL_NAMES
+                if force_defer:
+                    deferred.append(t)
+                elif is_core:
                     core_summaries.append(ToolSummary(
                         name=t.name, description=t.description, read_only=t.read_only,
                     ))
@@ -729,6 +733,22 @@ class AgentGateway:
         else:
             answer = result.final_answer
 
+        # #32: 先解析 [mem:ID] 做追踪，再剥离标记，最后存 JSONL（用户加载历史时不看到标记）
+        if result and not cancelled and not runtime_error and answer and ctx.memory_id_map and self.memory_store:
+            import re as _re
+            refs = _re.findall(r"\[mem:(m\d+)\]", answer)
+            for mid in set(refs):
+                if mid in ctx.memory_id_map:
+                    scope, entry_key = ctx.memory_id_map[mid]
+                    try:
+                        self.memory_store.increment_usage(
+                            scope, entry_key,
+                            tenant_id=tenant_id, user_id=user_id,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Memory usage tracking failed for {mid}: {e}")
+            answer = _re.sub(r"\s*\[mem:m\d+\]", "", answer).strip()
+
         self.session_manager.append_message(
             tenant_id, user_id, session_id,
             {"role": "assistant", "content": answer, "ts": time.time()},
@@ -800,32 +820,7 @@ class AgentGateway:
                 timeline_entries=timeline_entries or None,
             )
 
-            # ── 5.3: 记忆引用追踪 — 解析 [mem:ID] 递增 usage_count，然后从回复中移除标记 ──
-            if result.final_answer and ctx.memory_id_map and self.memory_store:
-                import re as _re
-                refs = _re.findall(r"\[mem:(m\d+)\]", result.final_answer)
-                for mid in set(refs):
-                    if mid in ctx.memory_id_map:
-                        scope, entry_key = ctx.memory_id_map[mid]
-                        try:
-                            self.memory_store.increment_usage(
-                                scope, entry_key,
-                                tenant_id=tenant_id, user_id=user_id,
-                            )
-                        except Exception as e:
-                            logger.debug(f"Memory usage tracking failed for {mid}: {e}")
-                # 从回复中剥离 [mem:ID] 标记，不暴露给用户
-                answer = _re.sub(r"\s*\[mem:m\d+\]", "", answer).strip()
-                result = RuntimeResult(
-                    final_answer=answer,
-                    steps=result.steps,
-                    token_usage=result.token_usage,
-                    iterations=result.iterations,
-                    max_iterations_reached=result.max_iterations_reached,
-                    error=result.error,
-                    thinking=result.thinking,
-                    compact_stats=result.compact_stats,
-                )
+            # (记忆引用追踪已移到 append_message 之前)
 
             # ── 5.3: 工作流指纹记录 + Skill 建议 ──
             from config import settings as _cfg

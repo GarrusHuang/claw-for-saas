@@ -81,3 +81,11 @@ async def remove_session(session_id: str, user: AuthUser = Depends(get_current_u
             content={"error": f"Session {session_id} not found"},
         )
     return {"status": "deleted", "session_id": session_id, "user_id": user.user_id}
+
+
+@router.post("/{session_id}/rollback")
+async def rollback_session(session_id: str, n: int = 1, user: AuthUser = Depends(get_current_user)):
+    """#15 Thread Rollback: 撤销最近 N 轮对话。"""
+    sm = get_session_manager()
+    removed = sm.rollback_turns(user.tenant_id, user.user_id, session_id, n=n)
+    return {"session_id": session_id, "removed_messages": removed, "turns_rolled_back": n}
